@@ -66,3 +66,37 @@ jobs:
           RECOVERED_ACCESS_MODULE: ../worker/access.mjs
           RECOVERED_STATION_MODULE: ../worker/index.mjs
         run: node --test interop/access-scope-interop.mjs interop/recovered-station-contract.mjs
+
+  public-source-snapshot:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/ds011-rb01-integrated-review'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Enforce public-source boundary before review handoff
+        shell: bash
+        run: |
+          test ! -e src/app.js
+          test ! -e src/index.html
+          test ! -e pwa/icons/icon-192.png
+          test ! -e pwa/icons/icon-512.png
+          test ! -e pwa/icons/apple-touch-icon.png
+          test ! -e deployment/modules.json
+          test ! -e hosted-dist/index.html
+          test -z "$(git status --porcelain)"
+      - name: Package only tracked public source at exact checkout commit
+        shell: bash
+        run: |
+          mkdir -p review-bundle
+          git archive --format=tar HEAD | gzip -n > review-bundle/devonstation-public-tree.tar.gz
+          sha256sum review-bundle/devonstation-public-tree.tar.gz > review-bundle/SHA256SUMS
+          git rev-parse HEAD > review-bundle/COMMIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ds011-public-source-only
+          path: review-bundle/
+          if-no-files-found: error
+          retention-days: 7
