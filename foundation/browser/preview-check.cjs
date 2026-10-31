@@ -11,7 +11,8 @@ const fs = require('node:fs/promises');
   try {
     await fs.mkdir('browser-results', { recursive: true });
     for (const viewport of [{width:1440,height:900},{width:375,height:812},{width:320,height:720}]) {
-      const page=await browser.newPage({viewport,deviceScaleFactor:1});
+      const context=await browser.newContext({viewport,deviceScaleFactor:1});
+      const page=await context.newPage();
       page.on('pageerror', error=>errors.push(error.message));
       await page.goto(demo.origin);
       await page.getByRole('button',{name:/Creative Studio/}).waitFor();
@@ -29,11 +30,11 @@ const fs = require('node:fs/promises');
       await page.getByRole('button',{name:`Approve: Synthetic step ${viewport.width}`}).click();
       await page.getByText('Action approved. No external operation was performed.').waitFor();
       assert.equal(await page.locator('.badge').last().textContent(),'approved');
+      await page.screenshot({path:`browser-results/preview-${viewport.width}.png`,fullPage:true});
       const results=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa']).analyze();
       assert.deepEqual(results.violations.map(v=>({id:v.id,impact:v.impact,description:v.description,nodes:v.nodes.map(n=>n.target)})),[],`accessibility violations at ${viewport.width}`);
-      await page.screenshot({path:`browser-results/preview-${viewport.width}.png`,fullPage:true});
       console.log(`PASS ${viewport.width}x${viewport.height}: layout, keyboard, proposal, approval, WCAG automated checks`);
-      await page.close();
+      await context.close();
     }
     assert.deepEqual(errors,[],'uncaught page errors');
   } finally { await browser.close(); await demo.close(); }
