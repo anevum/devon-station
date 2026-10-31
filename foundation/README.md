@@ -11,3 +11,7 @@ Historical recovery code, archives and graphics were not incorporated. Existing 
 ## Local synthetic interface
 
 Run `npm run preview`, then open the printed loopback address. The preview is explicitly synthetic: it starts with two fabricated projects, uses temporary memory, and forgets changes when stopped. Do not enter personal, business, clinical, or sensitive information. No network deployment, real identity, external action, or live integration is provided. The local server binds only to IPv4 loopback, validates the host, origin for mutations, and a per-process token; this is a local-development precaution, not production authentication or protection against other local processes. The source link is a generic example, not a live data connection. Test with `npm test`.
+
+### Synthetic adapter integration
+
+The local preview issues short-lived test assertions internally and routes requests through the synthetic scope and SQLite adapter. These generated test assertions do not authenticate a real person. The normal preview uses an in-memory database and forgets all changes on exit. Automated tests can inject an isolated temporary database and a second synthetic scope to check restart, denial and failure behavior; there is no UI for choosing an identity or connecting real data. Local tokens and scope checks are not production access controls. Preview mutation requests carry a generation and operation ID so exact HTTP retries can be recognized; the UI does not automatically retry failed submissions.
