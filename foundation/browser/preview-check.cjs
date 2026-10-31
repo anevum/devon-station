@@ -53,8 +53,8 @@ const fs = require('node:fs/promises');
           {id:'SH-011',area:'Shinewell',name:'Unapproved Business Project',record:notionUrl}
         ]
       },
-      projectGrants:[{...identity,projectId:'DS-011',area:'Devon Works',role:undefined}]
-        .map(({principalId,scopeKind,scopeId,projectId,area})=>({principalId,scopeKind,scopeId,projectId,area}))
+      projectGrants:[{principalId:identity.principalId,scopeKind:identity.scopeKind,
+        scopeId:identity.scopeId,projectId:'DS-011',area:'Devon Works'}]
     });
     const approvedDemo=await startDemo({approvedSyntheticProjects:projection.projects});
     try {
