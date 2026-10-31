@@ -36,6 +36,49 @@ const fs = require('node:fs/promises');
       console.log(`PASS ${viewport.width}x${viewport.height}: layout, keyboard, proposal, approval, WCAG automated checks`);
       await context.close();
     }
+    // Approved portfolio preview: only fabricated, explicitly granted metadata.
+    // This validates the *same existing UI* with a real integration contract,
+    // without using client, household, business, or production source data.
+    const { approvedProjectsForIdentity } = await import('../interop/approved-portfolio.mjs');
+    const identity={principalId:'demo-owner',role:'owner',scopeKind:'personal',scopeId:'demo-scope'};
+    const notionUrl='https://app.notion.com/p/'+'a'.repeat(32);
+    const projection=approvedProjectsForIdentity({
+      identity,
+      portfolio:{
+        source:'Notion project portfolio',mode:'read_only_cache',
+        notionWrites:false,cachedAt:Date.parse('2026-10-31T18:00:00.000Z'),
+        projects:[
+          {id:'DS-011',area:'Devon Works',name:'Synthetic Approved Project',record:notionUrl,
+            next:'private synthetic note that must stay excluded'},
+          {id:'SH-011',area:'Shinewell',name:'Unapproved Business Project',record:notionUrl}
+        ]
+      },
+      projectGrants:[{...identity,projectId:'DS-011',area:'Devon Works',role:undefined}]
+        .map(({principalId,scopeKind,scopeId,projectId,area})=>({principalId,scopeKind,scopeId,projectId,area}))
+    });
+    const approvedDemo=await startDemo({approvedSyntheticProjects:projection.projects});
+    try {
+      for(const viewport of [{width:1440,height:900},{width:375,height:812},{width:320,height:720}]) {
+        const context=await browser.newContext({viewport,deviceScaleFactor:1});
+        const page=await context.newPage();
+        page.on('pageerror', error=>errors.push(error.message));
+        await page.goto(approvedDemo.origin);
+        await page.getByRole('button',{name:/Synthetic Approved Project/}).waitFor();
+        assert.equal(await page.locator('#project-title').innerText(),'Synthetic Approved Project');
+        assert.equal(await page.locator('#projects .project').count(),1);
+        assert.equal(await page.locator('#source-info a').getAttribute('href'),notionUrl);
+        assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth),
+          true,'approved projection must not overflow viewport '+viewport.width);
+        assert(!((await page.locator('body').innerText()).includes('Unapproved Business Project')));
+        assert(!((await page.locator('body').innerText()).includes('private synthetic note')));
+        const axe=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa']).analyze();
+        assert.deepEqual(axe.violations.map(v=>({id:v.id,targets:v.nodes.map(n=>n.target)})),
+          [],'approved project UI accessibility at '+viewport.width);
+        await page.screenshot({path:`browser-results/approved-project-${viewport.width}.png`,fullPage:true});
+        console.log(`PASS approved projection ${viewport.width}x${viewport.height}: scoped source, privacy, layout, automated WCAG checks`);
+        await context.close();
+      }
+    } finally { await approvedDemo.close(); }
     assert.deepEqual(errors,[],'uncaught page errors');
   } finally { await browser.close(); await demo.close(); }
 })().catch(error=>{console.error(error);process.exitCode=1;});
