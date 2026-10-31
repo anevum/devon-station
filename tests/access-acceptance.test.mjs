@@ -45,23 +45,24 @@ test('signed owner Access JWT allows the hosted shell, while forgery, policy mis
  assert.equal(signed.headers.get('Cache-Control'),'no-store, private');
  assert.equal((await (await app.fetch(new Request(origin+'/api/session',{headers:{'Cf-Access-Jwt-Assertion':token}}),env,{})).json()).authenticated,true);
  assert.equal(jwksRequests,1,'JWKS verification is cached, not refetched for every request');
- // Optional time claims may be absent, but malformed values must never pass.
+ // Optional time claims may be absent and RFC 7519 permits fractional NumericDate.
  assert.equal((await app.fetch(cookie(await keys.sign({nbf:undefined,iat:undefined})),env,{})).status,200);
+ assert.equal((await app.fetch(cookie(await keys.sign({exp:now()+300.25,nbf:now()-0.25,iat:now()-0.25})),env,{})).status,200);
  const cases=[
   [await keys.sign({email:'not-owner@example.test'}),403],
   [await keys.sign({aud:['other-audience']}),401],
   [await keys.sign({iss:'https://attacker.cloudflareaccess.com'}),401],
   [await keys.sign({exp:now()-1}),401],
-  [await keys.sign({exp:now()+300.25}),401],
+  [await keys.sign({exp:'tomorrow'}),401],
   [await keys.sign({nbf:now()+3600}),401],
   [await keys.sign({nbf:'not-a-time'}),401],
   [await keys.sign({nbf:null}),401],
-  [await keys.sign({nbf:now()-0.25}),401],
+  [await keys.sign({nbf:[now()-60]}),401],
   [await keys.sign({nbf:{seconds:now()-60}}),401],
   [await keys.sign({iat:now()+3600}),401],
   [await keys.sign({iat:'not-a-time'}),401],
   [await keys.sign({iat:null}),401],
-  [await keys.sign({iat:now()-0.25}),401],
+  [await keys.sign({iat:[now()-60]}),401],
   [await keys.sign({sub:''}),401],
   [await keys.sign({}, {alg:'HS256'}),401]
  ];

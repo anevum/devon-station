@@ -29,10 +29,10 @@ export async function verifyAccessJWT(token, config, getJWKS = cachedJWKS) {
   if (header.alg !== 'RS256' || typeof header.kid !== 'string' || !header.kid) throw new Error('Unsupported JWT');
   if (!config?.issuer || !config?.audience || !config?.jwksUrl) throw new Error('Authentication is not configured');
   if(!/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(config.issuer)||config.jwksUrl!==config.issuer+'/cdn-cgi/access/certs')throw new Error('Unpinned identity endpoint');
-  const now = Math.floor(Date.now() / 1000);
-  // JWT NumericDate claims must be integers. An invalid optional time claim
-  // must fail closed rather than silently bypassing its boundary check.
-  const numericDate = value => Number.isSafeInteger(value) && value >= 0;
+  const now = Date.now() / 1000;
+  // RFC 7519 NumericDate permits fractional seconds. Reject malformed
+  // optional time claims instead of silently skipping their boundary checks.
+  const numericDate = value => typeof value === 'number' && Number.isFinite(value);
   if (claims.iss !== config.issuer || ![claims.aud].flat().includes(config.audience) ||
     !numericDate(claims.exp) || now >= claims.exp ||
     (Object.hasOwn(claims, 'nbf') && (!numericDate(claims.nbf) || now < claims.nbf)) ||
