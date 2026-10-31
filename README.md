@@ -4,7 +4,9 @@ DevonStation is an independent, personal operations workspace project. The targe
 
 ## Source status
 
-**Recovery pending.** The existing development archive includes private operational snapshots and must **not** be published wholesale. This repository does not yet contain a verified standalone application. A README is not evidence that the deployed service has been migrated here.
+**Recovered source verified privately; public release remains blocked.** The original V0.4.8 R3 frontend was found in the owner's file library, its recorded SHA-256 was verified, and a private combined source tree built with the existing recovered Worker and foundation code. That private candidate passed 89 recovered-server tests, 35 foundation tests, hosted build, privacy checks and six offline Chromium suites (synthetic fixtures only). The public draft still excludes this frontend, which remains `UNLICENSED` with unverified third-party rights and PWA icons. **Do not publish the private archive or interpret an offline build as a production cutover.**
+
+[October 31 verified rebuild-readiness handoff](docs/RB01-PRIVATE-REBUILD-READINESS-2026-10-31.md) · [Combined integration PR #8](https://github.com/anevum/devon-station/pull/8)
 
 ## Import criteria
 
