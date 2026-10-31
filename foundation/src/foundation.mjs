@@ -1,5 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 
+// Accommodates the worst-case bounded synthetic history, including JSON escaping.
+const MAX_EXPORT_BYTES = 4 * 1024 * 1024;
 const hash = value => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const clone = value => structuredClone(value);
 const fail = message => { throw new Error(message); };
@@ -79,7 +81,7 @@ function buildFoundation({ identity, projects, clock = () => new Date().toISOStr
 
 // Integrity verification, not authentication: an attacker can recalculate an unkeyed digest.
 export function verifyImport(serialized, expectedScope) {
-  if (typeof serialized !== 'string' || Buffer.byteLength(serialized) > 1024*1024) fail('invalid export size');
+  if (typeof serialized !== 'string' || Buffer.byteLength(serialized) > MAX_EXPORT_BYTES) fail('invalid export size');
   let envelope; try { envelope=JSON.parse(serialized); } catch { fail('invalid JSON'); }
   shape(envelope,['format','version','algorithm','data','checksum']);
   if (envelope.format !== 'devonstation-synthetic' || envelope.version !== 2 || envelope.algorithm !== 'sha256' || envelope.checksum !== hash(envelope.data)) fail('integrity failure');
