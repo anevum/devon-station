@@ -6,6 +6,8 @@ DevonStation is an independent, personal operations workspace project. The targe
 
 **Recovery pending.** The existing development archive includes private operational snapshots and must **not** be published wholesale. This repository does not yet contain a verified standalone application. A README is not evidence that the deployed service has been migrated here.
 
+[Draft recovery PR #1](https://github.com/anevum/devon-station/pull/1) preserves selected server components and synthetic tests. The UI and complete release tooling are not recovered there; privacy, licensing, and recovery checks remain open. The draft is not a deployment candidate.
+
 ## Import criteria
 
 1. Locate the authoritative current source and deployed revision, including authentication, storage, and backup dependencies.
