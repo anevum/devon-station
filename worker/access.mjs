@@ -30,10 +30,13 @@ export async function verifyAccessJWT(token, config, getJWKS = cachedJWKS) {
   if (!config?.issuer || !config?.audience || !config?.jwksUrl) throw new Error('Authentication is not configured');
   if(!/^https:\/\/[a-z0-9-]+\.cloudflareaccess\.com$/.test(config.issuer)||config.jwksUrl!==config.issuer+'/cdn-cgi/access/certs')throw new Error('Unpinned identity endpoint');
   const now = Math.floor(Date.now() / 1000);
+  // JWT NumericDate claims must be integers. An invalid optional time claim
+  // must fail closed rather than silently bypassing its boundary check.
+  const numericDate = value => Number.isSafeInteger(value) && value >= 0;
   if (claims.iss !== config.issuer || ![claims.aud].flat().includes(config.audience) ||
-    typeof claims.exp !== 'number' || now >= claims.exp ||
-    typeof claims.nbf === 'number' && now < claims.nbf ||
-    typeof claims.iat === 'number' && claims.iat > now + 60 ||
+    !numericDate(claims.exp) || now >= claims.exp ||
+    (Object.hasOwn(claims, 'nbf') && (!numericDate(claims.nbf) || now < claims.nbf)) ||
+    (Object.hasOwn(claims, 'iat') && (!numericDate(claims.iat) || claims.iat > now + 60)) ||
     typeof claims.sub !== 'string' || !claims.sub) throw new Error('Invalid JWT claims');
   let jwks = await getJWKS(config.jwksUrl);
   const match=keys=>Array.isArray(keys?.keys)?keys.keys.find(k => k.kid === header.kid && k.kty === 'RSA' && (!k.alg || k.alg === 'RS256') && (!k.use || k.use === 'sig')):null;
