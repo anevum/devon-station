@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="demo-token" content="__SESSION_TOKEN__">
+  <title>DevonStation · Foundation Preview</title>
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <a class="skip" href="#workspace">Skip to workspace</a>
+  <div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div>
+  <div class="shell">
+    <header class="masthead">
+      <a class="brand" href="/" aria-label="DevonStation preview home"><span class="mark" aria-hidden="true"><span></span></span><span>DEVON<span class="brand-light">STATION</span><small>PERSONAL OPERATING ENVIRONMENT</small></span></a>
+      <div class="mast-meta"><span class="live-dot"></span><span>LOCAL PREVIEW</span><span class="separator"></span><span class="version">FOUNDATION / 01</span></div>
+    </header>
+    <main id="workspace">
+      <section class="intro" aria-labelledby="title">
+        <div><p class="eyebrow"><span>01</span> &nbsp; / &nbsp; YOUR WORKSPACE</p><h1 id="title">A clearer place<br><em>to move forward.</em></h1><p class="lead">A quiet view of what matters, and the next step worth taking.</p></div>
+        <div class="intro-side"><div class="orb" aria-hidden="true"><div class="orb-core"></div></div><p>INTENTION INTO ACTION <span>↗</span></p></div>
+      </section>
+      <div class="notice"><span class="notice-icon" aria-hidden="true">i</span><p><strong>Preview with synthetic data.</strong> Changes exist only while this local preview is running. Don’t enter personal or sensitive information.</p></div>
+      <section class="workspace-grid" aria-label="Project workspace">
+        <div class="panel projects-panel">
+          <div class="panel-head"><div><p class="eyebrow">YOUR FOCUS</p><h2>Projects</h2></div><span class="panel-number">01 / 02</span></div>
+          <p class="section-copy">Select a project to explore its next actions.</p>
+          <div id="projects" class="project-list" aria-label="Projects"></div>
+          <div class="panel-foot"><span class="tiny-dot"></span> SYNTHETIC SOURCE PROJECTIONS</div>
+        </div>
+        <div class="panel action-panel">
+          <div class="panel-head"><div><p class="eyebrow">SELECTED PROJECT</p><h2 id="project-title">Loading project</h2></div><span class="panel-number">02 / 02</span></div>
+          <div class="source-line" id="source-info"></div>
+          <div class="rule"></div>
+          <div class="action-heading"><div><p class="eyebrow">A LITTLE PROGRESS, CLEARLY MADE</p><h3>Next actions</h3></div><span id="action-count" class="count">00</span></div>
+          <div id="actions" class="actions" aria-live="polite"></div>
+          <form id="proposal-form"><label for="summary">Propose a next action</label><div class="form-row"><input id="summary" name="summary" maxlength="200" placeholder="What’s one useful next step?" autocomplete="off" required><button class="primary" type="submit">Add proposal <span aria-hidden="true">↗</span></button></div><p class="helper">An approval records a decision. It does not execute anything.</p></form>
+        </div>
+      </section>
+      <div class="below"><span>BUILT FOR THE LIFE BEHIND THE WORK</span><span>DEVONSTATION <span class="slash">/</span> FOUNDATION PREVIEW</span></div>
+      <p id="status" class="status" role="status" aria-live="polite"></p>
+    </main>
+  </div>
+</body>
+</html>
