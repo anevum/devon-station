@@ -23,7 +23,7 @@ function projection(p) {
   if (p.source.sourceRevision !== undefined) id(p.source.sourceRevision);
   if (p.source.sourceUrl !== undefined) {
     const raw = clean(p.source.sourceUrl, 512); let u; try { u = new URL(raw); } catch { fail('unsafe URL'); }
-    if (u.protocol !== 'https:' || !['www.notion.so','notion.so','github.com'].includes(u.hostname) || u.port || u.username || u.password || u.search || u.hash || u.href !== raw) fail('unsafe URL');
+    if (u.protocol !== 'https:' || !['www.notion.so','notion.so','app.notion.com','github.com'].includes(u.hostname) || u.port || u.username || u.password || u.search || u.hash || u.href !== raw) fail('unsafe URL');
   }
   return clone(p);
 }
