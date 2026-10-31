@@ -24,7 +24,7 @@ const other='synthetic-other-subject';
 const request=(path,body,override={})=>new Request(origin+path,body===undefined?
   {headers:override}:
   {method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...override},body:JSON.stringify(body)});
-const oldFingerprint='b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c84';
+const oldFingerprint='b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c94';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 async function legacyWorker(t) {
