@@ -50,3 +50,19 @@ jobs:
           RECOVERED_ACCESS_MODULE: ../../recovered/worker/access.mjs
           RECOVERED_STATION_MODULE: ../../recovered/worker/index.mjs
         run: node --test interop/access-scope-interop.mjs interop/recovered-station-contract.mjs
+
+  integrated-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Preserve hardened Access verifier in combined tree
+        run: test "$(git hash-object worker/access.mjs)" = "64a6d1cd5437a1490a594ed31a451ed5b7ee45b8"
+      - name: Test integrated recovered Worker and foundation scope bridge
+        working-directory: foundation
+        env:
+          RECOVERED_ACCESS_MODULE: ../worker/access.mjs
+          RECOVERED_STATION_MODULE: ../worker/index.mjs
+        run: node --test interop/access-scope-interop.mjs interop/recovered-station-contract.mjs
