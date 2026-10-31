@@ -28,7 +28,7 @@ export async function startDemo() {
     try {
       let size=0, chunks=[];
       for await (const chunk of req) { size+=chunk.length; if(size>4096) return send(413,JSON.stringify({error:'Request too large'})); chunks.push(chunk); }
-      const data=JSON.parse(Buffer.concat(chunks).toString('utf8'));
+      const data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(Buffer.concat(chunks)));
       if(!data || typeof data!=='object' || Array.isArray(data)) throw new Error('invalid');
       let receipt;
       if(req.url==='/api/proposals') {
