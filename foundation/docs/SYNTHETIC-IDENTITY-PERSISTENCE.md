@@ -1,0 +1,15 @@
+# Synthetic identity and scoped SQLite experiment
+
+This is a local, synthetic-only experiment, separate from the existing preview and deployed systems. It is not authentication for real users or a private-data store. It uses only Node built-ins and a caller-supplied isolated SQLite connection. Node 22's `node:sqlite` API is experimental. Tests generate an ephemeral Ed25519 key pair and use in-memory or temporary synthetic databases.
+
+## Trust boundary and interface
+
+`openSyntheticAdapter` receives a trusted verification public key, fixed synthetic issuer/audience, server-side owner grants, seed projections, a clock and an isolated SQLite connection. A caller sends a signed bearer assertion to `read` or `mutate`; the adapter verifies the signature, exact claims, audience, issuer, lifetime (at most five minutes), timestamps and configured scope grant before deriving the owner identity. Request payloads cannot set the actor. A signed assertion can be replayed until expiry; this experiment has no revocation, rotation, session binding or token-issuance system. Never trust keys, grants, seeds or identity values provided by a request.
+
+Each scope is a separate SQLite row, owned by one configured principal. A write restores the existing foundation snapshot, applies one proposal or decision inside an immediate SQLite transaction, and compares a caller-observed generation before committing. Equivalent idempotent retries return the original receipt even when the observed generation is old; conflicting operation IDs and stale new writes fail. Rollback prevents partial committed changes. A local file can be reopened to test synthetic restart and multiple-connection behavior. This is not proof of distributed or network-file-system concurrency safety.
+
+## Threat model and explicit limits
+
+Tests cover untrusted assertions, wrong signatures and scopes, missing grants, expiry, cross-scope reads/writes, invalid request fields, stale writes, replay of an identical operation, restart, and accidentally corrupted snapshots. Unkeyed snapshot checksums catch accidental corruption but cannot detect an adversary able to rewrite both data and checksum. Receipt digests of predictable payloads may be guessable. SQLite data and assertions are not encrypted. An actor able to read or modify the local process, files, clock, trusted key or configuration is outside this prototype's defenses. Scope access is not a substitute for a production authorization service.
+
+Do not use this module for real household, business, clinical or production records. Real identity provider validation, secure key and session lifecycle, revocation, replay defenses, encrypted storage, independent backup/restore, process/file permission policy, atomic migration, independently reviewed concurrency, rate limiting and security review require separate design and verification before integration or release. No deployed service, provider, credentials, real database or existing V1 schema is modified by this experiment.
