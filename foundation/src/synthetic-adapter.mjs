@@ -58,12 +58,14 @@ export function openSyntheticAdapter({ db, publicKey, issuer, audience, grants, 
       const identity=assertIdentity(token);if(!Number.isSafeInteger(expectedGeneration) || expectedGeneration<0 || !['propose','decide'].includes(kind)) fail();
       db.exec('BEGIN IMMEDIATE');
       try {
+        // A lock wait may outlast the assertion; recheck before accessing state.
+        assertIdentity(token);
         const {row,store}=load(identity); const receipt=store[kind](identity,input); const next=store.export(identity);
         // Identical retries do not mutate state and are safe even after generation advances.
-        if(next===row.snapshot) { db.exec('COMMIT'); return {generation:row.generation,receipt}; }
+        if(next===row.snapshot) { assertIdentity(token); db.exec('COMMIT'); return {generation:row.generation,receipt}; }
         if(row.generation!==expectedGeneration) fail();
         if(update.run(next,identity.scopeKind,identity.scopeId,identity.principalId,row.generation).changes!==1) fail();
-        db.exec('COMMIT');return {generation:row.generation+1,receipt};
+        assertIdentity(token); db.exec('COMMIT');return {generation:row.generation+1,receipt};
       } catch(error) { db.exec('ROLLBACK'); throw error; }
     }
   });
