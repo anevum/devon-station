@@ -35,3 +35,9 @@ npm run test:browser
 The last command additionally needs Chromium and Python Playwright and is offline/synthetic. Do not upload source, the private combined ZIP, real data or build outputs to public GitHub. After specific license, attribution, privacy and icon signoff, a new *public-safe* frontend source change can be reviewed on this same draft PR with full clean build and AAA gates.
 
 **Production preservation:** No Worker, Access, DNS, live D1, Railway or other running application was modified. Preserve existing V0.3 fallback until an independently accepted cutover.
+
+## Later read-only production and source parity check
+
+The current Cloudflare `devon-station` deployment metadata still lists an October 28, 2026 deployed version at 100% traffic, with a D1 binding and Access settings present (binding names/types inspected only; secret values untouched). A strictly **read-only metadata query** of the currently bound D1 found five reviewed application tables and two indexes with column names matching `worker/schema.sql`. There was also a Cloudflare-managed `_cf_KV` table outside the app schema. **Do not** pass authentic Cloudflare SQL blindly into the synthetic restore helper, which rejects extra tables; treat that provider-managed schema separately during independently authorized restore acceptance. Neither live user records nor export/rollback data were read or modified.
+
+Comparing the preserved private R4 client to the privacy-sanitized R3 client found the same 35 top-level named functions and eight differing regions: `command`, `inbox`, `infrastructure`, `works`, `writing`, `anevum`, `preferences`, and `saveCapture`. R3 remains the safe reviewed staging baseline; R4 is the separate protected reference. Verify behavior and privacy of these eight regions before declaring complete original-client parity. No private R4 code was uploaded here.
