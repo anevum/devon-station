@@ -28,7 +28,7 @@ const fs = require('node:fs/promises');
       await page.getByRole('button',{name:/Add proposal/}).click();
       await page.getByRole('button',{name:`Approve: Synthetic step ${viewport.width}`}).click();
       await page.getByText('Action approved. No external operation was performed.').waitFor();
-      assert.equal(await page.locator('.badge').last().innerText(),'APPROVED');
+      assert.equal(await page.locator('.badge').last().textContent(),'approved');
       const results=await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21a','wcag21aa']).analyze();
       assert.deepEqual(results.violations.map(v=>({id:v.id,impact:v.impact,description:v.description,nodes:v.nodes.map(n=>n.target)})),[],`accessibility violations at ${viewport.width}`);
       await page.screenshot({path:`browser-results/preview-${viewport.width}.png`,fullPage:true});
