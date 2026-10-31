@@ -13,12 +13,19 @@ const projects = [
 ];
 const assets = new Map(await Promise.all(['index.html','app.js','style.css'].map(async name=>[name,await readFile(new URL(name,import.meta.url),'utf8')])));
 // Dependency injection is available only to trusted local test code, never request data.
-export async function startDemo({db: suppliedDb, identity = owner} = {}) {
+export async function startDemo({db: suppliedDb, identity = owner, approvedSyntheticProjects} = {}) {
+  // Test-injected projections are only allowed for the personal demo owner,
+  // from trusted local tests. Never accept them over HTTP or with real data.
+  if(approvedSyntheticProjects!==undefined &&
+    (!Array.isArray(approvedSyntheticProjects) ||
+      !Object.keys(owner).every(k=>identity?.[k]===owner[k]) ||
+      Object.keys(identity).length!==4)) throw new Error('invalid synthetic project injection');
   if (![owner,otherOwner].some(allowed => Object.keys(allowed).every(k=>identity?.[k]===allowed[k]) && Object.keys(identity).length===4)) throw new Error('invalid synthetic identity');
   const db=suppliedDb ?? new DatabaseSync(':memory:');
   const token=randomBytes(32).toString('hex'), keys=generateKeyPairSync('ed25519');
+  const activeProjects=approvedSyntheticProjects===undefined?projects:approvedSyntheticProjects;
   const otherProjects=projects.map(p=>({...p,scopeId:otherOwner.scopeId}));
-  const store=openSyntheticAdapter({db,publicKey:keys.publicKey,issuer:'demo-issuer',audience:'demo-app',grants:[owner,otherOwner],seeds:[{identity:owner,projects},{identity:otherOwner,projects:otherProjects}]});
+  const store=openSyntheticAdapter({db,publicKey:keys.publicKey,issuer:'demo-issuer',audience:'demo-app',grants:[owner,otherOwner],seeds:[{identity:owner,projects:activeProjects},{identity:otherOwner,projects:otherProjects}]});
   // This test issuer is process-local, not an authentication mechanism for real users.
   const assertion=()=>{const now=Math.floor(Date.now()/1000);const payload=Buffer.from(JSON.stringify({iss:'demo-issuer',aud:'demo-app',sub:identity.principalId,scopeKind:identity.scopeKind,scopeId:identity.scopeId,iat:now,exp:now+60}));return `${payload.toString('base64url')}.${sign(null,payload,keys.privateKey).toString('base64url')}`;};
   let origin;
