@@ -1,0 +1,10 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {createAccessScopeBridge} from '../src/access-scope-bridge.mjs';
+const grant={subject:'provider-user-a',principalId:'owner-a',scopeKind:'personal',scopeId:'scope-a',role:'owner'};
+const scope={scopeKind:'personal',scopeId:'scope-a'};
+const verify=async token=>{if(token!=='signed-synthetic-assertion')throw Error('bad signature');return {subject:'provider-user-a',email:'synthetic@example.test'};};
+test('verified provider subject maps to a server-owned scope without copying email',async()=>{const bridge=createAccessScopeBridge({verifyAssertion:verify,grants:[grant]});assert.deepEqual(await bridge.authorize('signed-synthetic-assertion',scope),{principalId:'owner-a',role:'owner',...scope});});
+test('rejects unverified, unauthorized, malformed and cross-scope requests',async()=>{const bridge=createAccessScopeBridge({verifyAssertion:verify,grants:[grant]});for(const [token,s] of [['forged',scope],['signed-synthetic-assertion',{...scope,scopeId:'other'}],['signed-synthetic-assertion',{...scope,scopeKind:'business'}],['signed-synthetic-assertion',{...scope,role:'owner'}],['x'.repeat(12001),scope],['',scope]])await assert.rejects(bridge.authorize(token,s),/access denied/);});
+test('rejects ambiguous grants and ignores later mutations of configured grants',async()=>{assert.throws(()=>createAccessScopeBridge({verifyAssertion:verify,grants:[grant,grant]}));assert.throws(()=>createAccessScopeBridge({verifyAssertion:verify,grants:[{...grant,role:'admin'}]}));const mutable={...grant};const bridge=createAccessScopeBridge({verifyAssertion:verify,grants:[mutable]});mutable.principalId='changed';assert.equal((await bridge.authorize('signed-synthetic-assertion',scope)).principalId,'owner-a');});
+test('an email or role without a verified subject never grants access',async()=>{const bridge=createAccessScopeBridge({verifyAssertion:async()=>({email:'owner@example.test',role:'owner'}),grants:[grant]});await assert.rejects(bridge.authorize('assertion',scope),/access denied/);});
