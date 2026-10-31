@@ -27,3 +27,26 @@ jobs:
           name: synthetic-preview-browser-results
           path: foundation/browser-results/
           if-no-files-found: ignore
+  access-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout synthetic scope bridge
+        uses: actions/checkout@v4
+        with:
+          path: scoped
+          persist-credentials: false
+      - name: Checkout pinned recovered verifier (separate draft)
+        uses: actions/checkout@v4
+        with:
+          ref: 5c93f2315cafff16d63668938293e526ef5d9140
+          path: recovered
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify synthetic JWT and scope bridge integration
+        working-directory: scoped/foundation
+        env:
+          RECOVERED_ACCESS_MODULE: ../../recovered/worker/access.mjs
+          RECOVERED_STATION_MODULE: ../../recovered/worker/index.mjs
+        run: node --test interop/access-scope-interop.mjs interop/recovered-station-contract.mjs
