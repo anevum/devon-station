@@ -8,7 +8,7 @@ function render(){
  projectsEl.replaceChildren();actionsEl.replaceChildren();sourceInfo.replaceChildren();
  for(const [index,p] of snapshot.projects.entries()){
   const button=element('button','project');button.type='button';button.setAttribute('aria-pressed',String(p.projectId===selected));
-  const icon=element('span','project-icon',index===0?'◇':'⌁');icon.setAttribute('aria-hidden','true');const detail=element('span','project-details');detail.append(element('span','project-title',p.title),element('span','project-sub','SYNTHETIC PROJECT  ·  CACHED'));const arrow=element('span','project-arrow','↗');arrow.setAttribute('aria-hidden','true');button.append(icon,detail,arrow);button.addEventListener('click',()=>{selected=p.projectId;render();});projectsEl.append(button);
+  const icon=element('span','project-icon',index===0?'◇':'⌁');icon.setAttribute('aria-hidden','true');const detail=element('span','project-details');detail.append(element('span','project-title',p.title),element('span','project-sub','SYNTHETIC PROJECT  ·  CACHED'));const arrow=element('span','project-arrow','↗');arrow.setAttribute('aria-hidden','true');button.append(icon,detail,arrow);button.addEventListener('click',()=>{selected=p.projectId;render();projectsEl.querySelector('[aria-pressed="true"]')?.focus();});projectsEl.append(button);
  }
  const project=snapshot.projects.find(p=>p.projectId===selected);if(!project){projectTitle.textContent='No project selected';return;}
  projectTitle.textContent=project.title;const link=element('a',null,'Source reference');link.href=project.source.sourceUrl;link.target='_blank';link.rel='noreferrer noopener';sourceInfo.append('Cached synthetic projection  ·  ',link);

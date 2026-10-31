@@ -11,3 +11,19 @@ jobs:
         with:
           node-version: 22
       - run: npm --prefix foundation test
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --prefix foundation --no-save --ignore-scripts --no-audit --no-fund --package-lock=false playwright@1.62.1 @axe-core/playwright@4.10.2
+      - run: node browser/preview-check.cjs
+        working-directory: foundation
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: synthetic-preview-browser-results
+          path: foundation/browser-results/
+          if-no-files-found: ignore
