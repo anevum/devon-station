@@ -35,7 +35,7 @@ export function approvedProjectsForIdentity({identity,portfolio,projectGrants}) 
     rows.set(row.id,row);
   }
   const empty=portfolio.cachedAt===null && portfolio.projects.length===0;
-  if(!empty && (!Number.isSafeInteger(portfolio.cachedAt)||portfolio.cachedAt<0))fail();
+  if(!empty && (!Number.isSafeInteger(portfolio.cachedAt)||portfolio.cachedAt<0 || portfolio.cachedAt>8640000000000000))fail();
   const observedAt=empty?null:new Date(portfolio.cachedAt).toISOString();
   const approved=new Set(),projections=[];
   for(const grant of projectGrants){
