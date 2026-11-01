@@ -86,7 +86,6 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
-        with:
           persist-credentials: false
       - name: Enforce public-source boundary before review handoff
         shell: bash
