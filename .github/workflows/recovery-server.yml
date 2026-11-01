@@ -24,10 +24,13 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
       - run: npm test --prefix workerd-test
-      - name: Replay synthetic workerd at production compatibility date
-        env:
-          DS_WORKERD_COMPAT_DATE: '2026-10-28'
-        run: npm test --prefix workerd-test
+      - name: Replay on October 30 pinned workerd at October 28 compatibility date
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ds011-oct-workerd"
+          npm install --prefix "$RUNNER_TEMP/ds011-oct-workerd" --ignore-scripts --no-audit --no-fund --no-save --package-lock=false workerd@1.20261030.1
+          test -x "$RUNNER_TEMP/ds011-oct-workerd/node_modules/workerd/bin/workerd"
+          MINIFLARE_WORKERD_PATH="$RUNNER_TEMP/ds011-oct-workerd/node_modules/workerd/bin/workerd" DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
   unified-application:
     runs-on: ubuntu-latest
     steps:

@@ -10,16 +10,18 @@ This does not establish actual deployed compatibility flags, `ctx.access` identi
 
 ## October 28 compatibility-date replay (additive CI gate)
 
-The same pinned Miniflare/workerd fixture is run a second time with `DS_WORKERD_COMPAT_DATE=2026-10-28`. It exercises the actual recovered Worker, synthetic signed JWTs, two isolated test D1 stores, approval receipts, source reconciliation and empty-target restoration with `nodejs_compat` at the **date observed in production**. The July 30 baseline remains independently executed and unchanged. The CI step is blocking: any engine incompatibility must be investigated rather than silently accepted.
+The same pinned Miniflare `4.20260730.0` test harness is replayed at `DS_WORKERD_COMPAT_DATE=2026-10-28` with a separately installed, **exact-version** `workerd@1.20261030.1` binary supplied through Miniflare's documented `MINIFLARE_WORKERD_PATH` override. It exercises the actual recovered Worker, signed synthetic identities, two isolated synthetic D1 stores, decision receipts, source reconciliation and empty-target recovery. The original July 30 workerd test remains independently executed on its lockfile-pinned binary. The October 28 replay is a blocking CI check.
 
 Reproduce where the pinned dependencies can be installed:
 
 ```sh
 npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
 npm test --prefix workerd-test
-DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
+mkdir -p /tmp/ds011-oct-workerd
+npm install --prefix /tmp/ds011-oct-workerd --ignore-scripts --no-audit --no-fund --no-save --package-lock=false workerd@1.20261030.1
+MINIFLARE_WORKERD_PATH=/tmp/ds011-oct-workerd/node_modules/workerd/bin/workerd DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
 ```
 
-This checks a *different compatibility date on the July 30 pinned local engine*; it does **not** establish Cloudflare's October 28 deployed runtime binary, D1 service, `ctx.access` or production compatibility. Actual independent Cloudflare acceptance remains mandatory. This document records the test design, not an unobserved pass.
+The first attempt to use the July 30 engine for October 28 was **observed to fail at startup**: its binary supports dates only through `2026-08-06` ([CI failure](https://github.com/anevum/devon-station/actions/runs/41270715579)). This is a test-engine ceiling, not a failed application assertion. The second test uses a pinned October 30 engine and still does **not** establish the hosted Cloudflare runtime, D1 service, `ctx.access` or production compatibility. Actual isolated Cloudflare acceptance remains mandatory. This document records the updated test design, not an unobserved pass.
 
 The reviewed unified application and PWA artwork are now AGPL-3.0-only in draft PR #8; historical statements above that the frontend is private/unlicensed are superseded.
