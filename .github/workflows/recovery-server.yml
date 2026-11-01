@@ -29,8 +29,8 @@ jobs:
         run: |
           mkdir -p "$RUNNER_TEMP/ds011-oct-workerd"
           npm install --prefix "$RUNNER_TEMP/ds011-oct-workerd" --ignore-scripts --no-audit --no-fund --no-save --package-lock=false workerd@1.20261030.1
-          test -x "$RUNNER_TEMP/ds011-oct-workerd/node_modules/workerd/bin/workerd"
-          MINIFLARE_WORKERD_PATH="$RUNNER_TEMP/ds011-oct-workerd/node_modules/workerd/bin/workerd" DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
+          test -x "$RUNNER_TEMP/ds011-oct-workerd/node_modules/@cloudflare/workerd-linux-64/bin/workerd"
+          MINIFLARE_WORKERD_PATH="$RUNNER_TEMP/ds011-oct-workerd/node_modules/@cloudflare/workerd-linux-64/bin/workerd" DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
   unified-application:
     runs-on: ubuntu-latest
     steps:
