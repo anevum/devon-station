@@ -7,6 +7,19 @@ const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosn
 const csp="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const pushReady=env=>Boolean(env.DB&&env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT);
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{...common,'Content-Type':'application/json;charset=utf-8','Content-Security-Policy':csp}});
+function publicServiceWorker(request,env,url,assets){
+ // A separate, exact-path Cloudflare Access Bypass rule is ALSO required.
+ // Never bypass Access for the private shell, APIs, manifests, or other assets.
+ if(env.PUBLIC_SERVICE_WORKER!=='true'||url.pathname!=='/sw.js'||url.search)return null;
+ if(!['GET','HEAD'].includes(request.method))return json({error:'method_not_allowed'},405);
+ const script=assets['/sw.js'];
+ if(!script||script.encoding==='base64'||!/^((text|application)\/javascript)(;|$)/.test(script.type))return json({error:'not_found'},404);
+ return new Response(request.method==='HEAD'?null:script.body,{
+  headers:{...common,'Cache-Control':'no-store','Content-Type':script.type,
+   'Content-Security-Policy':csp,'Cross-Origin-Resource-Policy':'same-origin',
+   'Service-Worker-Allowed':'/'}
+ });
+}
 async function readBody(request,limit=8192){
  // Bound bytes while reading instead of buffering an unbounded request first.
  if(Number(request.headers.get('Content-Length'))>limit)throw {status:413};
@@ -19,6 +32,7 @@ async function readBody(request,limit=8192){
 }
 export function createStation(assets,auth=authorizedIdentity,transport=fetch){return {async fetch(request,env,ctx){try{
  const url=new URL(request.url);if(url.origin!==env.APP_ORIGIN)return json({error:'wrong_origin'},403);
+ const publicScript=publicServiceWorker(request,env,url,assets);if(publicScript)return publicScript;
  let user;try{user=await auth(request,env,ctx)}catch{return json({error:'owner_sign_in_required'},401)}
  if(user?.email!==env.OWNER_EMAIL||!user.subject)return json({error:'owner_only'},403);
  if(!['GET','HEAD','POST','DELETE'].includes(request.method))return json({error:'method_not_allowed'},405);
