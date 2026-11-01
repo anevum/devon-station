@@ -19,9 +19,11 @@ npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
 npm test --prefix workerd-test
 mkdir -p /tmp/ds011-oct-workerd
 npm install --prefix /tmp/ds011-oct-workerd --ignore-scripts --no-audit --no-fund --no-save --package-lock=false workerd@1.20261030.1
-MINIFLARE_WORKERD_PATH=/tmp/ds011-oct-workerd/node_modules/workerd/bin/workerd DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
+MINIFLARE_WORKERD_PATH=/tmp/ds011-oct-workerd/node_modules/@cloudflare/workerd-linux-64/bin/workerd DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
 ```
 
 The first attempt to use the July 30 engine for October 28 was **observed to fail at startup**: its binary supports dates only through `2026-08-06` ([CI failure](https://github.com/anevum/devon-station/actions/runs/41270715579)). This is a test-engine ceiling, not a failed application assertion. The second test uses a pinned October 30 engine and still does **not** establish the hosted Cloudflare runtime, D1 service, `ctx.access` or production compatibility. Actual isolated Cloudflare acceptance remains mandatory. This document records the updated test design, not an unobserved pass.
 
 The reviewed unified application and PWA artwork are now AGPL-3.0-only in draft PR #8; historical statements above that the frontend is private/unlicensed are superseded.
+
+The first supplemental replay attempt installed the correct `workerd` version but passed its **Node launcher** to `MINIFLARE_WORKERD_PATH`. That launcher does not preserve Miniflare's `--control-fd` and caused `Bad file descriptor`/`EPIPE` before application execution ([CI](https://github.com/anevum/devon-station/actions/runs/41270778978)). The corrected command points to the native package binary. The fix is test-harness-only.
