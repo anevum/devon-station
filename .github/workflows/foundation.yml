@@ -69,7 +69,7 @@ jobs:
         with:
           node-version: 22
       - name: Preserve hardened Access verifier in combined tree
-        run: test "$(git hash-object worker/access.mjs)" = "64a6d1cd5437a1490a594ed31a451ed5b7ee45b8"
+        run: test "$(git hash-object worker/access.mjs)" = "69ec253eddfe6ad26268bef2d2a270cd3faa947d"
       - name: Test integrated recovered Worker and foundation scope bridge
         working-directory: foundation
         env:

@@ -26,7 +26,7 @@ const request=(path,body,override={})=>new Request(origin+path,body===undefined?
   {headers:override}:
   {method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...override},body:JSON.stringify(body)});
 const oldFingerprint='b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c8c94';
-const hardenedAccessFingerprint='63e81e184542f3a05d312a7c4329044bd8e8c9116ec11631829b699e96e6fac1';
+const hardenedAccessFingerprint='1f3127c82f2079f82685f8f4ee56a82c390cf36dd7ef36273b4623e9ab3c9654';
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 
 async function legacyWorker(t) {

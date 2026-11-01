@@ -32,8 +32,9 @@ test('signed owner Access JWT allows the hosted shell, while forgery, policy mis
  const keys=await signer();
  const previous=globalThis.fetch;
  let jwksRequests=0;
- globalThis.fetch=async(url)=>{
+ globalThis.fetch=async(url,options)=>{
   assert.equal(url,env.ACCESS_JWKS_URL);
+  assert.equal(options.redirect,'manual','JWKS must use a Workers-compatible no-follow transport');
   jwksRequests++;
   return new Response(JSON.stringify({keys:[keys.pub]}),{status:200});
  };

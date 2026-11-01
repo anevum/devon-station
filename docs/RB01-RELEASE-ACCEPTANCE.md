@@ -6,6 +6,39 @@ The owning DS-011 Notion record holds private target identifiers and approvals.
 Keep account/database IDs, identity subjects, grants, credentials and authentic
 exports out of this public repository.
 
+## November 1 continuation — signed-JWT transport acceptance
+
+The earlier verifier's `redirect: 'error'` option fails while constructing a
+request in workerd, before fetching the pinned identity keys. The default
+signed-JWT path consequently rejected even a valid synthetic owner. Existing
+workerd journal tests injected a JWKS resolver and did not exercise this fetch.
+Cloudflare documents the unsupported mode in its
+[Request API](https://developers.cloudflare.com/workers/runtime-apis/request/).
+
+Use `redirect: 'manual'` with the existing non-OK response rejection. Redirects
+remain denied; issuer/audience, signature and time checks, trusted runtime
+identity, cookie ambiguity rules, owner check and scope grants are unchanged.
+The reviewed transport revision is now pinned in CI, candidate/fallback packaging
+and legacy rollback tests: Git blob
+`69ec253eddfe6ad26268bef2d2a270cd3faa947d`, SHA-256
+`1f3127c82f2079f82685f8f4ee56a82c390cf36dd7ef36273b4623e9ab3c9654`.
+Older fingerprints below describe the historical comparison, not current pins.
+
+`workerd-test/access-fixture.mjs` uses the real default verifier and native fetch,
+with only the outbound HTTP boundary fabricated and networking disabled/mocked.
+The runtime tests prove signed owner header/cookie acceptance, cached key reuse,
+nonowner/unsigned/spoofed/expired/forged/wrong-audience/ambiguous-cookie rejection
+across 22 protected UI/API method-path pairs, no fallback from an invalid assertion
+to a valid cookie, the separate generic service-worker exception, redirect refusal
+and successful direct-key retry after failure. These are synthetic checks only;
+they do not prove an actual nonowner Cloudflare Access login, logout/revocation,
+physical device behavior, authentic-data recovery or live deployment.
+
+The separately documented isolated iPhone push and synthetic encrypted restore
+milestones stay accepted. Do not rerun them merely because this source changed.
+Production cutover and RB02 implementation remain gated by the outstanding real
+identity/session and authentic recovery requirements.
+
 ## Verified comparison on November 1, 2026 (UTC)
 
 Reviewed application baseline: `6da693a39f6ee5e2c1f36245257375611bc491c6`

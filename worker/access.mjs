@@ -14,7 +14,9 @@ export async function cachedJWKS(url,{refresh=false}={}) {
   if(previous&&at<previous.expires&&(!refresh||at-previous.created<60000))return previous.promise;
   if(keyCache.size>=8&&!keyCache.has(url))keyCache.delete(keyCache.keys().next().value);
   const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),5000);
-  const promise=fetch(url,{redirect:'error',signal:controller.signal}).then(async r=>{
+  // Workers rejects redirect:'error' before sending. Never follow identity-key
+  // redirects: manual returns 3xx, which the non-OK check below rejects.
+  const promise=fetch(url,{redirect:'manual',signal:controller.signal}).then(async r=>{
     if(!r.ok)throw new Error('JWKS unavailable');const data=await r.json();
     if(!Array.isArray(data?.keys)||data.keys.length>20)throw new Error('Invalid JWKS');return data;
   }).catch(e=>{keyCache.delete(url);throw e}).finally(()=>clearTimeout(timeout));

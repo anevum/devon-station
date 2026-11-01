@@ -14,8 +14,8 @@ const EXPECTED_MODULES = [
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
 ];
 const LEGACY_SHA256 = 'b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c8c94';
-const ACCESS_SHA256 = '63e81e184542f3a05d312a7c4329044bd8e8c9116ec11631829b699e96e6fac1';
-const ACCESS_GIT_BLOB = '64a6d1cd5437a1490a594ed31a451ed5b7ee45b8';
+const ACCESS_SHA256 = '1f3127c82f2079f82685f8f4ee56a82c390cf36dd7ef36273b4623e9ab3c9654';
+const ACCESS_GIT_BLOB = '69ec253eddfe6ad26268bef2d2a270cd3faa947d';
 const ALLOWED_ASSETS = [
   '/LICENSE.txt', '/index.html', '/manifest.webmanifest', '/sw.js',
   '/icons/icon-192.png', '/icons/icon-512.png', '/icons/apple-touch-icon.png'
