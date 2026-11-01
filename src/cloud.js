@@ -42,7 +42,8 @@
   }
  };
  async function api(method,body){
-  const response=await fetch('/api/state',{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,credentials:'same-origin',cache:'no-store'});
+  const response=await fetch('/api/state',{method,headers:{'X-Requested-With':'XMLHttpRequest',...(body?{'Content-Type':'application/json'}:{})},body:body?JSON.stringify(body):undefined,credentials:'same-origin',cache:'no-store',redirect:'manual'});
+  if(response.status===401||response.status===403||response.type==='opaqueredirect'||response.status>=300&&response.status<400)throw Object.assign(Error('Sign in again to reconnect private storage.'),{status:401});
   if(!response.headers.get('Content-Type')?.includes('application/json'))throw Error('Sign-in or private API unavailable');
   const data=await response.json();if(!response.ok){const err=Error(data.error||'Private API unavailable');err.status=response.status;throw err;}
   return data;
@@ -72,12 +73,13 @@
     pending=true;
     if(externalEpoch!==saveEpoch)return;
     mode=error.status===409?'import-required':'blocked';
-    setStatus(error.status===409?'Sync conflict · local changes preserved. Review device changes.':'Sync unavailable · device changes preserved. Export before switching devices.');
+    setStatus(error.status===401?'Sign-in required · device changes preserved. Sign in again, then retry private sync.':error.status===409?'Sync conflict · local changes preserved. Review device changes.':'Sync unavailable · device changes preserved. Export before switching devices.');
    }
   });
  }
  async function readPortfolio(method='GET'){
-  const response=await fetch(method==='POST'?'/api/portfolio/refresh':'/api/portfolio',{method,headers:method==='POST'?{'Content-Type':'application/json'}:{},body:method==='POST'?'{}':undefined,credentials:'same-origin',cache:'no-store'});
+  const response=await fetch(method==='POST'?'/api/portfolio/refresh':'/api/portfolio',{method,headers:{'X-Requested-With':'XMLHttpRequest',...(method==='POST'?{'Content-Type':'application/json'}:{})},body:method==='POST'?'{}':undefined,credentials:'same-origin',cache:'no-store',redirect:'manual'});
+  if(response.status===401||response.status===403||response.type==='opaqueredirect'||response.status>=300&&response.status<400)throw Object.assign(Error('Sign in again to reconnect private storage.'),{status:401});
   if(!response.ok)throw Error('Notion project cache unavailable');
   const data=await response.json();portfolioConfigured=!!data.configured;
   const button=document.getElementById('portfolio-refresh');if(button)button.hidden=!portfolioConfigured;
@@ -103,8 +105,8 @@
    }else{
     mode='import-required';setStatus('Device changes require review · private storage untouched');
    }
-   await readPortfolio().catch(()=>{});
-  }catch(error){mode='blocked';setStatus('Private sync offline · device-only changes. Export to protect data.');}
+   await readPortfolio().catch(error=>{if(error.status===401)throw error;});
+  }catch(error){mode='blocked';setStatus(error.status===401?'Sign-in required · device changes preserved. Sign in again, then retry private sync.':'Private sync offline · device-only changes. Export to protect data.');}
  }
  let activeReview=null,reviewDialog=null;
  function labelForConflict(key){
@@ -190,6 +192,7 @@
    hydrate(merged);acknowledge(revision,state());setStatus('Reviewed choices saved · private revision '+revision);reviewDialog.close();
   }catch(e){
    if(e.status===409){mode='import-required';setStatus('Review must restart · local notes preserved');reviewDialog.close();}
+   else if(e.status===401){mode='blocked';setStatus('Sign-in required · device changes preserved. Sign in again, then retry private sync.');reviewDialog.close();}
    else error.textContent='Could not save the review. Your local and cloud notes are unchanged. '+(e.message||'');
   }finally{button.disabled=false;}
  }
@@ -219,7 +222,7 @@
    if(response.superseded)throw Object.assign(Error('Superseded reconciliation'),{status:409});
    revision=response.revision;mode='live';pending=false;remoteState=reconciled.state;
    hydrate(reconciled.state);acknowledge(revision,state());setStatus('Device changes safely merged · private revision '+revision);
-  }catch(error){mode='import-required';setStatus(error.status===409?'Revision changed during merge · retry after exporting notes':'Review not completed · '+error.message);}
+  }catch(error){mode=error.status===401?'blocked':'import-required';setStatus(error.status===401?'Sign-in required · device changes preserved. Sign in again, then retry private sync.':error.status===409?'Revision changed during merge · retry after exporting notes':'Review not completed · '+error.message);}
  }
  globalThis.StationCloud={get ready(){return mode==='live'},get diagnostics(){return {mode,revision,pending,externalChange:externalEpoch>0}},async stageBackupRestore(){
   if(mode==='connecting'||mode==='importing'||mode==='reviewing')return false;
@@ -241,7 +244,7 @@
  document.getElementById('portfolio-refresh')?.addEventListener('click',async()=>{
   if(!portfolioConfigured)return;const b=document.getElementById('portfolio-refresh');b.disabled=true;
   try{const result=await readPortfolio('POST');setStatus('Notion read-only project cache refreshed · '+result.projects.length+' projects');}
-  catch{setStatus('Notion refresh failed · existing project cache preserved');}
+  catch(error){if(error.status===401){mode='blocked';setStatus('Sign-in required · device changes preserved. Sign in again, then retry private sync.');}else setStatus('Notion refresh failed · existing project cache preserved');}
   finally{b.disabled=false;}
  });
  start();

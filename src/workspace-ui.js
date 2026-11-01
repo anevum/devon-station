@@ -8,9 +8,11 @@
  const title=s=>s.scopeKind[0].toUpperCase()+s.scopeKind.slice(1)+' / '+s.scopeId;
  const date=value=>new Date(value).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'});
  async function api(path,body){
-  const response=await fetch(path,{cache:'no-store',credentials:'same-origin',...(body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
+  const response=await fetch(path,{cache:'no-store',credentials:'same-origin',redirect:'manual',headers:{'X-Requested-With':'XMLHttpRequest',...(body?{'Content-Type':'application/json'}:{})},...(body?{method:'POST',body:JSON.stringify(body)}:{})});
+  if(response.status===401||response.status===403||response.type==='opaqueredirect'||response.status>=300&&response.status<400)throw Error('Your session or scope is no longer authorized. Sign in again or choose an approved workspace.');
   if(!response.ok){let code;try{code=(await response.json()).error;}catch{}const error=Error(response.status===401||response.status===403?'Your session or scope is no longer authorized. Sign in again or choose an approved workspace.':response.status===409?'The workspace changed. Reload and review its current state before continuing.':'The workspace could not confirm this request. Reload to check saved records before trying again.');error.code=code;throw error;}
-  return response.json();
+  if(!response.headers.get('Content-Type')?.includes('application/json'))throw Error('The workspace could not confirm this request. Reload to check saved records before trying again.');
+  try{return await response.json();}catch{throw Error('The workspace could not confirm this request. Reload to check saved records before trying again.');}
  }
  function draw(focus){
   const root=host();if(!root)return;

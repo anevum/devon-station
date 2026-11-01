@@ -50,6 +50,29 @@ timestamp after a redirect or 503, no redirect-target request, and successful
 direct retry. All source IDs, tokens, project records and D1 data in this test
 are fabricated. No live Notion refresh, credentials or integration is enabled.
 
+### Browser session-loss handling
+
+Private state, portfolio, workspace and notification requests now identify as
+AJAX using `X-Requested-With: XMLHttpRequest`, which Cloudflare documents for
+[expired-session 401 responses](https://developers.cloudflare.com/cloudflare-one/access-controls/access-settings/session-management/#ajax).
+Browser fetch uses manual redirect mode; the app recognizes opaque redirects,
+HTTP redirects and 401/403 before parsing a response. Sign-in HTML cannot be
+mistaken for saved state or a successful workspace operation. Local notes and
+the prior portfolio projection remain available; failed saves stay pending and
+stop automatically posting until private sync is explicitly retried. Notification
+setup stays disabled without requesting new push permission.
+
+Synthetic client regressions cover startup authorization loss, expiry during a
+save, blocked queued writes, portfolio-refresh denial, workspace controls and
+notification readiness. These do not prove actual one-hour session expiration,
+independent nonowner login denial or successful owner reauthentication.
+
+Cloudflare's user logout endpoint has a broader effect than an isolated test:
+it revokes that user's Access sessions across applications. Obtain explicit
+authorization for that effect before the real logout test; never invoke it
+automatically after a fetch failure or silently add it as an application-only
+logout. Keep credentials, codes and token-bearing sign-in URLs out of evidence.
+
 ## Verified comparison on November 1, 2026 (UTC)
 
 Reviewed application baseline: `6da693a39f6ee5e2c1f36245257375611bc491c6`

@@ -6,7 +6,7 @@ import {runInNewContext} from 'node:vm';
 const source=readFileSync(new URL('../src/pwa.js',import.meta.url),'utf8');
 const tick=async()=>{for(let i=0;i<24;i++)await Promise.resolve()};
 
-function browser({existing=false,registrationBlocked=false,lookupBlocked=false,insecure=false}={}){
+function browser({existing=false,registrationBlocked=false,lookupBlocked=false,insecure=false,deniedStatus=null,opaqueRedirect=false}={}){
  const controls=new Map(['notification-status','push-enable','push-test','push-disable','push-retry'].map(id=>[id,{id,textContent:'',disabled:true,hidden:true}]));
  const events={};
  const calls={register:0,existing:0,subscribe:0,config:0};
@@ -35,7 +35,7 @@ function browser({existing=false,registrationBlocked=false,lookupBlocked=false,i
   localStorage:{getItem:()=>null,setItem(){}},
   document:{getElementById:id=>controls.get(id),addEventListener:(name,fn)=>{events[name]=fn}},
   URL,Uint8Array,atob,
-  fetch:async path=>{if(path==='/api/notifications/config'){calls.config++;return {ok:true,headers:{get:()=> 'application/json'},json:async()=>({configured:true,publicKey:'synthetic',automaticAlerts:false})}}throw Error('Unexpected fetch '+path)}
+  fetch:async(path,options)=>{assert.equal(options.headers['X-Requested-With'],'XMLHttpRequest');assert.equal(options.redirect,'manual');if(path==='/api/notifications/config'){calls.config++;if(deniedStatus!==null||opaqueRedirect)return {ok:false,status:deniedStatus??0,type:opaqueRedirect?'opaqueredirect':'basic',headers:{get:()=> 'application/json'},json(){throw Error('Do not parse an unauthorized response')}};return {ok:true,headers:{get:()=> 'application/json'},json:async()=>({configured:true,publicKey:'synthetic',automaticAlerts:false})}}throw Error('Unexpected fetch '+path)}
  };
  runInNewContext(source,sandbox,{filename:'src/pwa.js'});
  return {
@@ -89,4 +89,14 @@ test('refuse insecure origins without calling service worker APIs',async()=>{
  assert.equal(b.calls.existing,0);
  assert.equal(b.calls.register,0);
  assert.equal(b.controls.get('push-enable').disabled,true);
+});
+
+test('expired and redirected notification sessions require sign-in without enabling push or requesting permission',async()=>{
+ for(const options of [{deniedStatus:401},{deniedStatus:403},{deniedStatus:302},{opaqueRedirect:true}]){
+  const b=browser({existing:true,...options});await tick();
+  assert.match(b.status(),/Sign in again, then reopen Settings/);
+  assert.equal(b.controls.get('push-enable').disabled,true);
+  assert.equal(b.controls.get('push-test').disabled,true);
+  assert.equal(b.calls.subscribe,0);
+ }
 });
