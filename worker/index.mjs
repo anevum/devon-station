@@ -1,6 +1,6 @@
 import {workspaceScopes,readWorkspace,mutateWorkspace,reviewWorkspaceSources,reconcileWorkspaceSources,exportWorkspace,reviewWorkspaceRestore,restoreWorkspace} from './workspace.mjs';
 import {authorizedIdentity} from './access.mjs';
-import {validEndpoint,deviceId,endpointHash,sendGenericPush} from './notifications.mjs';
+import {validEndpoint,deviceId,endpointHash,sendGenericPush,PushDispatchError} from './notifications.mjs';
 import {getOwnerState,saveOwnerState} from './state.mjs';
 import {getCachedPortfolio,refreshPortfolio} from './portfolio.mjs';
 const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
@@ -73,12 +73,15 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch){re
   const body=await readBody(request),id=deviceId(body.deviceId);if(!id)return json({error:'invalid_device'},400);
   const device=await env.DB.prepare('SELECT endpoint FROM push_devices WHERE owner_sub=? AND device_id=? AND active=1').bind(user.subject,id).first();if(!device)return json({error:'enable_this_device_first'},404);
   const now=Date.now();const reserve=await env.DB.prepare('UPDATE push_devices SET last_sent_at=? WHERE owner_sub=? AND device_id=? AND active=1 AND (last_sent_at IS NULL OR last_sent_at<?)').bind(now,user.subject,id,now-30000).run();if(reserve.meta?.changes!==1)return json({error:'wait_30_seconds'},429);
-  let response;try{response=await sendGenericPush(device.endpoint,env,transport)}catch{response={status:502,ok:false}}
+  let response,failureCode;
+  try{response=await sendGenericPush(device.endpoint,env,transport)}
+  catch(error){failureCode=error instanceof PushDispatchError?error.code:'push_sender_failed';response={status:502,ok:false}}
   const accepted=response.status===201||response.status===202||response.status===200;
+  if(!accepted&&!failureCode)failureCode='push_service_http_'+response.status;
   await env.DB.prepare('INSERT INTO push_delivery_log(id,owner_sub,device_id,kind,status,service_status,created_at) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user.subject,id,'manual-test',accepted?'accepted':'failed',response.status,now).run();
   if([404,410].includes(response.status))await env.DB.prepare('UPDATE push_devices SET active=0 WHERE owner_sub=? AND device_id=?').bind(user.subject,id).run();
   await env.DB.prepare('DELETE FROM push_delivery_log WHERE owner_sub=? AND created_at<?').bind(user.subject,now-30*86400000).run();
-  return json({accepted,serviceStatus:response.status,delivery:'Phone receipt must be checked on your device.'},accepted?202:502);
+  return json({accepted,serviceStatus:response.status,...(failureCode?{error:failureCode}:{}),delivery:'Phone receipt must be checked on your device.'},accepted?202:502);
  }
  if(url.pathname.startsWith('/api/'))return json({error:'not_found'},404);
  if(!['GET','HEAD'].includes(request.method))return json({error:'method_not_allowed'},405);
