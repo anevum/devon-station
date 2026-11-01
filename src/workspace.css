@@ -17,3 +17,5 @@
 #station-workspace button:focus-visible,#station-workspace select:focus-visible,#station-workspace textarea:focus-visible,#station-workspace summary:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 @media(max-width:850px){.ws-layout{grid-template-columns:1fr}.ws-projects{position:static;grid-template-columns:repeat(2,minmax(0,1fr))}.ws-projects h2{grid-column:1/-1}.ws-projects button{min-height:80px}.ws-toolbar{align-items:stretch}.ws-toolbar>div{flex:1}.ws-toolbar button{align-self:end}}
 @media(max-width:420px){.ws-toolbar{flex-direction:column;gap:10px}.ws-toolbar button{align-self:stretch}.ws-projects{grid-template-columns:1fr}.ws-action-head{flex-direction:column}.ws-project-header h2{font-size:22px}}
+
+.ws-recovery-tools,.ws-backup-panel,.ws-governance{margin-top:18px}.ws-backup-panel form{display:grid;gap:10px}.ws-backup-panel input{width:100%;min-height:44px;font-size:16px}.ws-backup-panel button{justify-self:start;min-height:44px}.ws-governance li,.ws-review li{margin:14px 0;overflow-wrap:anywhere;line-height:1.6}.ws-backup-panel form button{margin-top:6px}

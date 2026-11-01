@@ -1,4 +1,4 @@
-import {workspaceScopes,readWorkspace,mutateWorkspace} from './workspace.mjs';
+import {workspaceScopes,readWorkspace,mutateWorkspace,reviewWorkspaceSources,reconcileWorkspaceSources,exportWorkspace,reviewWorkspaceRestore,restoreWorkspace} from './workspace.mjs';
 import {authorizedIdentity} from './access.mjs';
 import {validEndpoint,deviceId,endpointHash,sendGenericPush} from './notifications.mjs';
 import {getOwnerState,saveOwnerState} from './state.mjs';
@@ -24,10 +24,16 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch){re
  const writes=['POST','DELETE'].includes(request.method);if(writes&&(request.headers.get('Origin')!==url.origin||request.headers.get('Content-Type')?.split(';')[0]!=='application/json'))return json({error:'same_origin_json_required'},403);
  if(url.pathname==='/api/session'&&request.method==='GET')return json({authenticated:true,mode:'owner',version:'0.4.8',snapshot:true,persistentStorage:!!env.DB});
  if(url.pathname==='/api/workspaces'&&request.method==='GET')return json(await workspaceScopes(user,env));
- if(['/api/workspace','/api/workspace/propose','/api/workspace/decide'].includes(url.pathname)){
+ if(['/api/workspace','/api/workspace/propose','/api/workspace/decide','/api/workspace/review','/api/workspace/reconcile','/api/workspace/backup','/api/workspace/restore-review','/api/workspace/restore'].includes(url.pathname)){
   const scope={scopeKind:url.searchParams.get('scopeKind'),scopeId:url.searchParams.get('scopeId')};
   if(url.pathname==='/api/workspace'&&request.method==='GET')return json(await readWorkspace(env.DB,user,env,scope));
-  if(request.method==='POST'&&url.pathname!=='/api/workspace')return json(await mutateWorkspace(env.DB,user,env,scope,url.pathname.endsWith('/propose')?'propose':'decide',await readBody(request,8192)));
+  if(request.method==='GET'&&url.pathname==='/api/workspace/review')return json(await reviewWorkspaceSources(env.DB,user,env,scope));
+  if(request.method==='GET'&&url.pathname==='/api/workspace/backup')return json(await exportWorkspace(env.DB,user,env,scope));
+  if(request.method==='POST'&&['/api/workspace/reconcile','/api/workspace/restore-review','/api/workspace/restore'].includes(url.pathname)){
+   const handler=url.pathname.endsWith('/reconcile')?reconcileWorkspaceSources:url.pathname.endsWith('/restore-review')?reviewWorkspaceRestore:restoreWorkspace;
+   return json(await handler(env.DB,user,env,scope,await readBody(request,url.pathname.endsWith('/reconcile')?8192:6*1024*1024)));
+  }
+  if(request.method==='POST'&&['/api/workspace/propose','/api/workspace/decide'].includes(url.pathname))return json(await mutateWorkspace(env.DB,user,env,scope,url.pathname.endsWith('/propose')?'propose':'decide',await readBody(request,8192)));
   return json({error:'method_not_allowed'},405);
  }
  if(url.pathname==='/api/portfolio'&&request.method==='GET'){if(!env.DB)return json({error:'storage_unavailable'},503);return json(await getCachedPortfolio(env.DB,user.subject,!!(env.NOTION_READ_TOKEN&&env.NOTION_PORTFOLIO_SOURCE_ID)));}

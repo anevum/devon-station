@@ -1,5 +1,7 @@
 # RB01 unified project and decision runtime
 
+Current follow-on: [encrypted journal recovery and source review](RB01-JOURNAL-RECOVERY-2026-10-31.md) are implemented in draft. The earlier backup/rebase limitations below describe the initial runtime checkpoint.
+
 Status: development candidate only. No merge, deployment or real-data intake.
 
 This change connects the existing recovered Worker to the existing foundation's project, proposal, decision, retry and receipt contracts. It does not replace the recovered application or change its hardened Access verifier. A new original UI component is available for mounting inside that application; the rights-gated recovered shell and its private integration edits remain excluded from public history.
@@ -21,7 +23,7 @@ The foundation uses `node:crypto`; a future Cloudflare build requires tested Nod
 
 `src/workspace-ui.js` and `src/workspace.css` provide the new original component. The private recovered application mounts it through its existing navigation, theme, command view and build pipeline. It supports source links, project filtering, proposal entry, explicit review, approve/reject, receipt history, error/reload states, disabled pending controls, keyboard focus, 44px control sizing, responsive layouts and existing safe-area/reduced-motion conventions. These are implementation details, not a claim of rendered AAA acceptance.
 
-The runtime journal reopens across an isolated database restart. Its integrity digests detect accidental corruption, not an attacker able to rewrite the database and recompute hashes. Storage is not encrypted by this adapter. The existing recovered encrypted device-note backup does **not yet include this separate workspace journal**. Portable encrypted workspace backup/restore and deliberate source/grant reconciliation remain follow-up work; never treat the prior note-backup tests as coverage for this new table.
+The runtime journal reopens across an isolated database restart. Its integrity digests detect accidental corruption, not an attacker able to rewrite the database and recompute hashes. Storage is not encrypted by this adapter. The existing recovered encrypted device-note backup remains separate; the follow-on adds its own encrypted scoped journal export and reviewed empty-target restore. Portable encrypted workspace backup/restore and deliberate source/grant reconciliation are now implemented in the follow-on; never treat the prior note-backup tests as coverage for this new table.
 
 ## Evidence and boundaries
 
@@ -31,4 +33,4 @@ The private combined tree additionally passes the recovered application test/bui
 
 Actual Chromium launch in this session was blocked by the execution environment's socket policy. The six recovered browser suites and new responsive browser suite therefore remain **unverified for these edits**. No physical iPhone, PWA/push, real Access owner/nonowner session, Cloudflare D1 export/restore, production-source parity or live rollback was accepted. Full frontend publication still requires verified authorship/third-party rights, an explicit approved OSI license and cleared PWA artwork. Existing drafts remain unmerged and production unchanged.
 
-Next bounded job: portable encrypted recovery for the new journal and explicit source/grant reconciliation, followed by actual integrated browser/contrast/touch checks in a permitted environment. Resolve source/asset rights before importing the recovered frontend publicly. Retain all production cutover gates.
+Next bounded job: independently verify workerd compatibility, then perform actual integrated browser/contrast/touch checks in a permitted environment. The encrypted recovery/source-review follow-on is implemented in draft. Resolve source/asset rights before importing the recovered frontend publicly. Retain all production cutover gates.
