@@ -5,6 +5,7 @@ import {getOwnerState,saveOwnerState} from './state.mjs';
 import {getCachedPortfolio,refreshPortfolio} from './portfolio.mjs';
 const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 const csp="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
+const pushReady=env=>Boolean(env.DB&&env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT);
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{...common,'Content-Type':'application/json;charset=utf-8','Content-Security-Policy':csp}});
 async function readBody(request,limit=8192){
  // Bound bytes while reading instead of buffering an unbounded request first.
@@ -40,9 +41,10 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch){re
  if(url.pathname==='/api/portfolio/refresh'&&request.method==='POST'){if(!env.DB)return json({error:'storage_unavailable'},503);return json(await refreshPortfolio(env.DB,user.subject,env,transport));}
  if(url.pathname==='/api/state'&&request.method==='GET'){if(!env.DB)return json({error:'storage_unavailable'},503);const {lastOperation,...state}=await getOwnerState(env.DB,user.subject);return json(state);}
  if(url.pathname==='/api/state'&&request.method==='POST'){if(!env.DB)return json({error:'storage_unavailable'},503);const data=await readBody(request,131072);try{return json(await saveOwnerState(env.DB,user.subject,data));}catch(e){if(e.status===409)return json({error:'revision_conflict'},409);throw e;}}
- if(url.pathname==='/api/notifications/config'&&request.method==='GET')return json({configured:!!(env.DB&&env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK),publicKey:env.VAPID_PUBLIC_KEY??null,automaticAlerts:false,privacy:'Generic notifications only; no private content in push payloads.'});
+ if(url.pathname==='/api/notifications/config'&&request.method==='GET')return json({configured:pushReady(env),publicKey:env.VAPID_PUBLIC_KEY??null,automaticAlerts:false,privacy:'Generic notifications only; no private content in push payloads.'});
  if(url.pathname.startsWith('/api/notifications/')&&!env.DB)return json({error:'notification_storage_unavailable'},503);
  if(url.pathname==='/api/notifications/subscribe'&&request.method==='POST'){
+  if(!pushReady(env))return json({error:'push_not_configured'},503);
   const body=await readBody(request),id=deviceId(body.deviceId),endpoint=validEndpoint(body.subscription?.endpoint);if(!id||!endpoint)return json({error:'invalid_device_or_endpoint'},400);
   const count=await env.DB.prepare('SELECT COUNT(*) AS n FROM push_devices WHERE owner_sub=? AND active=1').bind(user.subject).first();
   const existing=await env.DB.prepare('SELECT device_id FROM push_devices WHERE owner_sub=? AND device_id=? AND active=1').bind(user.subject,id).first();
@@ -53,7 +55,7 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch){re
  }
  if(url.pathname==='/api/notifications/unsubscribe'&&request.method==='POST'){const body=await readBody(request),id=deviceId(body.deviceId);if(!id)return json({error:'invalid_device'},400);await env.DB.prepare('DELETE FROM push_devices WHERE owner_sub=? AND device_id=?').bind(user.subject,id).run();return json({unsubscribed:true});}
  if(url.pathname==='/api/notifications/test'&&request.method==='POST'){
-  if(!env.VAPID_PRIVATE_JWK||!env.VAPID_PUBLIC_KEY)return json({error:'push_not_configured'},503);
+  if(!pushReady(env))return json({error:'push_not_configured'},503);
   const body=await readBody(request),id=deviceId(body.deviceId);if(!id)return json({error:'invalid_device'},400);
   const device=await env.DB.prepare('SELECT endpoint FROM push_devices WHERE owner_sub=? AND device_id=? AND active=1').bind(user.subject,id).first();if(!device)return json({error:'enable_this_device_first'},404);
   const now=Date.now();const reserve=await env.DB.prepare('UPDATE push_devices SET last_sent_at=? WHERE owner_sub=? AND device_id=? AND active=1 AND (last_sent_at IS NULL OR last_sent_at<?)').bind(now,user.subject,id,now-30000).run();if(reserve.meta?.changes!==1)return json({error:'wait_30_seconds'},429);
