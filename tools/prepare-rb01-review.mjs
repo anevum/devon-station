@@ -28,7 +28,7 @@ function sortedDigestMap(entries) {
   return Object.fromEntries(entries.slice().sort((a, b) => a[0].localeCompare(b[0]))
     .map(([name, bytes]) => [name, sha256(bytes)]));
 }
-function unpackAssets(entry) {
+function unpackAssets(entry, requireHostedMarker = true) {
   const match = entry.match(/^import \{createStation\} from '\.\/worker\/index\.mjs';\nconst assets=(\{[^\n]*\});\nexport default createStation\(assets\);\n$/);
   insist(match, 'unexpected protected Worker entry template');
   const assets = JSON.parse(match[1]);
@@ -36,7 +36,7 @@ function unpackAssets(entry) {
   for (const asset of Object.values(assets)) {
     insist(asset && typeof asset.type === 'string' && typeof asset.body === 'string' && ['utf8', 'base64'].includes(asset.encoding), 'invalid asset encoding');
   }
-  insist(assets['/index.html'].body.includes('"privateDataLoaded":false'), 'hosted shell contains no private-data marker');
+  if (requireHostedMarker) insist(assets['/index.html'].body.includes('"privateDataLoaded":false'), 'hosted shell contains no private-data marker');
   insist(assets['/LICENSE.txt'].body.includes('GNU AFFERO GENERAL PUBLIC LICENSE'), 'AGPL license asset missing');
   return assets;
 }
@@ -56,8 +56,8 @@ const fallbackHTML = [
   '<p><a href="/LICENSE.txt">License</a> · <a href="https://github.com/anevum/devon-station">Corresponding source</a></p>',
   '</main></body></html>'
 ].join('\n');
-function describeBundle(modules) {
-  const assets = unpackAssets(modules['index.mjs']);
+function describeBundle(modules, requireHostedMarker = true) {
+  const assets = unpackAssets(modules['index.mjs'], requireHostedMarker);
   return {
     moduleCount: Object.keys(modules).length,
     assetCount: Object.keys(assets).length,
@@ -115,7 +115,7 @@ export function buildReleaseArtifacts({candidate, legacyServer, accessModule, no
     guardedFallback: {
       file: 'guarded-v03.modules.json', sha256: sha256(fallbackText),
       mode: 'Hardened V0.3 APIs with static read-only safety screen; degraded UI intentionally blocks editing',
-      ...describeBundle(fallback)
+      ...describeBundle(fallback, false)
     }
   };
   const manifestText = json(manifest);
