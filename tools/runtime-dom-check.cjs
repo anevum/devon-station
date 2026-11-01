@@ -17,6 +17,13 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
   dom=await make();let doc=dom.window.document;
   try{await until(()=>doc.querySelector('#ws-summary'),'workspace loaded');}catch(e){console.error('BOOT ERRORS',errors);console.error('VIEW',doc.querySelector('#view')?.textContent.slice(0,1500));console.error('BODY',doc.body.textContent.slice(-400));throw e;}
   const source=doc.querySelector('.ws-project-header a');if(!source.href.includes('synthetic-project-a'))throw Error('source missing');
+  // Async redraw must preserve a keyboard user's place after reload/scope change.
+  const reload=doc.querySelector('#ws-reload');reload.focus();reload.click();
+  await until(()=>doc.querySelector('#ws-reload')!==reload&&!doc.querySelector('#ws-reload').disabled,'workspace keyboard reload');
+  if(doc.activeElement?.id!=='ws-reload')throw Error('workspace reload lost keyboard focus');
+  const chooser=doc.querySelector('#ws-scope');chooser.focus();chooser.dispatchEvent(new dom.window.Event('change',{bubbles:true}));
+  await until(()=>doc.querySelector('#ws-scope')!==chooser&&!doc.querySelector('#ws-scope').disabled,'workspace keyboard scope selection');
+  if(doc.activeElement?.id!=='ws-scope')throw Error('scope selection lost keyboard focus');
   function click(selector){const el=doc.querySelector(selector);if(!el)throw Error('missing '+selector);el.click();}
   async function propose(text){const input=doc.querySelector('#ws-summary');input.value=text;input.dispatchEvent(new dom.window.Event('input',{bubbles:true}));doc.querySelector('#ws-proposal').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));await until(()=>doc.querySelector('#ws-status').textContent.includes('Proposal saved'),'proposed');}
   await propose('DOM acceptance approval');click('[data-ws-review]');if(doc.activeElement.id!=='ws-review-title')throw Error('review focus');click('[data-ws-decision=approved]');await until(()=>doc.querySelector('#ws-status').textContent.includes('Decision saved: approved'),'approved');
