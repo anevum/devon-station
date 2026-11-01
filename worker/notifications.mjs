@@ -27,6 +27,8 @@ export async function sendGenericPush(endpoint,env,transport=fetch){
  let jwt;
  try{jwt=await vapidToken(endpoint,key,env.VAPID_SUBJECT)}
  catch{throw new PushDispatchError('push_vapid_sign_failed')}
- try{return await transport(endpoint,{method:'POST',headers:{Authorization:`vapid t=${jwt}, k=${env.VAPID_PUBLIC_KEY}`,TTL:'300',Urgency:'normal',Topic:'devon-station'},redirect:'error',signal:AbortSignal.timeout(10000)})}
+ // Cloudflare Workers rejects redirect:'error' before a network request. Manual
+ // redirect handling is required so VAPID credentials never follow 3xx URLs.
+ try{return await transport(endpoint,{method:'POST',headers:{Authorization:`vapid t=${jwt}, k=${env.VAPID_PUBLIC_KEY}`,TTL:'300',Urgency:'normal',Topic:'devon-station'},redirect:'manual',signal:AbortSignal.timeout(10000)})}
  catch(error){throw new PushDispatchError(['TimeoutError','AbortError'].includes(error?.name)?'push_transport_timeout':'push_transport_failed')}
 }

@@ -54,7 +54,7 @@ async function syntheticPushEnv(storage){
  const publicKey=Buffer.concat([Buffer.from([4]),Buffer.from(privateJwk.x,'base64url'),Buffer.from(privateJwk.y,'base64url')]).toString('base64url');
  return {...env,DB:storage,VAPID_PRIVATE_JWK:JSON.stringify(privateJwk),VAPID_PUBLIC_KEY:publicKey,VAPID_SUBJECT:'mailto:owner@example.test'};
 }
-test('real subscription SQL is owner scoped and a test records acceptance, not phone receipt',async()=>{const storage=db();try{const e=await syntheticPushEnv(storage);let sends=0;const app=createStation(assets,async()=>user,async(endpoint,options)=>{sends++;assert.equal(endpoint,'https://web.push.apple.com/Q/test');assert(!options.body);assert(options.headers.Authorization.startsWith('vapid t='));return new Response(null,{status:201})});assert.equal((await app.fetch(request('/api/notifications/subscribe',{deviceId:'device-test-001',subscription:{endpoint:'https://web.push.apple.com/Q/test'}}),e,{})).status,200);const sent=await app.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{});assert.equal(sent.status,202);assert.equal((await sent.json()).accepted,true);assert.equal((await app.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{})).status,429);assert.equal(sends,1);const other=createStation(assets,async()=>({...user,subject:'other-sub'}));assert.equal((await other.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{})).status,404);assert.equal((await app.fetch(request('/api/notifications/unsubscribe',{deviceId:'device-test-001'}),e,{})).status,200);assert.equal((await app.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{})).status,404);}finally{storage.close()}});
+test('real subscription SQL is owner scoped and a test records acceptance, not phone receipt',async()=>{const storage=db();try{const e=await syntheticPushEnv(storage);let sends=0;const app=createStation(assets,async()=>user,async(endpoint,options)=>{sends++;assert.equal(endpoint,'https://web.push.apple.com/Q/test');assert(!options.body);assert(options.headers.Authorization.startsWith('vapid t='));assert.equal(options.redirect,'manual','Cloudflare Workers only implements follow/manual; never follow sensitive VAPID Authorization redirects');return new Response(null,{status:201})});assert.equal((await app.fetch(request('/api/notifications/subscribe',{deviceId:'device-test-001',subscription:{endpoint:'https://web.push.apple.com/Q/test'}}),e,{})).status,200);const sent=await app.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{});assert.equal(sent.status,202);assert.equal((await sent.json()).accepted,true);assert.equal((await app.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{})).status,429);assert.equal(sends,1);const other=createStation(assets,async()=>({...user,subject:'other-sub'}));assert.equal((await other.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{})).status,404);assert.equal((await app.fetch(request('/api/notifications/unsubscribe',{deviceId:'device-test-001'}),e,{})).status,200);assert.equal((await app.fetch(request('/api/notifications/test',{deviceId:'device-test-001'}),e,{})).status,404);}finally{storage.close()}});
 test('incomplete VAPID setup is disabled and stores no iPhone subscription',async()=>{const storage=db();try{
  const app=createStation(assets,async()=>user);
  const incomplete={...env,DB:storage,VAPID_PUBLIC_KEY:'synthetic-public',VAPID_PRIVATE_JWK:'synthetic-private'};
@@ -93,6 +93,24 @@ test('manual push failure returns only a safe code and leaves the device registe
   assert(!JSON.stringify(body).includes('web.push.apple.com'));
   assert.equal((await storage.prepare('SELECT COUNT(*) AS n FROM push_devices WHERE active=1').bind().first()).n,1);
   assert.equal((await storage.prepare('SELECT service_status FROM push_delivery_log').bind().first()).service_status,502);
+ }finally{storage.close()}
+});
+test('redirecting push endpoint is rejected without following and exposing VAPID credentials',async()=>{
+ const storage=db();try{
+  const e=await syntheticPushEnv(storage);let requested=0;
+  const app=createStation(assets,async()=>user,async(endpoint,options)=>{
+   requested++;
+   assert.equal(new URL(endpoint).hostname,'web.push.apple.com');
+   assert.equal(options.redirect,'manual');
+   // A push service redirect must never cause our authorization header to be forwarded.
+   return new Response(null,{status:302,headers:{Location:'https://example.invalid/exfiltrate'}});
+  });
+  assert.equal((await app.fetch(request('/api/notifications/subscribe',{deviceId:'device-redirect-001',subscription:{endpoint:'https://web.push.apple.com/Q/synthetic'}}),e,{})).status,200);
+  const res=await app.fetch(request('/api/notifications/test',{deviceId:'device-redirect-001'}),e,{});
+  assert.equal(res.status,502);const body=await res.json();
+  assert.equal(body.accepted,false);assert.equal(body.error,'push_service_http_302');assert.equal(body.serviceStatus,302);
+  assert.equal(requested,1,'must never follow the redirect');
+  assert(!JSON.stringify(body).includes('example.invalid'));
  }finally{storage.close()}
 });
 test('actual push-provider rejection keeps its HTTP status and is distinct from a local exception',async()=>{
