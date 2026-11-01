@@ -16,7 +16,7 @@
   const root=host();if(!root)return;
   const projects=state?.projects??[],project=projects.find(x=>x.projectId===projectId),actions=(state?.actions??[]).filter(x=>x.projectId===projectId),review=actions.find(x=>x.recordId===reviewId);
   root.setAttribute('aria-busy',String(busy));
-  root.innerHTML=`<div class="ws-toolbar"><div><label for="ws-scope">Workspace boundary</label><select id="ws-scope" ${busy?'disabled':''}>${scopes.map(s=>`<option value="${escape(scopeKey(s))}" ${scope&&scopeKey(scope)===scopeKey(s)?'selected':''}>${escape(title(s))}</option>`).join('')}</select></div><button data-ws-reload ${busy?'disabled':''}>${busy?'Loading…':'Reload workspace'}</button></div>
+  root.innerHTML=`<div class="ws-toolbar"><div><label for="ws-scope">Workspace boundary</label><select id="ws-scope" ${busy?'disabled':''}>${scopes.map(s=>`<option value="${escape(scopeKey(s))}" ${scope&&scopeKey(scope)===scopeKey(s)?'selected':''}>${escape(title(s))}</option>`).join('')}</select></div><button id="ws-reload" data-ws-reload ${busy?'disabled':''}>${busy?'Loading…':'Reload workspace'}</button></div>
    <p class="ws-notice">Approvals record your decision. External operations require their own authorized workflow.</p>
    <p id="ws-status" tabindex="-1" role="status" aria-live="polite">${escape(notice)}</p><p id="ws-error" tabindex="-1" role="alert" class="error">${escape(error)}</p>
    ${state?`<div class="ws-layout"><nav class="ws-projects" aria-label="Approved projects"><h2>Projects <span class="count-label">${projects.length}</span></h2>${projects.length?projects.map(p=>`<button data-ws-project="${escape(p.projectId)}" ${p.projectId===projectId?'aria-current="true"':''}><strong>${escape(p.title)}</strong><span>Source-linked · ${escape(p.freshness)}</span></button>`).join(''):'<p class="muted">No approved project metadata is available in this scope.</p>'}</nav>
@@ -31,13 +31,17 @@
   if(focus)document.getElementById(focus)?.focus({preventScroll:true});
  }
  async function load(changeScope){
+  // The asynchronous redraw replaces its triggering control. Return focus to
+  // that control so keyboard and screen-reader users do not land on <body>.
+  const active=document.activeElement;
+  const returnFocus=active?.id==='ws-reload'?'ws-reload':changeScope&&active?.id==='ws-scope'?'ws-scope':null;
   const mine=++epoch;busy=true;error='';notice='';state=null;reviewId=null;sourceReview=null;recoveryMode=null;pendingRestore=null;pendingTransfer=null;if(changeScope){draft='';projectId=null;}draw();
   try{
    const response=await api('/api/workspaces');if(mine!==epoch)return;scopes=response.scopes;
    scope=scopes.find(s=>scope&&scopeKey(s)===scopeKey(scope))??scopes[0]??null;
    if(scope){const next=await api('/api/workspace?'+query());if(mine!==epoch)return;state=next;projectId=next.projects.some(p=>p.projectId===projectId)?projectId:next.projects[0]?.projectId;notice='Workspace loaded. Saved decisions are up to date.';}
   }catch(e){if(mine===epoch){state=null;error=e.message;if(e.code==='workspace_source_requires_review'){try{sourceReview=await api('/api/workspace/review?'+query());if(mine!==epoch)return;}catch(reviewError){error=reviewError.message;}}}}
-  finally{if(mine===epoch){busy=false;draw();}}
+  finally{if(mine===epoch){busy=false;draw(returnFocus);}}
  }
  async function mutate(kind,input){
   if(busy||!state)return;busy=true;error='';notice='';draw();
