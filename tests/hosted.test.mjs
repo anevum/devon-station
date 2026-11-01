@@ -18,6 +18,33 @@ const user={subject:'synthetic-owner',email:'owner@example.test'};const env={APP
 const assets={'/index.html':{type:'text/html',body:'PRIVATE_SNAPSHOT'},'/sw.js':{type:'text/javascript',body:'/* generic service worker */'}};
 const request=(path,body,headers={})=>new Request(origin+path,body===undefined?{}:{method:'POST',headers:{Origin:origin,'Content-Type':'application/json',...headers},body:JSON.stringify(body)});
 test('unsigned or forged-header requests cannot read the private document or subscribe',async()=>{const app=createStation(assets);for(const path of ['/','/sw.js','/api/notifications/config']){const r=await app.fetch(new Request(origin+path,{headers:{'Cf-Access-Authenticated-User-Email':user.email,'X-User-Email':user.email}}),env,{});assert.equal(r.status,401);assert(!(await r.text()).includes('PRIVATE_SNAPSHOT'));}});
+test('exact static service worker opt-in cannot reveal owner assets or API data',async()=>{
+ const app=createStation(assets),e={...env,PUBLIC_SERVICE_WORKER:'true'};
+ const path=origin+'/sw.js';
+ const js=await app.fetch(new Request(path),e,{});
+ assert.equal(js.status,200);
+ assert.equal(js.headers.get('Service-Worker-Allowed'),'/');
+ assert.equal(js.headers.get('Content-Type'),'text/javascript');
+ assert.equal(js.headers.get('Cross-Origin-Resource-Policy'),'same-origin');
+ assert.equal(js.headers.get('Cache-Control'),'no-store');
+ assert.equal(await js.text(),'/* generic service worker */');
+ const head=await app.fetch(new Request(path,{method:'HEAD'}),e,{});
+ assert.equal(head.status,200);
+ assert.equal(await head.text(),'');
+ for(const route of ['/','/index.html','/api/state','/api/notifications/config','/LICENSE.txt','/sw.js/','/sw.js?version=1']){
+  const res=await app.fetch(new Request(origin+route),e,{});
+  assert.equal(res.status,401,'owner-only route accidentally exposed: '+route);
+  assert(!(await res.text()).includes('PRIVATE_SNAPSHOT'));
+ }
+ assert.equal((await app.fetch(new Request(path,{method:'POST'}),e,{})).status,405);
+ assert.equal((await app.fetch(new Request('https://evil.example.test/sw.js'),e,{})).status,403);
+ assert.equal((await app.fetch(new Request(path),{...env,PUBLIC_SERVICE_WORKER:'false'},{})).status,401);
+ assert.equal((await app.fetch(new Request(path),env,{})).status,401);
+ const wrong=createStation({...assets,'/sw.js':{type:'text/html',body:'PRIVATE_SNAPSHOT'}});
+ const wrongRes=await wrong.fetch(new Request(path),e,{});
+ assert.equal(wrongRes.status,404);
+ assert(!(await wrongRes.text()).includes('PRIVATE_SNAPSHOT'));
+});
 test('an authenticated different identity is denied before asset access',async()=>{const app=createStation(assets,async()=>({...user,email:'other@example.test'}));assert.equal((await app.fetch(request('/'),env,{})).status,403);});
 test('same-origin JSON is required for all subscription mutations',async()=>{const app=createStation(assets,async()=>user);const r=await app.fetch(request('/api/notifications/subscribe',{}, {Origin:'https://evil.test'}),env,{});assert.equal(r.status,403);});
 test('push endpoint validation rejects local targets, credentials and lookalike domains',()=>{for(const u of ['http://web.push.apple.com/test','https://web.push.apple.com.evil.test/a','https://127.0.0.1/a','https://fcm.googleapis.com:444/a','https://u:p@fcm.googleapis.com/a','https://internal.invalid/a'])assert.equal(validEndpoint(u),null);assert.equal(validEndpoint('https://web.push.apple.com/Q/test'),'https://web.push.apple.com/Q/test');});
