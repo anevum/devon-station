@@ -24,6 +24,10 @@ jobs:
           node-version: '22'
       - run: npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
       - run: npm test --prefix workerd-test
+      - name: Replay synthetic workerd at production compatibility date
+        env:
+          DS_WORKERD_COMPAT_DATE: '2026-10-28'
+        run: npm test --prefix workerd-test
   unified-application:
     runs-on: ubuntu-latest
     steps:

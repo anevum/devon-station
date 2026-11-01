@@ -2,12 +2,14 @@ import test from 'node:test';import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';import {generateKeyPairSync,sign} from 'node:crypto';
 import {Miniflare} from 'miniflare';
 const origin='https://station.example.test',scope='scopeKind=personal&scopeId=personal-a';
+const compatibilityDate=process.env.DS_WORKERD_COMPAT_DATE??'2026-07-30';
+if(!['2026-07-30','2026-10-28'].includes(compatibilityDate))throw Error('Unsupported synthetic workerd compatibility date');
 const keys=generateKeyPairSync('rsa',{modulusLength:2048}),jwk=keys.publicKey.export({format:'jwk'});Object.assign(jwk,{kid:'fixture-key',alg:'RS256'});
 const enc=x=>Buffer.from(JSON.stringify(x)).toString('base64url');
 function jwt(subject='test-subject',overrides={}){const data=enc({alg:'RS256',kid:jwk.kid})+'.'+enc({iss:'https://synthetic.cloudflareaccess.com',aud:['synthetic-audience'],sub:subject,email:'owner@example.test',exp:Math.floor(Date.now()/1000)+300,...overrides});return data+'.'+sign('RSA-SHA256',Buffer.from(data),keys.privateKey).toString('base64url');}
-test('workerd: signed owner, local D1 journal, source review and empty-target recovery contract',async()=>{
+test(`workerd ${compatibilityDate}: signed owner, local D1 journal, source review and empty-target recovery contract`,async()=>{
  const schema=await readFile(new URL('../worker/schema.sql',import.meta.url),'utf8')+'\n'+await readFile(new URL('../worker/migrations/0003-scoped-workspace.sql',import.meta.url),'utf8');
- const options={modules:true,modulesRoot:new URL('../',import.meta.url).pathname,scriptPath:new URL('./fixture.mjs',import.meta.url).pathname,compatibilityDate:'2026-07-30',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],bindings:{APP_ORIGIN:origin,OWNER_EMAIL:'owner@example.test',FIXTURE_JWK:jwk,FIXTURE_SCHEMA:schema,WORKSPACE_GRANTS:[{subject:'test-subject',principalId:'owner-a',scopeKind:'personal',scopeId:'personal-a',role:'owner'}],WORKSPACE_PROJECT_GRANTS:[{principalId:'owner-a',scopeKind:'personal',scopeId:'personal-a',projectId:'project-a',area:'Devon Works'}]}};
+ const options={modules:true,modulesRoot:new URL('../',import.meta.url).pathname,scriptPath:new URL('./fixture.mjs',import.meta.url).pathname,compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],bindings:{APP_ORIGIN:origin,OWNER_EMAIL:'owner@example.test',FIXTURE_JWK:jwk,FIXTURE_SCHEMA:schema,WORKSPACE_GRANTS:[{subject:'test-subject',principalId:'owner-a',scopeKind:'personal',scopeId:'personal-a',role:'owner'}],WORKSPACE_PROJECT_GRANTS:[{principalId:'owner-a',scopeKind:'personal',scopeId:'personal-a',projectId:'project-a',area:'Devon Works'}]}};
  const mf=new Miniflare(options);let target;
  try{
   assert.equal((await mf.dispatchFetch(origin+'/fixture/init',{method:'POST'})).status,200);
