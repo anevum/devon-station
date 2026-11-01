@@ -28,6 +28,43 @@ const protectedRoutes=[
  ['POST','/api/notifications/test'],['GET','/api/unknown']
 ];
 
+test(`workerd ${compatibilityDate}: native portfolio refresh refuses redirects without replacing the previous cache or forwarding credentials`,async()=>{
+ const source='aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',token='synthetic-read-only-token';
+ const project={object:'page',id:'synthetic-project',url:'https://www.notion.so/synthetic',
+  properties:{Project:{type:'title',title:[{plain_text:'Synthetic portfolio project'}]}}};
+ const payload=()=>JSON.stringify({results:[project],has_more:false,next_cursor:null});
+ let requests=0,followed=false;
+ const mf=new Miniflare({modules:true,modulesRoot:new URL('../',import.meta.url).pathname,
+  scriptPath:new URL('./portfolio-fixture.mjs',import.meta.url).pathname,
+  compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],
+  bindings:{NOTION_PORTFOLIO_SOURCE_ID:source,NOTION_READ_TOKEN:token},
+  outboundService:request=>{
+   if(new URL(request.url).hostname==='untrusted.example.test'){
+    followed=true;return new Response(payload());
+   }
+   assert.equal(request.url,`https://api.notion.com/v1/data_sources/${source}/query`);
+   assert.equal(request.method,'POST');assert.equal(request.headers.get('Authorization'),'Bearer '+token);
+   requests++;
+   if(requests===2)return new Response(payload(),{status:302,headers:{Location:'https://untrusted.example.test/collect'}});
+   if(requests===3)return new Response('unavailable',{status:503});
+   return new Response(payload(),{headers:{'Content-Type':'application/json'}});
+  }});
+ try{
+  assert.equal((await mf.dispatchFetch(origin+'/init')).status,200);
+  const first=await mf.dispatchFetch(origin+'/refresh');assert.equal(first.status,200);
+  const cached=await first.json();assert.equal(cached.projects.length,1);assert.equal(cached.notionWrites,false);
+  for(let i=0;i<2;i++){
+   const denied=await mf.dispatchFetch(origin+'/refresh');assert.equal(denied.status,502);
+   assert.deepEqual(await denied.json(),{error:'notion_provider_error'});
+   assert.deepEqual(await(await mf.dispatchFetch(origin+'/cache')).json(),cached);
+  }
+  assert.equal(followed,false);assert.equal(requests,3);
+  const retry=await mf.dispatchFetch(origin+'/refresh');assert.equal(retry.status,200);
+  assert.equal((await retry.json()).projects[0].name,'Synthetic portfolio project');
+  assert.equal(requests,4);assert.equal(followed,false);
+ }finally{await mf.dispose()}
+});
+
 test(`workerd ${compatibilityDate}: default signed-JWT auth fetches pinned JWKS and rejects nonowners across protected routes`,async()=>{
  const mock=createFetchMock();mock.disableNetConnect();
  mock.get('https://synthetic.cloudflareaccess.com').intercept({path:'/cdn-cgi/access/certs'})

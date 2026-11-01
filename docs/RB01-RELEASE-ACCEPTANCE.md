@@ -39,6 +39,17 @@ milestones stay accepted. Do not rerun them merely because this source changed.
 Production cutover and RB02 implementation remain gated by the outstanding real
 identity/session and authentic recovery requirements.
 
+### Optional portfolio-refresh transport follow-through
+
+The same unsupported fetch mode also existed in `worker/portfolio.mjs`. The
+separate follow-through uses manual redirects with the existing provider-error
+check, so a 3xx cannot forward the Notion read token or replace a valid cache.
+Native workerd coverage reproduces the original valid-refresh failure, then
+verifies successful projection/cache replacement, unchanged cached content and
+timestamp after a redirect or 503, no redirect-target request, and successful
+direct retry. All source IDs, tokens, project records and D1 data in this test
+are fabricated. No live Notion refresh, credentials or integration is enabled.
+
 ## Verified comparison on November 1, 2026 (UTC)
 
 Reviewed application baseline: `6da693a39f6ee5e2c1f36245257375611bc491c6`
