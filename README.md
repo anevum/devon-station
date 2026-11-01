@@ -40,4 +40,4 @@ Before production: physical iPhone/Safari/PWA/push acceptance, named Access owne
 
 [Runtime contract](docs/RB01-UNIFIED-RUNTIME-2026-10-31.md) · [Journal recovery](docs/RB01-JOURNAL-RECOVERY-2026-10-31.md) · [Source import](docs/SOURCE-IMPORT-2026-10-31.md) · [Workerd test](docs/RB01-WORKERD-COMPATIBILITY-2026-10-31.md)
 
-[Current release comparison, ordered acceptance and guarded fallback](docs/RB01-RELEASE-ACCEPTANCE.md) records the remaining production gates and the offline six-table fallback rehearsal.
+[Current release comparison, ordered acceptance and guarded fallback](docs/RB01-RELEASE-ACCEPTANCE.md) · [Exact isolated acceptance target and review bundle contract](docs/RB01-ISOLATED-ACCEPTANCE-TARGET.md) records the remaining production gates and the offline six-table fallback rehearsal.

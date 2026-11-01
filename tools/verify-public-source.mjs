@@ -12,7 +12,7 @@ const directSecrets=[
  {label:'token-shaped credential',pattern:/(?:sk-|ghp_|github_pat_|xox[baprs]-)[A-Za-z0-9_-]{20,}/},
  {label:'private key material',pattern:/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/},
  ];
-const ignoreDirs=new Set(['node_modules','.git','deployment','dist','hosted-dist']);
+const ignoreDirs=new Set(['node_modules','.git','deployment','dist','hosted-dist','release-review']);
 const unreviewedLegacyCopy=/private evening review|live release differs from main|28 OCT 2026/i;
 const scanText=(rel,text)=>{
  for(const {label,pattern} of directSecrets){if(pattern.test(text))throw Error(label+' in '+rel)}

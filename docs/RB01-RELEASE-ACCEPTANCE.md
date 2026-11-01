@@ -105,3 +105,7 @@ This uses in-memory SQLite with a D1-shaped adapter and fabricated records.
 Generated JWTs and a stubbed JWKS endpoint are not actual Access acceptance.
 Existing workerd/full-shell tests remain separate evidence. No physical device,
 authentic D1 restore, deployed fallback or production cutover is proven here.
+
+## Review-only artifact and target contract
+
+The offline generator `node tools/prepare-rb01-review.mjs` builds deterministic candidate and guarded-fallback module packages from the current checkout. The CI artifact and `SHA256SUMS` identify exact source/module/asset hashes; the fallback uses the hardened verifier with a **read-only emergency screen**, not a fully functional RB01 UI. See [isolated acceptance target and reproducibility contract](RB01-ISOLATED-ACCEPTANCE-TARGET.md). The proposed `2026-10-28` + `nodejs_compat` isolated runtime remains **unverified on Cloudflare**. No target, identity, deployment or real-data acceptance is implied.

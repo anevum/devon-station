@@ -41,3 +41,17 @@ jobs:
       - run: npm run test:browser
         env:
           DS_CHROME: /usr/bin/google-chrome
+      - name: Prepare SHA-pinned review-only candidate and guarded fallback
+        shell: bash
+        run: |
+          node tools/prepare-rb01-review.mjs
+          (cd release-review && sha256sum -c SHA256SUMS)
+          cp release-review/SHA256SUMS "$RUNNER_TEMP/rb01-first-sums"
+          node tools/prepare-rb01-review.mjs
+          cmp "$RUNNER_TEMP/rb01-first-sums" release-review/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ds011-rb01-review-only-bundles
+          path: release-review/
+          if-no-files-found: error
+          retention-days: 7
