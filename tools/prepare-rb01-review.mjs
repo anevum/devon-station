@@ -86,7 +86,7 @@ export function buildReleaseArtifacts({candidate, legacyServer, accessModule, no
     const value = JSON.stringify(modules);
     insist(!/https:\/\/app\.notion\.com\/p\/[a-f0-9]{32}/i.test(value) &&
       !/-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/.test(value) &&
-      !/"privateDataLoaded"\s*:\s*true/.test(value), name + ' contains a forbidden private-data marker');
+      !Object.values(modules).some(text => /"privateDataLoaded"\s*:\s*true/.test(text)), name + ' contains a forbidden private-data marker');
   }
   const candidateText = json(candidate);
   const fallbackText = json(fallback);
