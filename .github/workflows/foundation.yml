@@ -82,11 +82,7 @@ jobs:
       - name: Enforce public-source boundary before review handoff
         shell: bash
         run: |
-          test ! -e src/app.js
-          test ! -e src/index.html
-          test ! -e pwa/icons/icon-192.png
-          test ! -e pwa/icons/icon-512.png
-          test ! -e pwa/icons/apple-touch-icon.png
+          node tools/verify-public-source.mjs
           test ! -e deployment/modules.json
           test ! -e hosted-dist/index.html
           test -z "$(git status --porcelain)"
