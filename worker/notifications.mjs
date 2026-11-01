@@ -5,6 +5,39 @@ export function deviceId(value){return typeof value==='string'&&/^[a-zA-Z0-9-]{8
 export async function endpointHash(value){const bytes=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value));return Array.from(new Uint8Array(bytes),b=>b.toString(16).padStart(2,'0')).join('');}
 const tokenCache=new Map();
 export async function vapidToken(endpoint,privateJwk,subject,now=Math.floor(Date.now()/1000)){const origin=new URL(endpoint).origin;const cacheKey=origin+'|'+privateJwk.x;const previous=tokenCache.get(cacheKey);if(previous&&previous.created+3600>now)return previous.token;const unsigned=part({typ:'JWT',alg:'ES256'})+'.'+part({aud:origin,exp:now+12*3600,sub:subject});const key=await crypto.subtle.importKey('jwk',privateJwk,{name:'ECDSA',namedCurve:'P-256'},false,['sign']);const signature=await crypto.subtle.sign({name:'ECDSA',hash:'SHA-256'},key,new TextEncoder().encode(unsigned));const token=unsigned+'.'+encode(new Uint8Array(signature));tokenCache.set(cacheKey,{token,created:now});return token;}
+// Only Apple's documented error reasons are returned to the authenticated owner.
+// Never copy the upstream JSON, push endpoint, authorization header or keys.
+const SAFE_PUSH_REASONS=Object.freeze({
+ BadTtl:'bad_ttl',BadUrgency:'bad_urgency',
+ BadWebPushRequest:'bad_web_push_request',BadWebPushTopic:'bad_web_push_topic',
+ VapidPkHashMismatch:'vapid_key_mismatch',IdleTimeout:'idle_timeout',
+ BadAuthorizationHeader:'bad_authorization_header',BadJwtToken:'bad_jwt_token',
+ BadVapidPublicKey:'bad_vapid_public_key',BadPath:'bad_path',
+ MethodNotAllowed:'method_not_allowed',PayloadTooLarge:'payload_too_large',
+ TooManyRequests:'too_many_requests',InternalServerError:'internal_server_error',
+ ServiceUnavailable:'service_unavailable',Shutdown:'shutdown'
+});
+export async function safePushServiceFailure(response){
+ const code='push_service_http_'+String(response?.status);
+ if(!response||response.status<400||response.status>599)return code;
+ if(!/^application\/json(?:;|$)/i.test(response.headers?.get('Content-Type')||''))return code;
+ const length=response.headers?.get('Content-Length');
+ if(length!==null&&(!/^\d+$/.test(length)||Number(length)>1024))return code;
+ const reader=response.body?.getReader?.();
+ if(!reader)return code;
+ let size=0;const parts=[];
+ try{
+  for(;;){const {done,value}=await reader.read();if(done)break;
+   size+=value.byteLength;if(size>1024){await reader.cancel();return code;}
+   parts.push(value);
+  }
+  const bytes=new Uint8Array(size);let offset=0;
+  for(const part of parts){bytes.set(part,offset);offset+=part.byteLength;}
+  const data=JSON.parse(new TextDecoder('utf-8',{fatal:true}).decode(bytes));
+  const suffix=Object.hasOwn(SAFE_PUSH_REASONS,data?.reason)?SAFE_PUSH_REASONS[data.reason]:null;
+  return suffix?code+'_'+suffix:code;
+ }catch{return code}finally{reader.releaseLock()}
+}
 // These codes are intentionally fixed, non-sensitive labels: never expose JWK,
 // JWT, endpoint, subscription, transport exception text or upstream body.
 export class PushDispatchError extends Error {

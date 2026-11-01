@@ -1,6 +1,6 @@
 import {workspaceScopes,readWorkspace,mutateWorkspace,reviewWorkspaceSources,reconcileWorkspaceSources,exportWorkspace,reviewWorkspaceRestore,restoreWorkspace} from './workspace.mjs';
 import {authorizedIdentity} from './access.mjs';
-import {validEndpoint,deviceId,endpointHash,sendGenericPush,PushDispatchError} from './notifications.mjs';
+import {validEndpoint,deviceId,endpointHash,sendGenericPush,PushDispatchError,safePushServiceFailure} from './notifications.mjs';
 import {getOwnerState,saveOwnerState} from './state.mjs';
 import {getCachedPortfolio,refreshPortfolio} from './portfolio.mjs';
 const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
@@ -77,7 +77,7 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch){re
   try{response=await sendGenericPush(device.endpoint,env,transport)}
   catch(error){failureCode=error instanceof PushDispatchError?error.code:'push_sender_failed';response={status:502,ok:false}}
   const accepted=response.status===201||response.status===202||response.status===200;
-  if(!accepted&&!failureCode)failureCode='push_service_http_'+response.status;
+  if(!accepted&&!failureCode)failureCode=await safePushServiceFailure(response);
   await env.DB.prepare('INSERT INTO push_delivery_log(id,owner_sub,device_id,kind,status,service_status,created_at) VALUES(?,?,?,?,?,?,?)').bind(crypto.randomUUID(),user.subject,id,'manual-test',accepted?'accepted':'failed',response.status,now).run();
   if([404,410].includes(response.status))await env.DB.prepare('UPDATE push_devices SET active=0 WHERE owner_sub=? AND device_id=?').bind(user.subject,id).run();
   await env.DB.prepare('DELETE FROM push_delivery_log WHERE owner_sub=? AND created_at<?').bind(user.subject,now-30*86400000).run();

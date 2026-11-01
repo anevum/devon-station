@@ -113,6 +113,48 @@ test('redirecting push endpoint is rejected without following and exposing VAPID
   assert(!JSON.stringify(body).includes('example.invalid'));
  }finally{storage.close()}
 });
+test('Apple JSON rejection reason is reported through a fixed allowlist without leaking the upstream response',async()=>{
+ const storage=db();try{
+  const e=await syntheticPushEnv(storage);
+  const appleError={reason:'BadJwtToken',details:'PRIVATE_UPSTREAM_RESPONSE_MUST_NOT_LEAK',endpoint:'https://web.push.apple.com/private'};
+  const app=createStation(assets,async()=>user,async()=>new Response(JSON.stringify(appleError),{status:400,headers:{'Content-Type':'application/json; charset=utf-8'}}));
+  assert.equal((await app.fetch(request('/api/notifications/subscribe',{deviceId:'device-apple-400',subscription:{endpoint:'https://web.push.apple.com/Q/synthetic'}}),e,{})).status,200);
+  const response=await app.fetch(request('/api/notifications/test',{deviceId:'device-apple-400'}),e,{});
+  assert.equal(response.status,502);const body=await response.json();
+  assert.equal(body.error,'push_service_http_400_bad_jwt_token');assert.equal(body.serviceStatus,400);
+  assert(!JSON.stringify(body).includes('PRIVATE_UPSTREAM'));assert(!JSON.stringify(body).includes('web.push.apple.com'));
+  assert.equal((await storage.prepare('SELECT status,service_status FROM push_delivery_log').bind().first()).service_status,400);
+  assert.equal((await storage.prepare('SELECT COUNT(*) AS n FROM push_devices WHERE active=1').bind().first()).n,1);
+ }finally{storage.close()}
+});
+test('unknown or oversized provider messages never reach the owner response',async()=>{
+ const configs=[
+  {name:'unrecognized reason',body:JSON.stringify({reason:'UNTRUSTED_SECRET_VALUE'}),headers:{'Content-Type':'application/json'}},
+  {name:'non-JSON response',body:'<html>confidential</html>',headers:{'Content-Type':'text/html'}},
+  {name:'oversized JSON',body:JSON.stringify({reason:'BadTtl',details:'Z'.repeat(4096)}),headers:{'Content-Type':'application/json'}}
+ ];
+ for(const cfg of configs){
+  const storage=db();try{
+   const e=await syntheticPushEnv(storage),app=createStation(assets,async()=>user,async()=>new Response(cfg.body,{status:400,headers:cfg.headers}));
+   await app.fetch(request('/api/notifications/subscribe',{deviceId:'device-unsafe-400',subscription:{endpoint:'https://web.push.apple.com/Q/synthetic'}}),e,{});
+   const response=await app.fetch(request('/api/notifications/test',{deviceId:'device-unsafe-400'}),e,{});
+   assert.equal(response.status,502,cfg.name);
+   const body=await response.json();
+   assert.equal(body.error,'push_service_http_400',cfg.name);
+   assert(!JSON.stringify(body).includes('UNTRUSTED'));assert(!JSON.stringify(body).includes('confidential'));
+  }finally{storage.close()}
+ }
+});
+test('Apple known VAPID and Web Push headers are classified without forwarding raw JSON',async()=>{
+ for(const [reason,wanted] of [['BadAuthorizationHeader','bad_authorization_header'],['BadTtl','bad_ttl'],['BadUrgency','bad_urgency'],['BadWebPushRequest','bad_web_push_request'],['BadWebPushTopic','bad_web_push_topic'],['VapidPkHashMismatch','vapid_key_mismatch']]){
+  const storage=db();try{
+   const e=await syntheticPushEnv(storage),app=createStation(assets,async()=>user,async()=>new Response(JSON.stringify({reason}),{status:400,headers:{'Content-Type':'application/json'}}));
+   await app.fetch(request('/api/notifications/subscribe',{deviceId:'device-known-400',subscription:{endpoint:'https://web.push.apple.com/Q/synthetic'}}),e,{});
+   const res=await app.fetch(request('/api/notifications/test',{deviceId:'device-known-400'}),e,{});
+   assert.equal((await res.json()).error,'push_service_http_400_'+wanted);
+  }finally{storage.close()}
+ }
+});
 test('actual push-provider rejection keeps its HTTP status and is distinct from a local exception',async()=>{
  const storage=db();try{
   const e=await syntheticPushEnv(storage),app=createStation(assets,async()=>user,async()=>new Response('untrusted upstream text',{status:403}));
