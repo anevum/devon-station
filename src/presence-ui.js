@@ -69,7 +69,7 @@ function presenceDraftCard(draft) {
   '</span><h3>' + esc(draft.title) + '</h3></div><span class="tiny muted">' + esc(draft.format) + '</span></div>' +
   '<div class="ps-channels">' + platformInfo + '</div>' +
   '<p class="tiny muted">Local draft · ' + esc(draft.createdAt.slice(0,10)) + '</p>' +
-  '<div class="button-row">' + (draft.stage !== 'published' ? '<button data-ps-edit="' + esc(draft.id) + '">Edit</button>' : '') +
+  '<div class="button-row">' + (draft.stage !== 'published' && confirmed.length === 0 ? '<button data-ps-edit="' + esc(draft.id) + '">Edit</button>' : '') +
   (draft.stage === 'draft' ? '<button data-ps-ready="' + esc(draft.id) + '">Prepare handoff</button>' : '') +
   draft.channels.map(channel => '<button data-ps-copy="' + esc(draft.id) + '" data-ps-channel="' + channel + '">Copy ' +
     esc(presenceLabel(channel)) + '</button>').join('') +
@@ -106,6 +106,7 @@ function presenceStudio() {
   '<section class="ps-intro"><span class="eyebrow">FACEBOOK / INSTAGRAM / THREADS</span><h2>Build a presence worth following.</h2><p>One original idea, three distinct conversations. Real people before metrics.</p></section>' +
   '<div class="info-note ps-safety">Owner-only concept. This screen holds <strong>device-local, unencrypted data</strong>; it does not sync through DevonStation cloud storage, schedule posts, or connect to Meta. Do not enter personal DMs, contact lists, secrets or private family details.</div>' +
   (presenceConflict ? '<div class="info-note warning">Presence data changed in another browser tab. Export this tab before reloading to avoid overwriting newer work.</div>' : '') +
+  (!presenceStorageAvailable ? '<div class="info-note warning">Device storage unavailable. New work lasts only for this session: export a copy before leaving.</div>' : '') +
   presencePanel() +
   '<div class="ps-toolbar"><div class="segments" role="group" aria-label="Presence Studio view"><button type="button" data-ps-tab="plan" aria-pressed="' + (presenceTab==='plan') + '">Plan and publish</button>' +
   '<button type="button" data-ps-tab="insights" aria-pressed="' + (presenceTab==='insights') + '">Insights</button></div>' +
@@ -115,14 +116,14 @@ function presenceStudio() {
 }
 function presenceFillEditor(id) {
  const record = presenceState.drafts.find(x => x.id === id);
- if (!record || record.stage === 'published') return;
+ if (!record || record.stage === 'published' || Object.keys(record.published || {}).length) return;
  presenceEditId = id;
  presenceTab = 'plan'; render();
  document.getElementById('ps-title').value = record.title;
  document.getElementById('ps-format').value = record.format;
  for (const box of document.querySelectorAll('#ps-compose input[name=channels]')) box.checked = record.channels.includes(box.value);
  for (const channel of PRESENCE_CHANNELS) document.getElementById('ps-' + channel).value = record.captions[channel];
- document.getElementById('ps-privacy').checked = record.privacyReviewed;
+ document.getElementById('ps-privacy').checked = false;
  document.getElementById('ps-title').focus();
 }
 function presenceUpdate(updated, message) {
@@ -178,7 +179,7 @@ document.addEventListener('submit', event => {
     captions:Object.fromEntries(PRESENCE_CHANNELS.map(c => [c,form.querySelector('#ps-' + c).value])),
     privacyReviewed:form.querySelector('#ps-privacy').checked
    }, old);
-   if (old) { item.id = old.id; item.createdAt = old.createdAt;item.published = {...old.published};}
+   if (old) { item.id = old.id; item.createdAt = old.createdAt;}
    if (!old && presenceState.drafts.length >= PRESENCE_MAX_DRAFTS) throw Error('Export and delete an older record before creating more drafts.');
    presenceEditId = null;
    presenceUpdate(item, 'Draft saved locally; no social post was published.');
