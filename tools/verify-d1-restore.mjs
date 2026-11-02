@@ -18,11 +18,11 @@ const ddl=sql=>JSON.stringify(sql.match(/'(?:''|[^'])*'|"(?:""|[^"])*"|\[(?:[^\]
   ?.map(token=>/^[a-z_]/i.test(token)?token.toLowerCase():token));
 function structure(db){
   const objects=db.prepare("SELECT type,name,tbl_name,sql FROM sqlite_master WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name").all();
-  const internal=objects.find(row=>row.name==='_cf_KV');
+  const internal=objects.find(row=>row.type==='table'&&row.name==='_cf_KV');
   if(internal && (internal.type!=='table'||ddl(internal.sql)!==ddl(internalDDL)))refuse();
   // Cloudflare-managed metadata is explicitly outside application recovery.
   // Its values must not be copied, compared, or treated as portable app state.
-  return JSON.stringify(objects.filter(row=>row.name!=='_cf_KV').map(row=>
+  return JSON.stringify(objects.filter(row=>!(row.type==='table'&&row.name==='_cf_KV')).map(row=>
     [row.type,row.name,row.tbl_name,ddl(row.sql)]));
 }
 function expected(includeJournal){

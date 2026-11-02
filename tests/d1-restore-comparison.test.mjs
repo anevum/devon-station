@@ -104,6 +104,9 @@ test('missing indexes, changed constraints, unexpected tables and triggers fail 
 test('D1 internal metadata is explicitly excluded while unexpected provider schema is rejected',t=>{
   const f=fixture(t);create(f.source,{internal:true});create(f.target);
   assert.equal(verifyD1Restore(f.source,f.target).providerMetadataCompared,false);
+  mutate(f.target,'CREATE TRIGGER _cf_KV AFTER INSERT ON station_documents BEGIN SELECT 1; END;');
+  deny(()=>verifyD1Restore(f.source,f.target));
+  mutate(f.target,'DROP TRIGGER _cf_KV');
   mutate(f.target,'CREATE TABLE _cf_KV (key TEXT PRIMARY KEY,value TEXT) WITHOUT ROWID');
   deny(()=>verifyD1Restore(f.source,f.target));
 });
