@@ -13,6 +13,39 @@ application has five tables and two explicit indexes; isolated RB01 adds
 and wrote zero rows. Do not reuse either occupied synthetic acceptance database
 as an authentic restore destination or overwrite its accepted recovery evidence.
 
+## Offline encrypted backup rehearsal
+
+`tools/d1-backup-envelope.mjs` seals opaque approved bytes using Node's built-in
+AES-256-GCM and PBKDF2-SHA256, following the existing backup modules' 310,000
+iterations and 14–256 character passphrase contract. Each encryption generates
+a fresh 16-byte salt and 12-byte IV. A separate versioned format and authenticated
+header bind the algorithms, iteration count, byte length and SQL/SQLite kind;
+the 128-bit authentication tag must verify before plaintext is returned.
+Unrecognized metadata and KDF parameters fail before derivation. Use a strong,
+unique owner-held passphrase; the minimum length alone does not ensure strength.
+
+This is an offline module, not an export/upload command or application feature.
+It accepts at most 64 MiB of bytes and returns an encrypted envelope in memory.
+Unlock returns bytes in memory only after authentication. It does not validate
+SQL, inspect record semantics, establish provenance, select storage, restore D1
+or authorize authentic processing. No passphrase CLI/environment transport is
+provided. The caller must never log arguments or plaintext and must select the
+separately approved private processing/storage environment before authentic use.
+JavaScript cannot guarantee erasure of caller strings or runtime copies; internal
+key/plaintext buffers are wiped where owned. Encryption exposes kind and length
+metadata and does not hide ciphertext size. Keep encrypted files and keys apart.
+
+```sh
+node --test tests/d1-backup-envelope.test.mjs tests/d1-restore-comparison.test.mjs
+```
+
+Fabricated fixtures exercise file-backed encrypted retention/decryption and
+independent application-table comparison, fresh salt/IV, caller input mutation,
+wrong passphrase, ciphertext/tag/salt/IV/header tampering, malformed parameters,
+size limits and preservation of the original input. Fixture cleanup removes
+only each test's own temporary directory. No authentic SQL, storage service,
+Cloudflare export or live recovery is covered by that result.
+
 ## Exact comparison after an authorized restore
 
 `tools/verify-d1-restore.mjs` compares two separately obtained, quiescent SQLite
