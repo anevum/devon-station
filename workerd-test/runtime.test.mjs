@@ -150,3 +150,71 @@ test(`workerd ${compatibilityDate}: signed owner, local D1 journal, source revie
   const reconciled=await request('/api/workspace/reconcile?'+scope,{expectedGeneration:2,operationId:'source-review',reviewDigest:sourceReview.reviewDigest});assert.equal(reconciled.status,200);const updated=await reconciled.json();assert.equal(updated.receipts.length,2);assert.equal(updated.projects[0].title,'Updated synthetic project');
  }finally{if(target)await target.dispose();await mf.dispose();}
 });
+
+test('workerd ' + compatibilityDate + ': Newsroom D1 publication, signed subjects, immutable revisions, and revocation',async()=>{
+ const newsOrg='synthetic_newsroom';
+ const schema=await readFile(new URL('../worker/migrations/0004-newsroom-p1a.sql',import.meta.url),'utf8');
+ const mf=new Miniflare({modules:true,modulesRoot:new URL('../',import.meta.url).pathname,
+  scriptPath:new URL('./newsroom-fixture.mjs',import.meta.url).pathname,
+  compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['NEWSROOM_DB'],
+  bindings:{APP_ORIGIN:origin,NEWSROOM_SYNTHETIC_ONLY:'true',NEWSROOM_ORG_ID:newsOrg,
+   ACCESS_ISSUER:'https://synthetic.cloudflareaccess.com',ACCESS_AUD:'synthetic-audience',
+   ACCESS_JWKS_URL:'https://synthetic.cloudflareaccess.com/cdn-cgi/access/certs'},
+  outboundService:req=>{
+   assert.equal(req.url,'https://synthetic.cloudflareaccess.com/cdn-cgi/access/certs');
+   return Response.json({keys:[jwk]});
+  }});
+ try{
+  const db=await mf.getD1Database('NEWSROOM_DB');
+  await db.prepare('CREATE TABLE legacy_canary (id INTEGER PRIMARY KEY, val TEXT)').run();
+  await db.prepare('INSERT INTO legacy_canary(id,val) VALUES(1,?)').bind('preserved').run();
+  await db.exec(schema);
+  await db.prepare('INSERT INTO nr_organizations(org_id,label) VALUES(?,?)').bind(newsOrg,'Fictional Newsroom').run();
+  for(const [sub,role,active] of [['publisher','publisher',1],['reader','reader',1],['revoked','reader',0]])
+   await db.prepare('INSERT INTO nr_memberships(org_id,subject,role,active,created_at) VALUES(?,?,?,?,?)')
+    .bind(newsOrg,sub,role,active,Date.now()).run();
+  const call=(sub,method,path,payload,headers={})=>mf.dispatchFetch(origin+path,{method,
+   headers:{'Cf-Access-Jwt-Assertion':jwt(sub),
+    ...(payload===undefined?{}:{Origin:origin,'Content-Type':'application/json'}),...headers},
+   ...(payload===undefined?{}:{body:JSON.stringify(payload)})});
+  assert.equal((await mf.dispatchFetch(origin+'/api/newsroom/editions')).status,401);
+  assert.equal((await call('publisher','GET','/api/newsroom/editions',undefined,
+   {'Cf-Access-Jwt-Assertion':jwt('publisher',{aud:['wrong-audience']})})).status,401);
+  assert.equal((await call('outsider','GET','/api/newsroom/editions')).status,404);
+  assert.equal((await call('revoked','GET','/api/newsroom/editions')).status,404);
+  const manifest={schemaVersion:1,articles:[{id:'article-one',title:'Synthetic Article',blocks:[
+   {id:'block-heading',type:'heading',text:'A synthetic issue'},
+   {id:'block-paragraph',type:'paragraph',text:'Reading never grants approval.'}]}]};
+  const newIssue=await call('publisher','POST','/api/newsroom/drafts',
+   {slug:'synthetic-edition',title:'Synthetic Edition',manifest});
+  assert.equal(newIssue.status,201,await newIssue.clone().text());
+  const id=(await newIssue.json()).editionId;
+  assert.equal((await call('reader','GET','/api/newsroom/drafts/'+id)).status,404);
+  assert.equal((await call('reader','POST','/api/newsroom/drafts',
+   {slug:'fake-edition',title:'Forged Role',manifest},{'X-Role':'publisher'})).status,404);
+  const publish=(generation,operationId)=>call('publisher','POST','/api/newsroom/drafts/'+id+'/publish',
+   {expectedGeneration:generation,operationId});
+  const first=await publish(1,'native-operation-0001');assert.equal(first.status,201,await first.clone().text());
+  const v1=await first.json();assert.equal(v1.version,1);
+  const repeated=await publish(1,'native-operation-0001');assert.equal(repeated.status,201);
+  assert.deepEqual(await repeated.json(),v1);
+  const archived=await call('reader','GET','/api/newsroom/editions/'+id+'/revisions/1');
+  assert.equal(archived.status,200);assert.equal((await archived.json()).revision.sha256,v1.sha256);
+  const edited=structuredClone(manifest);
+  edited.articles[0].blocks[1].text='A later correction keeps the original anchor.';
+  assert.equal((await call('publisher','PUT','/api/newsroom/drafts/'+id,
+   {expectedGeneration:1,manifest:edited})).status,200);
+  const second=await publish(2,'native-operation-0002');assert.equal(second.status,201,await second.clone().text());
+  const v2=await second.json();assert.equal(v2.version,2);assert.notEqual(v1.sha256,v2.sha256);
+  const old=await call('reader','GET','/api/newsroom/editions/'+id+'/revisions/1');
+  assert.equal((await old.json()).revision.sha256,v1.sha256);
+  assert.equal((await db.prepare('SELECT COUNT(*) AS n FROM nr_revisions').first()).n,2);
+  await assert.rejects(()=>db.prepare('DELETE FROM nr_revisions WHERE revision_id=?').bind(v1.revisionId).run());
+  const exported=await call('reader','GET','/api/newsroom/editions/'+id+'/export');
+  assert.equal(exported.status,200);assert.equal((await exported.json()).revisions.length,2);
+  assert.equal((await db.prepare('SELECT val FROM legacy_canary WHERE id=1').first()).val,'preserved');
+  await db.prepare('UPDATE nr_memberships SET active=0 WHERE org_id=? AND subject=?')
+   .bind(newsOrg,'reader').run();
+  assert.equal((await call('reader','GET','/api/newsroom/editions/'+id+'/revisions/1')).status,404);
+ }finally{await mf.dispose()}
+});
