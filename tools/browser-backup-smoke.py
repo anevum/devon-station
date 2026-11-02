@@ -50,7 +50,10 @@ with TemporaryDirectory(prefix='devon-backup-') as temp, sync_playwright() as p:
         getRandomValues:randomness,randomUUID:()=>String(Date.now())+'-1234-4123-8123-123456789012',
         subtle:{
           importKey:async(_type,data)=>({word:new TextDecoder().decode(data)}),
-          deriveKey:async(options,source)=>{return {word:source.word,salt:new Uint8Array(options.salt)};},
+          deriveKey:async(options,source)=>{
+            if(window.__pauseRecoveryKey)await new Promise(resolve=>window.__releaseRecoveryKey=resolve);
+            return {word:source.word,salt:new Uint8Array(options.salt)};
+          },
           encrypt:async(options,key,data)=>{
             const source=new Uint8Array(data),sig=(key.word.length*17+key.word.charCodeAt(0))%256;
             const packed=new Uint8Array(source.length+1);packed[0]=sig;
@@ -86,8 +89,16 @@ with TemporaryDirectory(prefix='devon-backup-') as temp, sync_playwright() as p:
     page.locator('#backup-create').click()
     page.locator('#backup-passphrase').fill('A longer personal recovery passphrase')
     page.locator('#backup-repeat').fill('A longer personal recovery passphrase')
+    page.evaluate('window.__pauseRecoveryKey=true')
     with page.expect_download() as download_info:
         page.locator('#backup-submit').click()
+        page.wait_for_function('typeof window.__releaseRecoveryKey === "function"')
+        assert page.locator('#backup-passphrase').input_value()==''
+        assert page.locator('#backup-repeat').input_value()==''
+        assert page.locator('#backup-submit').is_disabled()
+        page.keyboard.press('Escape')
+        assert page.locator('#backup-dialog').is_visible(), 'Busy crypto must not be dismissed by Escape'
+        page.evaluate('''() => {window.__pauseRecoveryKey=false;window.__releaseRecoveryKey()}''')
     download=download_info.value
     backup_path=Path(temp)/download.suggested_filename
     download.save_as(backup_path)
@@ -119,6 +130,8 @@ with TemporaryDirectory(prefix='devon-backup-') as temp, sync_playwright() as p:
     page.locator('#backup-passphrase').fill('Another long wrong recovery passphrase')
     page.locator('#backup-submit').click()
     page.get_by_text('Passphrase is incorrect or this file was changed.',exact=True).wait_for(timeout=15000,state="attached")
+    assert page.locator('#backup-passphrase').input_value()==''
+    assert page.locator('#backup-repeat').input_value()==''
     assert state['revision']==3
     assert len(writes)==3
     page.locator('#backup-cancel').click()
