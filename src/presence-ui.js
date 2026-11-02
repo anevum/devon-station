@@ -154,7 +154,7 @@ function presenceStudio() {
   '<button type="button" data-ps-tab="insights" aria-pressed="' + (presenceTab==='insights') + '">Insights</button></div>' +
   '<div class="button-row"><button data-ps-export>Export JSON</button><button data-ps-import-open>Import JSON</button>' +
   '<input type="file" id="ps-import" accept=".json,application/json" hidden aria-label="Import Presence Studio JSON"></div></div>' +
-  (presenceTab === 'plan' ? presencePlan() : presenceInsights());
+  (presenceTab === 'plan' ? presencePlan() : presenceInsights()) + presenceVaultPanel();
 }
 function presenceFillEditor(id) {
  const record = presenceState.drafts.find(x => x.id === id);
