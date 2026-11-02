@@ -153,7 +153,7 @@ test(`workerd ${compatibilityDate}: signed owner, local D1 journal, source revie
 
 test('workerd ' + compatibilityDate + ': Newsroom D1 publication, signed subjects, immutable revisions, and revocation',async()=>{
  const newsOrg='synthetic_newsroom';
- const schema=await readFile(new URL('../worker/migrations/0004-newsroom-p1a.sql',import.meta.url),'utf8');
+ const schema=(await readFile(new URL('../worker/migrations/0004-newsroom-p1a.sql',import.meta.url),'utf8')).replace(/^\s*--[^\n]*$/gm,'').trim();
  const mf=new Miniflare({modules:true,modulesRoot:new URL('../',import.meta.url).pathname,
   scriptPath:new URL('./newsroom-fixture.mjs',import.meta.url).pathname,
   compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['NEWSROOM_DB'],
