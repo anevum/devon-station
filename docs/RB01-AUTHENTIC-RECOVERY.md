@@ -13,6 +13,42 @@ application has five tables and two explicit indexes; isolated RB01 adds
 and wrote zero rows. Do not reuse either occupied synthetic acceptance database
 as an authentic restore destination or overwrite its accepted recovery evidence.
 
+## Owner-local hidden passphrase entry
+
+The existing offline recovery tools now have an owner-operated terminal entry
+point. Run it only on your own trusted computer and only for separately approved
+files/locations. These commands do not export D1, upload files, execute SQL or
+change the application. An iPhone browser is not this terminal environment.
+
+```sh
+node tools/d1-backup-local.mjs encrypt /approved/source.sql /approved/archive.encrypted.json d1-sql
+node tools/d1-backup-local.mjs encrypt /approved/source.sqlite /approved/archive.encrypted.json sqlite
+node tools/d1-backup-local.mjs decrypt /approved/archive.encrypted.json /approved/recovered.sql
+```
+
+Use one encryption command appropriate to the source. Encryption requests a
+hidden passphrase twice; decryption requests it once. Input must be a real TTY:
+pipes, redirected input and extra arguments are refused. Never place a recovery
+passphrase in a command, environment variable, script, chat or CI log. Standard
+terminal scrollback receives fixed prompts/status only. Ctrl-C/Ctrl-D, process
+interruption and input closure cancel entry and restore terminal mode/listeners.
+The tool rejects control sequences and multiline pasted commands. It does not
+protect against a compromised computer, terminal recorder or memory inspection.
+
+Outputs are exclusively created with mode0600 and never overwrite an existing
+path, hard link or symlink. Input symlinks and nonregular/oversized files are
+refused. Source bytes remain untouched. Decrypt deliberately creates plaintext
+at the chosen destination: protect that environment and retain the original
+encrypted backup. On disk/write failure a new incomplete output may remain with
+restrictive permissions; no automatic deletion of files is performed. Internal
+owned buffers are wiped where possible, with the JavaScript limitations above.
+The encryption format's content-kind label does not validate SQL or provenance;
+this command does not apply a restore or close authentic recovery acceptance.
+
+This is a POSIX terminal workflow tested on Node22/24. Custody of an authentic
+passphrase and approval of the authentic source/export window remain owner
+decisions. Do not run it on real records inside an assistant-visible terminal.
+
 ## Offline encrypted backup rehearsal
 
 `tools/d1-backup-envelope.mjs` seals opaque approved bytes using Node's built-in
