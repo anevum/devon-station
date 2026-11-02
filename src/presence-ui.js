@@ -5,19 +5,38 @@
 let presenceState;
 let presenceStorageAvailable = true;
 let presenceConflict = false;
+let presenceLastSerialized = null;
 let presenceTab = 'plan';
 let presenceEditId = null;
-try { presenceState = presenceRestore(JSON.parse(localStorage.getItem(PRESENCE_STORAGE_KEY))); }
-catch { presenceState = presenceBlank(); presenceStorageAvailable = false; }
-function presenceSave() {
+try {
+ presenceLastSerialized = localStorage.getItem(PRESENCE_STORAGE_KEY);
+ presenceState = presenceRestore(JSON.parse(presenceLastSerialized));
+} catch { presenceState = presenceBlank(); presenceStorageAvailable = false; }
+function presenceSave({ ownerApprovedReplacement = false } = {}) {
  try {
-  localStorage.setItem(PRESENCE_STORAGE_KEY, JSON.stringify(presenceState));
+  // Another tab may write before the storage event is dispatched.
+  // Never silently replace its snapshot; only explicit confirmed import may override.
+  if (!ownerApprovedReplacement && (presenceConflict || localStorage.getItem(PRESENCE_STORAGE_KEY) !== presenceLastSerialized)) {
+   presenceConflict = true;
+   throw Error('Another tab changed Presence Studio. Export this tab, then reload before editing.');
+  }
+  const serialized = JSON.stringify(presenceState);
+  localStorage.setItem(PRESENCE_STORAGE_KEY, serialized);
+  presenceLastSerialized = serialized;
   presenceStorageAvailable = true;
- } catch { presenceStorageAvailable = false; }
+ } catch (error) {
+  if (presenceConflict) throw error;
+  presenceStorageAvailable = false;
+ }
 }
 function presenceError(message) {
  const el = document.getElementById('ps-error');
  if (el) { el.textContent = String(message); el.focus({preventScroll:true}); }
+}
+function presenceWritable() {
+ if (!presenceConflict) return true;
+ presenceError('Another tab changed Presence Studio. Export this tab, then reload before editing.');
+ return false;
 }
 function presenceLabel(platform) {
  return { facebook:'Facebook', instagram:'Instagram', threads:'Threads' }[platform] || platform;
@@ -138,6 +157,7 @@ document.addEventListener('click', async event => {
  if (d.psTab) { presenceTab = d.psTab; presenceEditId = null; render(); return; }
  if ('psCancel' in d) { presenceEditId = null; render(); return; }
  if (d.psEdit) { presenceFillEditor(d.psEdit); return; }
+ if ((d.psReady || d.psEdit || d.psDelete) && !presenceWritable()) return;
  if (d.psReady) {
   try { const draft = presenceState.drafts.find(x => x.id === d.psReady); presenceUpdate(presenceReady(draft), 'Prepared for manual publishing.'); }
   catch (error) { notify(error.message); } return;
@@ -167,6 +187,9 @@ document.addEventListener('click', async event => {
  if ('psImportOpen' in d) { document.getElementById('ps-import')?.click(); }
 });
 document.addEventListener('submit', event => {
+ if ((event.target.id === 'ps-compose' || event.target.id === 'ps-snapshot' || event.target.dataset.psPublished) && !presenceWritable()) {
+  event.preventDefault(); return;
+ }
  if (event.target.id === 'ps-compose') {
   event.preventDefault();
   const form = event.target;
@@ -211,10 +234,20 @@ document.addEventListener('change', async event => {
   if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.drafts) || !Array.isArray(parsed.snapshots)) throw Error('Not a Presence Studio v1 backup.');
   const incoming = presenceRestore(parsed);
   if (!window.confirm('Replace the current device-local Presence Studio data with this validated backup? Export your current copy first.')) return;
-  presenceState = incoming;presenceEditId = null;presenceConflict = false;presenceSave();render();notify('Validated manual backup imported.');
+  presenceState = incoming;presenceEditId = null;presenceConflict = false;presenceSave({ ownerApprovedReplacement:true });render();notify('Validated manual backup imported.');
  } catch (error) { notify('Import failed: ' + error.message); }
  finally { event.target.value = ''; }
 });
 window.addEventListener('storage', event => {
- if (event.key === PRESENCE_STORAGE_KEY || event.key === null) { presenceConflict = true; if (section === 'presence') render(); }
+ if (event.key !== PRESENCE_STORAGE_KEY && event.key !== null) return;
+ presenceConflict = true;
+ // Preserve unsaved typing. Re-rendering this page would discard the open composer.
+ if (section === 'presence' && !document.getElementById('ps-tab-conflict')) {
+  const warning = document.createElement('div');
+  warning.id = 'ps-tab-conflict';
+  warning.className = 'info-note warning';
+  warning.setAttribute('role','alert');
+  warning.textContent = 'Presence Studio changed in another tab. Export this tab, then reload before editing.';
+  document.querySelector('.ps-safety')?.after(warning);
+ }
 });
