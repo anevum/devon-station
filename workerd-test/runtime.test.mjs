@@ -168,7 +168,11 @@ test('workerd ' + compatibilityDate + ': Newsroom D1 publication, signed subject
   const db=await mf.getD1Database('NEWSROOM_DB');
   await db.prepare('CREATE TABLE legacy_canary (id INTEGER PRIMARY KEY, val TEXT)').run();
   await db.prepare('INSERT INTO legacy_canary(id,val) VALUES(1,?)').bind('preserved').run();
-  await db.exec(schema);
+  // Native D1 exec splits on line breaks. Prepare each complete CREATE statement,
+  // preserving trigger bodies (which themselves contain semicolons).
+  const ddl=schema.split(/(?=^CREATE (?:TABLE|INDEX|TRIGGER)\b)/gm).map(s=>s.trim()).filter(Boolean);
+  if(ddl.length!==14)throw Error('Unexpected Newsroom migration statement count');
+  for(const statement of ddl)await db.prepare(statement).run();
   await db.prepare('INSERT INTO nr_organizations(org_id,label) VALUES(?,?)').bind(newsOrg,'Fictional Newsroom').run();
   for(const [sub,role,active] of [['publisher','publisher',1],['reader','reader',1],['revoked','reader',0]])
    await db.prepare('INSERT INTO nr_memberships(org_id,subject,role,active,created_at) VALUES(?,?,?,?,?)')
