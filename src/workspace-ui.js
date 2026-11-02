@@ -2,6 +2,7 @@
 (()=>{
  const escape=value=>String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
  let scopes=[],scope=null,state=null,projectId=null,reviewId=null,busy=false,started=false,error='',notice='',draft='',epoch=0,sourceReview=null,recoveryMode=null,pendingRestore=null,pendingTransfer=null;
+ let recoveryEpoch=0,recovering=false;
  const host=()=>document.getElementById('station-workspace');
  const scopeKey=s=>s.scopeKind+':'+s.scopeId;
  const query=()=>new URLSearchParams(scope).toString();
@@ -65,18 +66,22 @@
   const mode=recoveryMode,pass=document.getElementById('ws-backup-pass').value,repeat=document.getElementById('ws-backup-repeat')?.value,file=document.getElementById('ws-backup-file')?.files?.[0];
   if(mode==='export'&&pass!==repeat){error='The passphrases do not match.';draw('ws-error');return;}
   if(mode==='restore'&&(!file||file.size>9*1024*1024)){error='Choose an encrypted journal file smaller than 9 MB.';draw('ws-error');return;}
-  busy=true;error='';notice='';draw();
+  const mine=++recoveryEpoch,current=()=>mine===recoveryEpoch&&!!host(),scopeQuery=query();
+  recovering=true;busy=true;error='';notice='';draw();
   try{
    if(mode==='export'){
-    const transfer=await api('/api/workspace/backup?'+query()),encrypted=await globalThis.StationWorkspaceBackup.encrypt(transfer,pass);
+    const transfer=await api('/api/workspace/backup?'+scopeQuery);if(!current())return;
+    const encrypted=await globalThis.StationWorkspaceBackup.encrypt(transfer,pass);if(!current())return;
     const url=URL.createObjectURL(new Blob([JSON.stringify(encrypted)],{type:'application/json'})),a=document.createElement('a');a.href=url;a.download='devonstation-encrypted-journal.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);
     recoveryMode=null;notice='Encrypted backup prepared. Keep the download and passphrase separately.';
    }else{
-    let decrypted;try{decrypted=await globalThis.StationWorkspaceBackup.decrypt(JSON.parse(await file.text()),pass);}catch{throw Error('Could not unlock this backup. Check the file and passphrase.');}
-    pendingRestore=await api('/api/workspace/restore-review?'+query(),{backup:decrypted});pendingTransfer=decrypted;notice='Backup unlocked on this device. Review the journal before restoring.';
+    let decrypted;try{const text=await file.text();if(!current())return;decrypted=await globalThis.StationWorkspaceBackup.decrypt(JSON.parse(text),pass);}catch{throw Error('Could not unlock this backup. Check the file and passphrase.');}
+    if(!current())return;
+    const review=await api('/api/workspace/restore-review?'+scopeQuery,{backup:decrypted});if(!current())return;
+    pendingRestore=review;pendingTransfer=decrypted;notice='Backup unlocked on this device. Review the journal before restoring.';
    }
-  }catch(e){pendingRestore=null;pendingTransfer=null;error=e.message;}
-  finally{busy=false;draw('ws-recovery-title');}
+  }catch(e){if(current()){pendingRestore=null;pendingTransfer=null;error=e.message;}}
+  finally{if(mine===recoveryEpoch){recovering=false;busy=false;draw('ws-recovery-title');}}
  }
  async function govern(kind){
   if(busy||!scope)return;busy=true;error='';notice='';draw();
@@ -101,6 +106,6 @@
   else if('wsCancel'in d){reviewId=null;draw('ws-project-title');}
   else if(d.wsDecision){const a=state?.actions.find(x=>x.recordId===reviewId);if(a)mutate('decide',{operationId:crypto.randomUUID(),recordId:a.recordId,decision:d.wsDecision,expectedRevision:a.revision});}
  });
- globalThis.StationWorkspace={mounted(){if(!host()){pendingRestore=null;pendingTransfer=null;recoveryMode=null;return;}if(!started){started=true;load(false);}else draw();}};
+ globalThis.StationWorkspace={mounted(){if(!host()){if(recovering){recoveryEpoch++;recovering=false;busy=false;}pendingRestore=null;pendingTransfer=null;recoveryMode=null;return;}if(!started){started=true;load(false);}else draw();}};
  globalThis.StationWorkspace.mounted();
 })();
