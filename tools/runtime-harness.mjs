@@ -7,8 +7,10 @@ import {verifyAccessJWT} from '../worker/access.mjs';
 const keys=generateKeyPairSync('rsa',{modulusLength:2048}),jwk=keys.publicKey.export({format:'jwk'});Object.assign(jwk,{kid:'offline-browser',alg:'RS256'});
 const config={issuer:'https://offline.cloudflareaccess.com',audience:'offline-browser',jwksUrl:'https://offline.cloudflareaccess.com/cdn-cgi/access/certs'};
 export function token(subject='test-owner',overrides={}){const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');const data=encode({alg:'RS256',kid:jwk.kid})+'.'+encode({iss:config.issuer,aud:[config.audience],sub:subject,email:'owner@example.test',exp:Date.now()/1000+300,...overrides});return data+'.'+sign('RSA-SHA256',Buffer.from(data),keys.privateKey).toString('base64url');}
-export async function start(path){
+export async function start(path,{migratePresence=false}={}){
  const sqlite=new DatabaseSync(path);sqlite.exec(readFileSync(new URL('../worker/schema.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../worker/migrations/0003-scoped-workspace.sql',import.meta.url),'utf8'));
+ // Opt-in synthetic rehearsal only. Never auto-migrate a real owner database.
+ if(migratePresence===true)sqlite.exec(readFileSync(new URL('../worker/migrations/0004-presence-vault.sql',import.meta.url),'utf8'));
  const rows=[{id:'project-a',name:'Recovery acceptance',area:'Devon Works',record:'https://www.notion.so/synthetic-project-a'},{id:'project-b',name:'Portable workspace',area:'Devon Works',record:'https://www.notion.so/synthetic-project-b'}];
  sqlite.prepare('INSERT OR IGNORE INTO station_portfolio_cache(owner_sub,source_id,fetch_time,payload) VALUES(?,?,?,?)').run('test-owner','synthetic-source',1793448000000,JSON.stringify(rows));
  const DB={prepare(sql){return {bind(...args){return {first:async()=>sqlite.prepare(sql).get(...args)??null,run:async()=>({meta:{changes:Number(sqlite.prepare(sql).run(...args).changes)}})};}}},async batch(items){sqlite.exec('BEGIN');try{const results=[];for(const item of items)results.push(await item.run());sqlite.exec('COMMIT');return results;}catch(e){sqlite.exec('ROLLBACK');throw e;}}};
