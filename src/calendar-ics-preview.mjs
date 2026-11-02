@@ -192,8 +192,8 @@ export function previewCalendarIcs(text, { defaultTimeZone = null } = {}) {
     catch { throw new TypeError('invalid default calendar time zone'); }
   }
   const lines = unfold(text), stack = [], rawEvents = [], embeddedZones = new Set();
-  const calendarProps = [], calendarIssues = new Set();
-  let event = null, timeZoneId = null;
+  const calendarProps = [], calendarIssues = new Set(), sourceTimeZones = [];
+  let event = null, timeZoneId = null, timeZone = null;
   for (const line of lines) {
     const p = property(line);
     if (p.name === 'BEGIN') {
@@ -204,8 +204,11 @@ export function previewCalendarIcs(text, { defaultTimeZone = null } = {}) {
       } else if (p.value === 'VEVENT' && parent === 'VCALENDAR') {
         if (rawEvents.length >= MAX_EVENTS) fail('too many events');
         event = { properties: [], alarms: [] };
-      } else if (p.value === 'VTIMEZONE' && parent === 'VCALENDAR') timeZoneId = null;
-      else if (['STANDARD', 'DAYLIGHT'].includes(p.value) && parent === 'VTIMEZONE') { /* preserved as embedded TZ metadata */ }
+      } else if (p.value === 'VTIMEZONE' && parent === 'VCALENDAR') {
+        timeZoneId = null; timeZone = { properties: [], observances: [] };
+      } else if (['STANDARD', 'DAYLIGHT'].includes(p.value) && parent === 'VTIMEZONE') {
+        timeZone.observances.push({ kind: p.value, properties: [] });
+      }
       else if (p.value === 'VALARM' && parent === 'VEVENT') event.alarms.push([]);
       else fail(`unsupported component ${p.value}`);
       stack.push(p.value);
@@ -215,7 +218,10 @@ export function previewCalendarIcs(text, { defaultTimeZone = null } = {}) {
       if (Object.keys(p.params).length) fail('parameters on component marker');
       if (!stack.length || stack.at(-1) !== p.value) fail('unbalanced components');
       if (p.value === 'VEVENT') { rawEvents.push(event); event = null; }
-      if (p.value === 'VTIMEZONE' && timeZoneId) embeddedZones.add(timeZoneId);
+      if (p.value === 'VTIMEZONE') {
+        if (timeZoneId) embeddedZones.add(timeZoneId);
+        sourceTimeZones.push(timeZone); timeZone = null;
+      }
       stack.pop();
       continue;
     }
@@ -223,7 +229,12 @@ export function previewCalendarIcs(text, { defaultTimeZone = null } = {}) {
     if (current === 'VCALENDAR') calendarProps.push(p);
     else if (current === 'VEVENT') event.properties.push(p);
     else if (current === 'VALARM') event.alarms.at(-1).push(p);
-    else if (current === 'VTIMEZONE' && p.name === 'TZID') timeZoneId = p.value;
+    else if (current === 'VTIMEZONE') {
+      timeZone.properties.push(p);
+      if (p.name === 'TZID') timeZoneId = p.value;
+    } else if (current === 'STANDARD' || current === 'DAYLIGHT') {
+      timeZone.observances.at(-1).properties.push(p);
+    }
     else if (!current) fail('property outside calendar');
   }
   if (stack.length || !calendarProps.length || !rawEvents.length) fail('incomplete or empty calendar');
@@ -250,5 +261,6 @@ export function previewCalendarIcs(text, { defaultTimeZone = null } = {}) {
   return { format: 'devonstation-ics-preview-v1', inputEvents: rawEvents.length,
     candidates: previews.filter(e => e.disposition === 'candidate').length,
     needsReview: previews.filter(e => e.disposition === 'needs-review').length,
-    events: previews, sourceCalendarProperties: calendarProps, imported: 0 };
+    events: previews, sourceCalendarProperties: calendarProps,
+    sourceTimeZones, imported: 0 };
 }
