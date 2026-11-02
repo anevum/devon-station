@@ -1,0 +1,49 @@
+/* Presence Studio: an owner-operated personal publishing desk, not a live Meta dashboard. */
+.page-presence .ps-intro{padding:23px 25px;margin-bottom:13px;border:1px solid #42516c;border-radius:19px;min-height:132px;background:radial-gradient(ellipse at 82% 12%,#6c4e8859,transparent 39%),radial-gradient(ellipse at 5% 110%,#126d7970,transparent 43%),linear-gradient(130deg,#101925,#182030 63%,#33272a);box-shadow:inset 0 1px #fff2}
+.page-presence .ps-intro h2{margin:7px 0 2px;font-size:clamp(22px,2.4vw,30px);font-weight:570;letter-spacing:-.035em;color:#f3f3f6}
+.page-presence .ps-intro p{margin:0;max-width:580px;color:#bccbd6;font-size:12px}
+.page-presence .ps-safety{margin:0 0 15px;border-color:#465566;color:#bfd0d9}
+.page-presence .ps-status{display:inline-flex;font-size:10px;letter-spacing:.025em;border:1px solid #3c5a67;color:#c7e8ed;border-radius:20px;padding:5px 9px;white-space:nowrap;background:#1b3139}
+.page-presence .ps-metrics{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0 0 17px}
+.page-presence .ps-metric-card{min-width:0;display:flex;flex-direction:column;gap:5px;padding:17px 18px;border-radius:14px;border:1px solid #304050;background:linear-gradient(145deg,#1b2534,#111820)}
+.page-presence .ps-metric-card strong{font-size:clamp(24px,2.4vw,35px);font-weight:550;letter-spacing:-.04em;line-height:1.13;font-variant-numeric:tabular-nums}
+.page-presence .ps-metric-label{font-size:12px;font-weight:600;letter-spacing:.02em}
+.page-presence .ps-metric-desc,.page-presence .ps-metric-change{font-size:10px;color:var(--muted);overflow-wrap:anywhere}
+.page-presence .ps-metric-change{color:#a4d4c7}
+.page-presence .ps-toolbar{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px}
+.page-presence .ps-toolbar .button-row{margin:0}
+.page-presence .ps-layout{display:grid;grid-template-columns:minmax(300px,.9fr) minmax(0,1.1fr);gap:14px;align-items:start}
+.page-presence .ps-compose,.page-presence .ps-queue,.page-presence .ps-history{min-width:0}
+.page-presence .ps-compose form,.page-presence #ps-snapshot{display:grid;gap:8px}
+.page-presence .ps-compose label:not(.ps-review),.page-presence #ps-snapshot label,.page-presence .ps-postform label{font-size:11px;font-weight:600;color:#cbd9e5}
+.page-presence .ps-compose input:not([type=checkbox]),.page-presence .ps-compose textarea,.page-presence .ps-compose select,.page-presence #ps-snapshot input,.page-presence #ps-snapshot select,.page-presence .ps-postform input,.page-presence .ps-postform select{width:100%;min-width:0;min-height:43px;border-radius:10px;border:1px solid #394e5c;color:#eff5f9;background:#090f17;padding:10px 12px;font-size:12px}
+.page-presence .ps-compose textarea{resize:vertical;min-height:75px}
+.page-presence .ps-compose input:focus-visible,.page-presence .ps-compose textarea:focus-visible,.page-presence .ps-compose select:focus-visible,.page-presence #ps-snapshot input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.page-presence .ps-destinations{min-width:0;display:flex;align-items:center;flex-wrap:wrap;gap:8px 15px;border:1px solid #354757;border-radius:12px;padding:10px 12px;margin:4px 0}
+.page-presence .ps-destinations legend{font-size:11px;font-weight:600;color:#c7d6e3;padding:0 4px}
+.page-presence .ps-destinations label{display:flex;align-items:center;gap:5px;font-size:11px}
+.page-presence .ps-destinations input,.page-presence .ps-review input{accent-color:#66e6e6;min-width:17px;min-height:17px}
+.page-presence .ps-review{display:flex;align-items:flex-start;gap:8px;padding:13px;border-radius:10px;background:#141f2c;border:1px solid #405263;font-size:11px;color:#cbd6e0}
+.page-presence .ps-review input{margin-top:2px;flex-shrink:0}
+.page-presence .ps-error{min-height:0;margin:0}
+.page-presence .ps-draft-card{padding:17px 0;border-top:1px solid var(--line)}
+.page-presence .ps-draft-card:first-of-type{margin-top:12px}
+.page-presence .ps-draft-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px}
+.page-presence .ps-draft-head h3{font-size:15px;font-weight:550;margin:5px 0}
+.page-presence .ps-stage{font-size:9px;color:#ade4e7;text-transform:uppercase;letter-spacing:.09em}
+.page-presence .ps-channels{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}
+.page-presence .ps-channel{font-size:10px;padding:4px 7px;border:1px solid #3a4d5b;border-radius:9px;color:#c7d5e0}
+.page-presence .ps-channel.ps-done{border-color:#397e69;color:#9be1c4}
+.page-presence .ps-draft-card .button-row{gap:6px;margin-top:10px;flex-wrap:wrap}
+.page-presence .ps-draft-card .button-row button{min-height:35px;font-size:11px;padding:6px 10px}
+.page-presence .ps-handoff{margin:10px 0 5px;padding:13px;border:1px solid #395566;background:#14232c;border-radius:12px}
+.page-presence .ps-postform{display:grid;grid-template-columns:minmax(0,.6fr) minmax(0,1.4fr);gap:10px;align-items:end}
+.page-presence .ps-postform label{display:grid;gap:5px}
+.page-presence .ps-postform button{grid-column:1/-1;justify-self:start}
+.page-presence .ps-history-item{display:grid;gap:5px;border-bottom:1px solid var(--line);padding:13px 0}
+.page-presence .ps-history-item:last-child{border-bottom:0}
+.page-presence .ps-history-item strong{font-weight:550}
+.page-presence #ps-snapshot .primary{justify-self:start}
+.page-presence .ps-toolbar .segments button{min-height:43px}
+@media(max-width:1050px){.page-presence .ps-layout{grid-template-columns:1fr}.page-presence .ps-metrics{gap:8px}.page-presence .ps-metric-card{padding:13px 12px}}
+@media(max-width:540px){.page-presence .ps-intro{padding:18px;min-height:120px}.page-presence .ps-metrics{grid-template-columns:1fr;gap:8px}.page-presence .ps-metric-card{display:grid;grid-template-columns:1fr auto;gap:2px 8px;padding:12px 14px}.page-presence .ps-metric-label{grid-column:1}.page-presence .ps-metric-card strong{font-size:24px;grid-column:2;grid-row:1/3;align-self:center}.page-presence .ps-metric-desc,.page-presence .ps-metric-change{grid-column:1}.page-presence .ps-toolbar .button-row{flex-wrap:wrap}.page-presence .ps-compose,.page-presence .ps-queue,.page-presence .ps-history{padding:15px}.page-presence .ps-postform{grid-template-columns:1fr}.page-presence .ps-intro h2{font-size:24px}}
