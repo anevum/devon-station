@@ -66,6 +66,19 @@ const {setTimeout:delay} = require('node:timers/promises');
   assert.equal(data.snapshots[0].views,0);
   assert.equal(data.snapshots[0].engagements,null);
   assert($('#view').textContent.includes('34'),'manual metric visible');
+  // An independent tab may change the shared key before a storage event arrives.
+  // A stale view must not silently overwrite that tab or discard form input.
+  const foreign='{"version":1,"drafts":[],"snapshots":[]}';
+  dom.window.localStorage.setItem('devon-station:presence:v1',foreign);
+  $('#ps-followers').value='777';
+  $('#ps-date').value='2026-11-01';
+  $('#ps-snapshot').dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}));
+  assert.equal(dom.window.localStorage.getItem('devon-station:presence:v1'),foreign,'stale write blocked');
+  assert.match($('#ps-error').textContent,/Another tab changed/);
+  assert.equal($('#ps-followers').value,'777','unsaved form contents survive conflict');
+  dom.window.dispatchEvent(new dom.window.StorageEvent('storage',{key:'devon-station:presence:v1',newValue:foreign}));
+  assert($('#ps-tab-conflict'),'cross-tab warning visible');
+  assert.equal($('#ps-followers').value,'777','storage event does not erase pending typing');
   const axe=require('axe-core');
   dom.window.eval(axe.source);
   const report=await dom.window.axe.run($('#view'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']},rules:{'color-contrast':{enabled:false}}});
