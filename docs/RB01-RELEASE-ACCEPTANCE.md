@@ -175,4 +175,13 @@ authentic D1 restore, deployed fallback or production cutover is proven here.
 
 ## Review-only artifact and target contract
 
+The review CLI now verifies a clean committed checkout and every tracked file's
+actual blob identity, rebuilds the shell/Worker from that checkout, scans source
+and generated output for privacy, then checks that the same source commit is
+still clean before writing packages. It does not trust a pre-existing ignored
+bundle. Synthetic Git-fixture tests reject dirty/staged/untracked inputs and
+edits hidden by assume-unchanged, and prove that tampered ignored output is
+rebuilt into identical artifacts. This strengthens source provenance; it does
+not authorize an authentic database export, restore or production cutover.
+
 The offline generator `node tools/prepare-rb01-review.mjs` builds deterministic candidate and guarded-fallback module packages from the current checkout. The CI artifact and `SHA256SUMS` identify exact source/module/asset hashes; the fallback uses the hardened verifier with a **read-only emergency screen**, not a fully functional RB01 UI. See [isolated acceptance target and reproducibility contract](RB01-ISOLATED-ACCEPTANCE-TARGET.md). The proposed `2026-10-28` + `nodejs_compat` isolated runtime remains **unverified on Cloudflare**. No target, identity, deployment or real-data acceptance is implied.

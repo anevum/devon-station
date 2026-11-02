@@ -1,8 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,mkdtempSync,rmSync,copyFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
-import {buildReleaseArtifacts} from '../tools/prepare-rb01-review.mjs';
+import {execFileSync} from 'node:child_process';
+import {join,dirname} from 'node:path';
+import {tmpdir} from 'node:os';
+import {fileURLToPath} from 'node:url';
+import {buildReleaseArtifacts,verifiedSourceCommit} from '../tools/prepare-rb01-review.mjs';
 const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8');
 const sha = value => createHash('sha256').update(value).digest('hex');
 const modules = [
@@ -56,4 +60,56 @@ test('changed authentication, legacy source, missing modules and embedded privat
   assert.throws(() => prepare(incomplete), /module graph/);
   const privateCandidate = syntheticCandidate(); privateCandidate['worker/index.mjs'] = '"privateDataLoaded":true';
   assert.throws(() => prepare(privateCandidate), /private-data marker/);
+});
+
+function fixture(t,complete=false) {
+  const dir=mkdtempSync(join(tmpdir(),'ds-release-provenance-'));
+  t.after(()=>rmSync(dir,{recursive:true,force:true}));
+  const git=args=>execFileSync('git',args,{cwd:dir,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+  git(['init','--quiet','--initial-branch=synthetic-review']);
+  if(complete){
+    const sourceRoot=fileURLToPath(new URL('../',import.meta.url));
+    const paths=execFileSync('git',['ls-files','-z'],{cwd:sourceRoot,encoding:'utf8'}).split('\0').filter(Boolean);
+    for(const path of paths){mkdirSync(dirname(join(dir,path)),{recursive:true});copyFileSync(join(sourceRoot,path),join(dir,path));}
+  }else{
+    writeFileSync(join(dir,'.gitignore'),'deployment/\n');
+    writeFileSync(join(dir,'source.txt'),'Synthetic tracked source\n');
+  }
+  git(['add','.']);
+  git(['-c','user.name=Synthetic Release Test','-c','user.email=fixture@example.test','-c','commit.gpgsign=false','-c','core.hooksPath=/dev/null','commit','--quiet','-m','Synthetic provenance fixture']);
+  return {dir,git,commit:git(['rev-parse','HEAD']).trim()};
+}
+
+test('source verification refuses tracked, staged and untracked edits without echoing their contents',async t=>{
+  const f=fixture(t);assert.equal(await verifiedSourceCommit(f.dir),f.commit);
+  writeFileSync(join(f.dir,'source.txt'),'Fabricated uncommitted content\n');
+  await assert.rejects(verifiedSourceCommit(f.dir),/not clean and verifiable/);
+  f.git(['add','source.txt']);
+  await assert.rejects(verifiedSourceCommit(f.dir),/not clean and verifiable/);
+  f.git(['reset','--hard',f.commit]);
+  writeFileSync(join(f.dir,'unreviewed.txt'),'Fabricated untracked content\n');
+  await assert.rejects(verifiedSourceCommit(f.dir),error=>/not clean and verifiable/.test(error.message)&&!error.message.includes('Fabricated'));
+});
+
+test('actual blob verification catches edits hidden by assume-unchanged index flags',async t=>{
+  const f=fixture(t);f.git(['update-index','--assume-unchanged','source.txt']);
+  writeFileSync(join(f.dir,'source.txt'),'Fabricated hidden edit\n');
+  assert.equal(f.git(['status','--porcelain']).trim(),'');
+  await assert.rejects(verifiedSourceCommit(f.dir),/tracked source bytes differ/);
+});
+
+test('clean-checkout CLI rebuilds a tampered ignored bundle and produces identical review artifacts',async t=>{
+  const f=fixture(t,true);
+  const run=()=>execFileSync(process.execPath,['tools/prepare-rb01-review.mjs'],{cwd:f.dir,encoding:'utf8',stdio:['ignore','pipe','pipe']});
+  run();
+  const manifest=JSON.parse(readFileSync(join(f.dir,'release-review/manifest.json'),'utf8'));
+  assert.equal(manifest.sourceCommit,f.commit);
+  const first=readFileSync(join(f.dir,'release-review/SHA256SUMS'),'utf8');
+  const candidate=JSON.parse(readFileSync(join(f.dir,'deployment/modules.json'),'utf8'));
+  candidate['worker/state.mjs']+='\n// fabricated stale bundle alteration';
+  writeFileSync(join(f.dir,'deployment/modules.json'),JSON.stringify(candidate));
+  assert.equal(await verifiedSourceCommit(f.dir),f.commit,'ignored build output is not a tracked-source edit');
+  run();
+  assert.equal(readFileSync(join(f.dir,'release-review/SHA256SUMS'),'utf8'),first);
+  assert(!readFileSync(join(f.dir,'release-review/candidate.modules.json'),'utf8').includes('fabricated stale bundle alteration'));
 });

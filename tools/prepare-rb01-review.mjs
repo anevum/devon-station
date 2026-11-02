@@ -1,7 +1,7 @@
 /** Review-only RB01 packages. No Cloudflare calls, credentials, or deployment. */
 import {createHash} from 'node:crypto';
 import {execFileSync} from 'node:child_process';
-import {mkdir, readFile, writeFile} from 'node:fs/promises';
+import {mkdir, readFile, writeFile, lstat} from 'node:fs/promises';
 import {resolve, join} from 'node:path';
 import {fileURLToPath, pathToFileURL} from 'node:url';
 
@@ -24,6 +24,31 @@ const sha256 = value => createHash('sha256').update(value).digest('hex');
 const gitBlob = value => createHash('sha1').update('blob ' + Buffer.byteLength(value) + '\0' + value).digest('hex');
 const json = value => JSON.stringify(value, null, 2) + '\n';
 function insist(ok, message) { if (!ok) throw Error('RB01 review package refused: ' + message); }
+export async function verifiedSourceCommit(checkoutRoot = root) {
+  const git = args => execFileSync('git', args, {cwd: checkoutRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe']});
+  let commit, entries;
+  try {
+    insist(!git(['status', '--porcelain=v1', '--untracked-files=all']).trim(), 'source checkout has uncommitted files');
+    commit = git(['rev-parse', 'HEAD']).trim();
+    insist(/^[a-f0-9]{40}$/.test(commit), 'source must have an exact commit');
+    entries = git(['ls-tree', '-r', '-z', '--full-tree', commit]).split('\0').filter(Boolean);
+  } catch { throw Error('RB01 review package refused: source checkout is not clean and verifiable'); }
+  // Check actual bytes, not just git status: assume-unchanged/skip-worktree
+  // index flags can otherwise hide a local edit from ordinary diff checks.
+  for (const entry of entries) {
+    const match = /^(100644|100755) blob ([a-f0-9]{40})\t([\s\S]+)$/.exec(entry);
+    insist(match, 'unsupported tracked source entry');
+    try {
+      const file = join(checkoutRoot, match[3]);
+      const info = await lstat(file);
+      insist(info.isFile() && !info.isSymbolicLink(), 'tracked source is not a regular file');
+      const bytes = await readFile(file);
+      const digest = createHash('sha1').update('blob ' + bytes.length + '\0').update(bytes).digest('hex');
+      insist(digest === match[2], 'tracked source bytes differ from the commit');
+    } catch { throw Error('RB01 review package refused: tracked source bytes differ from the commit'); }
+  }
+  return commit;
+}
 function sortedDigestMap(entries) {
   return Object.fromEntries(entries.slice().sort((a, b) => a[0].localeCompare(b[0]))
     .map(([name, bytes]) => [name, sha256(bytes)]));
@@ -129,7 +154,13 @@ export function buildReleaseArtifacts({candidate, legacyServer, accessModule, no
   return {files: {...files, 'SHA256SUMS': sums}, manifest};
 }
 async function main() {
-  const sourceCommit = execFileSync('git', ['rev-parse', 'HEAD'], {cwd: root, encoding: 'utf8'}).trim();
+  const sourceCommit = await verifiedSourceCommit();
+  // Never trust an ignored deployment/modules.json left by an earlier build.
+  // Both builders and the privacy scan use only this verified checkout.
+  for (const script of ['build-hosted-shell.mjs', 'build-worker.mjs', 'verify-public-source.mjs']) {
+    execFileSync(process.execPath, [join(root, 'tools', script), ...(script === 'build-worker.mjs' ? ['--shell'] : [])],
+      {cwd: root, stdio: ['ignore', 'pipe', 'pipe']});
+  }
   const [candidateText, legacyServer, accessModule, notificationsModule] = await Promise.all([
     readFile(join(root, 'deployment/modules.json'), 'utf8'),
     readFile(join(root, 'legacy/v03/worker/index.mjs'), 'utf8'),
@@ -137,6 +168,7 @@ async function main() {
     readFile(join(root, 'worker/notifications.mjs'), 'utf8')
   ]);
   const {files, manifest} = buildReleaseArtifacts({candidate: JSON.parse(candidateText), legacyServer, accessModule, notificationsModule, sourceCommit});
+  insist(await verifiedSourceCommit() === sourceCommit, 'source changed while preparing the package');
   const dest = process.argv[2] ? resolve(process.argv[2]) : join(root, 'release-review');
   await mkdir(dest, {recursive: true});
   for (const [name, body] of Object.entries(files)) await writeFile(join(dest, name), body, {flag: 'w'});
