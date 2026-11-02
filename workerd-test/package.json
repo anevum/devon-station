@@ -1,1 +1,1 @@
-{"name":"devonstation-workerd-test","private":true,"type":"module","scripts":{"test":"node --test runtime.test.mjs"},"devDependencies":{"miniflare":"4.20260730.0"}}
+{"name":"devonstation-workerd-test","private":true,"type":"module","scripts":{"test":"node --test runtime.test.mjs newsroom-conversations.test.mjs"},"devDependencies":{"miniflare":"4.20260730.0"}}
