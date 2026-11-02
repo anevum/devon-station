@@ -9,7 +9,7 @@
     "verify:privacy": "node tools/verify-public-source.mjs",
     "test:browser": "python3 tools/browser-smoke.py && python3 tools/browser-reconcile-smoke.py && python3 tools/browser-backup-smoke.py && python3 tools/browser-resolution-smoke.py && python3 tools/browser-tabs-smoke.py && python3 tools/browser-diagnostics-smoke.py",
     "test:runtime:dom": "node tools/runtime-dom-check.cjs && node tools/runtime-recovery-dom.cjs && node tools/runtime-presence-dom.cjs",
-    "test:runtime:browser": "node tools/runtime-browser-check.cjs && node tools/runtime-recovery-browser.cjs"
+    "test:runtime:browser": "node tools/runtime-browser-check.cjs && node tools/runtime-recovery-browser.cjs && node tools/runtime-presence-browser.cjs"
   },
   "engines": {
     "node": ">=22"
