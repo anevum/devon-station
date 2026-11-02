@@ -8,7 +8,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const EXPECTED_MODULES = [
   'index.mjs', 'worker/index.mjs', 'worker/access.mjs',
-  'worker/notifications.mjs', 'worker/state.mjs', 'worker/portfolio.mjs',
+  'worker/notifications.mjs', 'worker/state.mjs', 'worker/presence-vault.mjs', 'worker/portfolio.mjs',
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
