@@ -98,7 +98,11 @@ test('METHOD:CANCEL is explicitly held for approval', () => {
 test('custom embedded timezone rules cannot silently override IANA rules', () => {
   const tz = ['BEGIN:VTIMEZONE', 'TZID:America/New_York', 'BEGIN:STANDARD', 'DTSTART:19701101T020000', 'TZOFFSETFROM:-0400', 'TZOFFSETTO:-0500', 'END:STANDARD', 'END:VTIMEZONE'].join('\r\n');
   const ics = wrap(event('').replace('DTSTART:20261102T150000Z', 'DTSTART;TZID=America/New_York:20261102T100000').replace('DTEND:20261102T160000Z', 'DTEND;TZID=America/New_York:20261102T110000'), tz);
-  assert.ok(row(ics).issues.includes('timezone:embedded-rules-unverified'));
+  const p = previewCalendarIcs(ics);
+  assert.ok(p.events[0].issues.includes('timezone:embedded-rules-unverified'));
+  assert.equal(p.sourceTimeZones.length, 1);
+  assert.equal(p.sourceTimeZones[0].observances[0].kind, 'STANDARD');
+  assert.equal(p.sourceTimeZones[0].observances[0].properties.find(x => x.name === 'TZOFFSETFROM').value, '-0400');
 });
 test('rejects malformed or hostile ICS input without any side effects', () => {
   for (const ics of [
