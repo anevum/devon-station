@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
-import {readFileSync,writeFileSync} from 'node:fs';
+import {readFileSync} from 'node:fs';
 import {Script} from 'node:vm';
 import {createNewsroomHandler} from '../worker/newsroom.mjs';
 import {createNewsroomConversationHandler} from '../worker/newsroom-conversations.mjs';
@@ -133,5 +133,4 @@ test('renderer outputs a safe page with no browser network action during page ge
  assert.match(page,/role="status"/);
  assert.match(page,/data-can-reply="true"/);
  assert.doesNotMatch(page,/https:\/\/cdn/);
- writeFileSync(new URL('../review/preview.html',import.meta.url),page);
 });
