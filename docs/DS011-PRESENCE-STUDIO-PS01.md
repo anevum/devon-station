@@ -9,6 +9,7 @@
 - Local editorial queue; preview/edit before publishing; transition to **Ready** only after review and nonempty destination captions; manual native publishing. Copying captions does not publish.
 - Owner-entered published post URLs validated against each supported platform's HTTPS domain; labeled *owner-entered*, not confirmed by Meta APIs. Already published content cannot be silently edited.
 - Manual follower, views and engagement observations in explicit 7/28/30/90-day reporting windows. Missing optional metrics remain null. Duplicate platform/date/window snapshots refused.
+- An evidence-labeled goals panel computes the next proposed working milestone from an entered Facebook/Instagram snapshot, separately from the 1,000,000-follower stretch ambition. Without an observed baseline, progress is unavailable, never zero.
 - Browser-local JSON import/export with bounded size and strict input sanitation, plus confirm-to-delete individual drafts.
 - Responsive mobile/desktop layout. Uses existing accessible DevonStation contrast/focus/motion rules.
 

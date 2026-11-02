@@ -30,6 +30,8 @@ const {setTimeout:delay} = require('node:timers/promises');
   const $=s=>doc.querySelector(s);
   assert.equal($('#view').className,'page-presence');
   assert($('#ps-compose'),'composer should be present');
+  assert.match($('#ps-goals').textContent,/1,000,000 stretch/);
+  assert.match($('#ps-goals').textContent,/Baseline not measured/);
   assert.match($('#view').textContent,/Not connected/);
   assert.equal($('[data-go=presence]').getAttribute('aria-current'),'page');
   assert.equal($('#ps-privacy').checked,false,'review cannot be prechecked');
@@ -66,6 +68,8 @@ const {setTimeout:delay} = require('node:timers/promises');
   assert.equal(data.snapshots[0].views,0);
   assert.equal(data.snapshots[0].engagements,null);
   assert($('#view').textContent.includes('34'),'manual metric visible');
+  assert.match($('#ps-goals').textContent,/34 measured followers/);
+  assert.match($('#ps-goals').textContent,/250/);
   // An independent tab may change the shared key before a storage event arrives.
   // A stale view must not silently overwrite that tab or discard form input.
   const foreign='{"version":1,"drafts":[],"snapshots":[]}';

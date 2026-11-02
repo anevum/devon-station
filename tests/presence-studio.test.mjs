@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {
  PRESENCE_CHANNELS, PRESENCE_STORAGE_KEY, presenceBlank, presenceDraft, presenceReady, presenceMarkPublished,
- presencePostURL, presenceSnapshot, presenceAddSnapshot, presenceTrend, presenceRestore
+ presencePostURL, presenceSnapshot, presenceAddSnapshot, presenceTrend, presenceRestore, presenceGoalProgress, PRESENCE_GOAL_MILESTONES
 } from '../src/presence-core.mjs';
 
 const t='2026-11-02T17:00:00.000Z';
@@ -100,4 +100,24 @@ test('source wiring preserves client-side-only mode and avoids introducing Meta 
  assert(!/fetch\s*\(|(https?:\/\/)?graph\.facebook\.com|api\.threads\.net|access_token/.test(ui));
  assert(ui.includes('localStorage.setItem(PRESENCE_STORAGE_KEY'));
  assert(ui.includes('No API connection'));
+});
+
+test('working milestones remain proposed and do not fabricate follower baselines',()=>{
+ assert.equal(PRESENCE_GOAL_MILESTONES.length,5);
+ const unknown=presenceGoalProgress([], 'facebook');
+ assert.equal(unknown.followers,null);
+ assert.equal(unknown.next.followers,250);
+ assert.equal(unknown.nextProgress,null);
+ assert.equal(presenceGoalProgress([], 'threads'),null);
+ const first=presenceSnapshot({platform:'facebook',observedOn:'2026-11-02',periodDays:30,followers:34});
+ const progress=presenceGoalProgress([first],'facebook');
+ assert.equal(progress.next.followers,250);
+ assert.equal(progress.nextProgress,13.6);
+ assert.equal(progress.stretch,1000000);
+ assert.equal(progress.observedOn,'2026-11-02');
+ const reached=presenceGoalProgress([{...first,followers:250}],'facebook');
+ assert.equal(reached.next.followers,1000);
+ const finished=presenceGoalProgress([{...first,followers:10000}],'facebook');
+ assert.equal(finished.next,null);
+ assert.equal(finished.nextProgress,100);
 });

@@ -53,6 +53,29 @@ function presencePanel() {
  });
  return '<div class="ps-metrics">' + parts.join('') + '</div>';
 }
+function presenceGoals() {
+ const cards = ['facebook','instagram'].map(platform => {
+  const goal = presenceGoalProgress(presenceState.snapshots, platform);
+  const measured = goal.followers !== null;
+  const target = goal.next?.followers ?? 10000;
+  const deadline = goal.next?.deadline ?? '2027-12-31';
+  const title = goal.next ? 'Next proposed milestone' : 'Working milestones completed';
+  const day = new Date(deadline + 'T00:00:00Z').toLocaleDateString('en-US',{month:'short',day:'numeric',year:'numeric',timeZone:'UTC'});
+  const progress = measured ? '<div class="ps-goal-meter" role="progressbar" aria-label="' +
+   esc(presenceLabel(platform) + ' followers toward proposed milestone') + '" aria-valuemin="0" aria-valuemax="' + target +
+   '" aria-valuenow="' + Math.min(goal.followers,target) + '"><span style="width:' + goal.nextProgress.toFixed(1) + '%"></span></div>' :
+   '<p class="tiny muted">Add a dated snapshot to track this goal.</p>';
+  return '<article class="ps-goal-card"><div class="ps-goal-heading"><strong>' + esc(presenceLabel(platform)) +
+   '</strong><span class="tiny muted">1,000,000 stretch</span></div><p class="ps-goal-current">' +
+   (measured ? presenceMetric(goal.followers) + ' measured followers' : 'Baseline not measured') +
+   '</p><div class="ps-goal-target"><span>' + title + '</span><strong>' + presenceMetric(target) +
+   '</strong></div>' + progress + '<p class="tiny muted">Proposed checkpoint · ' + esc(day) +
+   (measured ? ' · Observed ' + esc(goal.observedOn) : '') + '</p></article>';
+ }).join('');
+ return '<section id="ps-goals" class="panel ps-goals"><div class="panel-head"><h2>Growth milestones</h2><span class="ps-status">Proposed targets</span></div>' +
+  '<p class="tiny muted">Working checkpoints are planning targets, not forecasts. The one-million ambition is a separate stretch goal for each platform. Followers are never summed as unique people.</p>' +
+  '<div class="ps-goal-grid">' + cards + '</div></section>';
+}
 function presenceEditor() {
  return '<section class="panel ps-compose" aria-labelledby="ps-composer-title"><div class="panel-head"><div><span class="eyebrow">CONTENT DESK</span><h2 id="ps-composer-title">' +
   (presenceEditId ? 'Edit this idea' : 'Create an original post') + '</h2></div><span class="ps-status">Manual publishing</span></div>' +
@@ -126,7 +149,7 @@ function presenceStudio() {
   '<div class="info-note ps-safety">Owner-only concept. This screen holds <strong>device-local, unencrypted data</strong>; it does not sync through DevonStation cloud storage, schedule posts, or connect to Meta. Do not enter personal DMs, contact lists, secrets or private family details.</div>' +
   (presenceConflict ? '<div class="info-note warning">Presence data changed in another browser tab. Export this tab before reloading to avoid overwriting newer work.</div>' : '') +
   (!presenceStorageAvailable ? '<div class="info-note warning">Device storage unavailable. New work lasts only for this session: export a copy before leaving.</div>' : '') +
-  presencePanel() +
+  presencePanel() + presenceGoals() +
   '<div class="ps-toolbar"><div class="segments" role="group" aria-label="Presence Studio view"><button type="button" data-ps-tab="plan" aria-pressed="' + (presenceTab==='plan') + '">Plan and publish</button>' +
   '<button type="button" data-ps-tab="insights" aria-pressed="' + (presenceTab==='insights') + '">Insights</button></div>' +
   '<div class="button-row"><button data-ps-export>Export JSON</button><button data-ps-import-open>Import JSON</button>' +

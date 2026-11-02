@@ -103,6 +103,27 @@ export function presenceTrend(items, platform) {
  const previous = latest ? records.find(x => x.observedOn !== latest.observedOn) ?? null : null;
  return { latest, previous, net: latest && previous ? latest.followers - previous.followers : null };
 }
+
+export const PRESENCE_GOAL_MILESTONES = Object.freeze([
+ Object.freeze({ followers:250, deadline:'2026-12-31' }),
+ Object.freeze({ followers:1000, deadline:'2027-03-31' }),
+ Object.freeze({ followers:3000, deadline:'2027-06-30' }),
+ Object.freeze({ followers:6000, deadline:'2027-09-30' }),
+ Object.freeze({ followers:10000, deadline:'2027-12-31' })
+]);
+export function presenceGoalProgress(items, platform) {
+ if (platform !== 'facebook' && platform !== 'instagram') return null;
+ const latest = presenceTrend(items, platform).latest;
+ const followers = latest ? latest.followers : null;
+ const next = followers === null ? PRESENCE_GOAL_MILESTONES[0] :
+  PRESENCE_GOAL_MILESTONES.find(m => followers < m.followers) ?? null;
+ return {
+  platform, followers, observedOn:latest?.observedOn ?? null, next,
+  nextProgress:followers === null ? null :
+   next ? Math.min(100, Math.round(followers / next.followers * 1000) / 10) : 100,
+  stretch:1000000
+ };
+}
 /* Reject foreign and malformed fields on restore. A corrupt tab must not
  * silently fabricate zero metrics or import tokens from arbitrary JSON. */
 export function presenceRestore(raw) {
