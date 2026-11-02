@@ -62,7 +62,7 @@ test('state validator rejects hostile text, arbitrary links and oversized payloa
  assert.throws(()=>validateOwnerState({...state,drafts:[{...draft,title:'patient test data'}]}),/invalid_draft/);
  assert.throws(()=>validateOwnerState({...state,drafts:[draft,draft]}),/duplicate/);
  assert.throws(()=>validateOwnerState({...state,notionToken:'leaked'}),/unexpected_state/);
- assert.throws(()=>validateOwnerState({...state,history:[{action:'sk-abcdefghijabcdefghij',at:'2026-10-28T19:00:00Z'}]}),/invalid_history/);
+ assert.throws(()=>validateOwnerState({...state,history:[{action:'sk-'+'x'.repeat(30),at:'2026-10-28T19:00:00Z'}]}),/invalid_history/);
  assert.throws(()=>validateOwnerState({...state,prefs:{theme:'<script>'}}),/invalid_preference/);
 });
 test('synthetic backup restores private owner document with matching content hash; no live database touched',async()=>{

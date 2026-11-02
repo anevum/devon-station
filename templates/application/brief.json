@@ -1,0 +1,1 @@
+{"kind":"application","owner":"REQUIRED","approver":"REQUIRED","outcome":"REQUIRED","sourceOfTruth":"REQUIRED","scope":[],"excluded":[],"dataClass":"synthetic-only","repository":null,"environments":{"development":"local","preview":null,"production":null},"budgetApproved":false,"releaseApproved":false,"maintenanceOwner":null,"renewal":null}

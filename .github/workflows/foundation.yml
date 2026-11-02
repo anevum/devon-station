@@ -1,0 +1,109 @@
+name: Synthetic foundation
+on: [push, pull_request]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm --prefix foundation test
+  browser:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: npm install --prefix foundation --no-save --ignore-scripts --no-audit --no-fund --package-lock=false playwright@1.62.1 @axe-core/playwright@4.10.2
+      - run: node browser/preview-check.cjs
+        working-directory: foundation
+      - run: npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
+      - run: node browser/workspace-component-check.cjs
+        working-directory: foundation
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: synthetic-preview-browser-results
+          path: foundation/browser-results/
+          if-no-files-found: ignore
+  access-interop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout synthetic scope bridge
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          path: scoped
+          persist-credentials: false
+      - name: Checkout pinned recovered verifier (separate draft)
+        uses: actions/checkout@v4
+        with:
+          ref: 5c93f2315cafff16d63668938293e526ef5d9140
+          path: recovered
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Verify synthetic JWT and scope bridge integration
+        working-directory: scoped/foundation
+        env:
+          RECOVERED_ACCESS_MODULE: ../../recovered/worker/access.mjs
+          RECOVERED_STATION_MODULE: ../../recovered/worker/index.mjs
+        run: node --test interop/access-scope-interop.mjs interop/recovered-station-contract.mjs
+
+  integrated-worker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Preserve hardened Access verifier in combined tree
+        run: test "$(git hash-object worker/access.mjs)" = "69ec253eddfe6ad26268bef2d2a270cd3faa947d"
+      - name: Test integrated recovered Worker and foundation scope bridge
+        working-directory: foundation
+        env:
+          RECOVERED_ACCESS_MODULE: ../worker/access.mjs
+          RECOVERED_STATION_MODULE: ../worker/index.mjs
+        run: node --test interop/access-scope-interop.mjs interop/recovered-station-contract.mjs
+
+  public-source-snapshot:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/feature/ds011-rb01-integrated-review'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - name: Enforce public-source boundary before review handoff
+        shell: bash
+        run: |
+          node tools/verify-public-source.mjs
+          test ! -e deployment/modules.json
+          test ! -e hosted-dist/index.html
+          test -z "$(git status --porcelain)"
+      - name: Package only tracked public source at exact checkout commit
+        shell: bash
+        run: |
+          mkdir -p review-bundle
+          git archive --format=tar HEAD | gzip -n > review-bundle/devonstation-public-tree.tar.gz
+          sha256sum review-bundle/devonstation-public-tree.tar.gz > review-bundle/SHA256SUMS
+          git rev-parse HEAD > review-bundle/COMMIT
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ds011-public-source-only
+          path: review-bundle/
+          if-no-files-found: error
+          retention-days: 7

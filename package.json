@@ -1,12 +1,23 @@
 {
-  "name": "devon-station-recovered-server",
-  "version": "0.0.0",
+  "name": "devon-station",
+  "version": "0.4.8-rb01-review",
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/*.test.mjs",
+    "build": "node tools/build-hosted-shell.mjs && node tools/build-worker.mjs --shell",
+    "verify:privacy": "node tools/verify-public-source.mjs",
+    "test:browser": "python3 tools/browser-smoke.py && python3 tools/browser-reconcile-smoke.py && python3 tools/browser-backup-smoke.py && python3 tools/browser-resolution-smoke.py && python3 tools/browser-tabs-smoke.py && python3 tools/browser-diagnostics-smoke.py",
+    "test:runtime:dom": "node tools/runtime-dom-check.cjs && node tools/runtime-recovery-dom.cjs",
+    "test:runtime:browser": "node tools/runtime-browser-check.cjs && node tools/runtime-recovery-browser.cjs"
   },
   "engines": {
     "node": ">=22"
+  },
+  "license": "AGPL-3.0-only",
+  "devDependencies": {
+    "jsdom": "26.1.0",
+    "axe-core": "4.10.3",
+    "playwright": "1.62.1"
   }
 }

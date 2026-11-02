@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512" role="img" aria-label="DevonStation DS monogram candidate">
+ <defs><linearGradient id="surface" x2="1" y2="1"><stop stop-color="#17232d"/><stop offset="1" stop-color="#080d14"/></linearGradient><linearGradient id="signal" x2="0.8" y2="1"><stop stop-color="#d2ffff"/><stop offset="0.45" stop-color="#78e4e1"/><stop offset="1" stop-color="#37b5b7"/></linearGradient></defs>
+ <rect width="512" height="512" rx="104" fill="url(#surface)"/>
+ <rect x="29" y="29" width="454" height="454" rx="79" fill="none" stroke="#b8ffff" stroke-opacity="0.13" stroke-width="2"/>
+ <path d="M132 162H186C238 162 262 199 262 256S238 350 186 350H132Z" fill="none" stroke="url(#signal)" stroke-width="22" stroke-linecap="round" stroke-linejoin="round"/>
+ <path d="M378 178C351 156 308 162 300 191C287 236 374 229 378 278C383 329 333 365 296 337" fill="none" stroke="url(#signal)" stroke-width="22" stroke-linecap="round"/>
+ <path d="M133 256H180" stroke="#8df6f0" stroke-width="8" stroke-linecap="round"/>
+ <circle cx="380" cy="107" r="6" fill="#8df6f0"/>
+</svg>

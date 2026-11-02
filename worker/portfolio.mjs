@@ -29,7 +29,8 @@ export async function refreshPortfolio(db,subject,env,transport=fetch){
  do {
   if(cycles++>=3)bad('notion_result_limit');
   const body=JSON.stringify({...{page_size:50},...(cursor?{start_cursor:cursor}:{})});
-  const response=await transport(`https://api.notion.com/v1/data_sources/${id}/query`,{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Notion-Version':'2025-09-03','Content-Type':'application/json'},body,redirect:'error',signal:AbortSignal.timeout(10000)});
+  // Workers supports manual, not error. Refuse 3xx below without forwarding the token.
+  const response=await transport(`https://api.notion.com/v1/data_sources/${id}/query`,{method:'POST',headers:{'Authorization':`Bearer ${token}`,'Notion-Version':'2025-09-03','Content-Type':'application/json'},body,redirect:'manual',signal:AbortSignal.timeout(10000)});
   if(!response.ok)bad('notion_provider_error');
   const data=await response.json();
   if(!Array.isArray(data.results)||data.results.length>50)bad('notion_invalid_response');

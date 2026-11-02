@@ -7,7 +7,68 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
       - run: npm test
+  workerd:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
+      - run: npm test --prefix workerd-test
+      - name: Replay on October 30 pinned workerd at October 28 compatibility date
+        shell: bash
+        run: |
+          mkdir -p "$RUNNER_TEMP/ds011-oct-workerd"
+          npm install --prefix "$RUNNER_TEMP/ds011-oct-workerd" --ignore-scripts --no-audit --no-fund --no-save --package-lock=false workerd@1.20261030.1
+          test -x "$RUNNER_TEMP/ds011-oct-workerd/node_modules/@cloudflare/workerd-linux-64/bin/workerd"
+          MINIFLARE_WORKERD_PATH="$RUNNER_TEMP/ds011-oct-workerd/node_modules/@cloudflare/workerd-linux-64/bin/workerd" DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
+  unified-application:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Assert tested source is the exact triggering head
+        env:
+          EXPECTED_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
+        run: test "$(git rev-parse HEAD)" = "$EXPECTED_COMMIT"
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: python -m pip install -r requirements-browser.txt
+      - run: npm run build
+      - run: npm run verify:privacy
+      - run: npm run test:runtime:dom
+      - run: npm run test:runtime:browser
+        env:
+          DS_CHROME: /usr/bin/google-chrome
+      - run: npm run test:browser
+        env:
+          DS_CHROME: /usr/bin/google-chrome
+      - name: Prepare SHA-pinned review-only candidate and guarded fallback
+        shell: bash
+        run: |
+          node tools/prepare-rb01-review.mjs
+          (cd release-review && sha256sum -c SHA256SUMS)
+          cp release-review/SHA256SUMS "$RUNNER_TEMP/rb01-first-sums"
+          node tools/prepare-rb01-review.mjs
+          cmp "$RUNNER_TEMP/rb01-first-sums" release-review/SHA256SUMS
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ds011-rb01-review-only-bundles
+          path: release-review/
+          if-no-files-found: error
+          retention-days: 7

@@ -1,19 +1,43 @@
 # DevonStation
 
-DevonStation is an independent, personal operations workspace project. The target repository is intended to hold **public-safe application source**, tests, setup documentation, and release history—not private operational records.
+DevonStation is Devon Akins's personal operating workspace: source-linked projects, scoped proposals and decisions, durable receipts, private capture and encrypted portable recovery. Original software and the original DS icon are licensed under **GNU AGPL version 3 only**. See [LICENSE](LICENSE).
 
-## Source status
+## Development status
 
-**Recovery pending.** The existing development archive includes private operational snapshots and must **not** be published wholesale. This repository does not yet contain a verified standalone application. A README is not evidence that the deployed service has been migrated here.
+The unified recovered application is now present in the review branch, including frontend, build tools and approved replacement PWA artwork. It is a tested development candidate, not an accepted production cutover. The recovered authentication implementation and legacy recovery history remain preserved. [Draft PR #8](https://github.com/anevum/devon-station/pull/8) contains the combined review.
 
-## Import criteria
+Use fabricated records for development. Each subject/principal/scope and project grant is supplied by trusted server configuration. Approving an action records a decision; the journal has no external dispatcher. Client-encrypted recovery requires explicit review and an empty authorized target. Source changes retain action/receipt history; removing projects with history requires a separate retention policy.
 
-1. Locate the authoritative current source and deployed revision, including authentication, storage, and backup dependencies.
-2. Prepare a reviewed export that excludes credentials, databases, personal notes, account tokens, snapshots, and private workspace data. Review Git history as well as the working tree before any public push.
-3. Preserve relevant source lineage and third-party attribution. Verify licensing rights before publishing recovered code.
-4. Run standalone builds, tests, security checks, and mobile/browser verification.
-5. Confirm production ownership, backups, rollback, and access boundaries before switching deployments. Never enable two competing deployers.
+## Build and verify
 
-Development continues on the existing source until a verified cutover. Do not replace the working application with a newly generated skeleton.
+Node 22 or later:
 
-Project index: [anevum/anevum](https://github.com/anevum/anevum) · Organization handoff: [GitHub reorganization](https://github.com/anevum/anevum/blob/main/handoffs/ANEVUM.OPS.PACKAGE.2026-10-30.002.md)
+```sh
+npm ci --ignore-scripts
+npm test
+npm --prefix foundation test
+npm run build
+npm run verify:privacy
+npm run test:runtime:dom
+```
+
+The build creates an empty-of-private-data hosted shell and a protected Worker module bundle. Generated outputs, private review records, database exports, browser results and credentials are excluded from Git history.
+
+For browser suites, install `requirements-browser.txt` in a Python environment and supply `DS_CHROME` pointing to a supported Chromium executable:
+
+```sh
+npm run test:runtime:browser
+npm run test:browser
+```
+
+The full-shell browser suites use generated test identities and isolated synthetic data; the older Python suites simulate private APIs. Workerd compatibility is independently tested with pinned dependencies in `workerd-test/`. Neither test substitutes for real Cloudflare Access or authentic production recovery.
+
+## Architecture and release gates
+
+Cloudflare-first, portable application contracts and replaceable adapters. Worker authentication, source cache and scope authorization sit in front of the foundation project/decision model. The current journal adapter uses Node crypto compatibility; deploy only with independently verified bindings and compatibility configuration. The additive scoped-journal migration is never run automatically by an HTTP request.
+
+Before production: physical iPhone/Safari/PWA/push acceptance, named Access owner/nonowner sessions, authentic isolated D1 export/restore, deployed-source/configuration parity and a guarded rollback. Clinical records and cross-business pooling are outside this candidate's authorization. Merge, deployment, real-data movement and infrastructure retirement require their own acceptance and authorization.
+
+[Runtime contract](docs/RB01-UNIFIED-RUNTIME-2026-10-31.md) · [Journal recovery](docs/RB01-JOURNAL-RECOVERY-2026-10-31.md) · [Source import](docs/SOURCE-IMPORT-2026-10-31.md) · [Workerd test](docs/RB01-WORKERD-COMPATIBILITY-2026-10-31.md)
+
+[Current release comparison, ordered acceptance and guarded fallback](docs/RB01-RELEASE-ACCEPTANCE.md) · [Exact isolated acceptance target and review bundle contract](docs/RB01-ISOLATED-ACCEPTANCE-TARGET.md) records the remaining production gates and the offline six-table fallback rehearsal.

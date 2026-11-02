@@ -1,6 +1,6 @@
 /** Private owner workspace state: versioned, bounded, access-scoped, no PHI or source-of-truth writes. */
 const AREAS = new Set(['Family & Home','Shinewell','Devon Works','Writing','ANEVUM','Incubator']);
-const SECTIONS = new Set(['command','inbox','portfolio','works','infrastructure','writing','anevum','reviews','settings','global']);
+const SECTIONS = new Set(['workspace','command','inbox','portfolio','works','infrastructure','writing','anevum','reviews','settings','global']);
 const FEEDBACK_TYPES = new Set(['Design','Behavior','Feature','Bug']);
 const PREFERENCES = {theme:['obsidian','slate'],accent:['cyan','teal','violet'],density:['compact','comfortable'],motion:['system','reduced'],contrast:['normal','high']};
 const DEFAULTS = {theme:'obsidian',accent:'cyan',density:'compact',motion:'system',contrast:'normal'};
