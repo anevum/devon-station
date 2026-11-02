@@ -56,6 +56,18 @@ export function presencePostURL(platform, url) {
  let parsed;
  try { parsed = new URL(String(url ?? '')); } catch { throw Error('Enter the full HTTPS post URL.'); }
  if (parsed.protocol !== 'https:' || parsed.username || parsed.password || !PRESENCE_DOMAINS[platform].has(parsed.hostname) || parsed.pathname === '/') throw Error('Link must point to a post on the selected platform.');
+ const path = parsed.pathname;
+ const facebookPost = parsed.hostname === 'fb.watch'
+  ? /^\/[A-Za-z0-9_-]{3,}\/?$/.test(path)
+  : /\/posts\/|\/reel\/|\/share\/(?:p|r|v)\/|\/videos\/|\/photos\/|\/permalink\.php$|\/photo\.php$|\/watch\/$/.test(path);
+ const instagramPost = /^\/(?:p|reel|reels|stories)\/[A-Za-z0-9_-]{3,}(?:\/|$)/.test(path);
+ const threadsPost = /^\/@[^/]+\/post\/[A-Za-z0-9_-]{3,}(?:\/|$)/.test(path);
+ if (!(platform === 'facebook' ? facebookPost : platform === 'instagram' ? instagramPost : threadsPost)) throw Error('Link must identify a post, not an account or home page.');
+ for (const key of [...parsed.searchParams.keys()]) {
+  const normalized = key.toLowerCase();
+  if (/^(?:access_token|auth_token|token|password|secret|api_key|session)$/.test(normalized)) throw Error('Remove private access parameters from the URL.');
+  if (normalized === 'fbclid' || normalized === 'igshid' || normalized.startsWith('utm_')) parsed.searchParams.delete(key);
+ }
  parsed.hash = ''; return parsed.href;
 }
 export function presenceMarkPublished(draft, platform, url, at = new Date().toISOString()) {
@@ -67,7 +79,10 @@ export function presenceMarkPublished(draft, platform, url, at = new Date().toIS
  return { ...draft, published, stage: Object.keys(published).length === draft.channels.length ? 'published' : 'ready', updatedAt: at };
 }
 function wholeNumber(value, label, optional = false) {
- if ((value === '' || value === null || value === undefined) && optional) return null;
+ if (value === '' || value === null || value === undefined) {
+  if (optional) return null;
+  throw Error(label + ' is required; missing is not zero.');
+ }
  const n = Number(value);
  if (!Number.isSafeInteger(n) || n < 0 || n > 2000000000) throw Error(label + ' must be a nonnegative whole number.');
  return n;
@@ -144,7 +159,7 @@ export function presenceRestore(raw) {
     draft.published[platform] = { url: presencePostURL(platform, old.url), confirmedAt, source: 'owner-entered' };
    }
    if (Object.keys(draft.published).length === draft.channels.length) draft.stage = 'published';
-   clean.drafts.push(draft);
+   if (!clean.drafts.some(x => x.id === draft.id)) clean.drafts.push(draft);
   } catch { /* Invalid records are not trusted or rendered. */ }
  }
  for (const record of raw.snapshots.slice(0, PRESENCE_MAX_SNAPSHOTS)) {
