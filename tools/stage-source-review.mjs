@@ -9,7 +9,8 @@ import {join, resolve, dirname, relative, sep} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {auditSourceIntake} from './source-intake.mjs';
 
-export const PINNED_ACCESS_BLOB='64a6d1cd5437a1490a594ed31a451ed5b7ee45b8';
+// Current reviewed verifier, including Workers-compatible no-follow JWKS fetch.
+export const PINNED_ACCESS_BLOB='69ec253eddfe6ad26268bef2d2a270cd3faa947d';
 const SOURCE_PATHS=Object.freeze([
  'package.json',
  ...['app.js','backup-core.mjs','backup-ui.js','cloud.js','core.mjs','diagnostics-core.mjs','index.html','pwa.js','style.css','sync-core.mjs'].map(x=>'src/'+x),
