@@ -45,4 +45,12 @@ Never change existing Cloudflare Access owner allow lists or account recovery id
 
 This branch is source-only and based on the RB01 review tree. PR target must be the RB01 review branch, NOT the published main branch, until that base is accepted. No production deploy, DNS/MX edit, account deletion, billing change, Access change or database migration is in scope. Full CI and privacy checks, independent review, RB01 owner/nonowner/MFA/authentic-backup acceptance and separate import approval are required before any live cutover.
 
-Future independently gated increments: RFC 5545/recurrence and staged validation; D1 calendar authorization; UI and CRUD; reminder/invitation receipts; CalDAV and actual iPhone sync; owner-approved event import and verified retirement of the Google source.
+## CAL01B — review-only ICS staging (source implemented; no live import)
+
+The additional `src/calendar-ics-preview.mjs` module and its synthetic Node regression suite implement a bounded, non-mutating preview of RFC 5545 `VEVENT` data. The parser accepts a 256 KiB input cap, up to 500 event components, and valid 2.0 calendar structure. It handles UTC timestamps, local IANA timezone conversion for nonambiguous contemporary wall times, all-day exclusive-end dates, line unfolding, and text escapes. It returns a candidate/review summary with `imported: 0`, retaining the original event properties, VALARM content, and embedded VTIMEZONE observances for explicit reviewer inspection.
+
+Any recurrence rule, override, cancellation, duplicate source UID/occurrence identity, floating time, ambiguous/nonexistent DST time, unsupported field/parameter, embedded time-zone rule, and invalid source interval forces `needs-review`. No recurrence is expanded, no invitation is sent, no calendar is modified, and even syntactically valid candidates still require a separate owner-authorized import process. Arbitrary embedded VTIMEZONE observances are preserved as source evidence but are NOT applied to the calculated IANA interpretation.
+
+`node --test tests/calendar-ics-preview.test.mjs` exercises 21 synthetic cases, including spring/fall DST boundaries, duplicate recurrence identities, lossless source retention, malformed inputs and bounds. The complete repository test/build/privacy/CI gate must still pass at the exact final PR head. This is an input assessment, **not** a full standards-compliant calendar client or safe authorization boundary for real records.
+
+Future independently gated increments: normalize/test recurrence patterns and staged owner approval receipts; D1 calendar authorization; UI and CRUD; reminders/invitation receipts; CalDAV and actual iPhone sync; owner-approved event import and verified retirement of the Google source.
