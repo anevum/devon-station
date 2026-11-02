@@ -11,7 +11,7 @@ const read = path => readFileSync(new URL('../' + path, import.meta.url), 'utf8'
 const sha = value => createHash('sha256').update(value).digest('hex');
 const modules = [
   'index.mjs', 'worker/index.mjs', 'worker/access.mjs',
-  'worker/notifications.mjs', 'worker/state.mjs', 'worker/portfolio.mjs',
+  'worker/notifications.mjs', 'worker/state.mjs', 'worker/presence-vault.mjs', 'worker/portfolio.mjs',
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
@@ -38,7 +38,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
-  assert.equal(first.manifest.candidate.moduleCount, 12);
+  assert.equal(first.manifest.candidate.moduleCount, 13);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
   assert.equal(first.manifest.intendedIsolatedRuntime.verifiedOnLiveOctoberRuntime, false);

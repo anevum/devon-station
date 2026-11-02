@@ -8,7 +8,7 @@ import {fileURLToPath, pathToFileURL} from 'node:url';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const EXPECTED_MODULES = [
   'index.mjs', 'worker/index.mjs', 'worker/access.mjs',
-  'worker/notifications.mjs', 'worker/state.mjs', 'worker/portfolio.mjs',
+  'worker/notifications.mjs', 'worker/state.mjs', 'worker/presence-vault.mjs', 'worker/portfolio.mjs',
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
@@ -91,8 +91,9 @@ function describeBundle(modules, requireHostedMarker = true) {
       [path, Buffer.from(value.body, value.encoding === 'base64' ? 'base64' : 'utf8')]))
   };
 }
-export function buildReleaseArtifacts({candidate, legacyServer, accessModule, notificationsModule, sourceCommit}) {
+export function buildReleaseArtifacts({candidate, legacyServer, accessModule, notificationsModule, sourceCommit, sourceBranch='feature/ds011-rb01-integrated-review'}) {
   insist(/^[a-f0-9]{40}$/.test(sourceCommit), 'source must have an exact commit');
+  insist(/^[A-Za-z0-9._/-]{2,120}$/.test(sourceBranch) && !sourceBranch.includes('..'), 'source branch identifier invalid');
   insist(candidate && typeof candidate === 'object' && !Array.isArray(candidate), 'candidate JSON is invalid');
   insist(Object.keys(candidate).length === EXPECTED_MODULES.length && EXPECTED_MODULES.every(p => typeof candidate[p] === 'string'), 'candidate module graph changed');
   insist(sha256(legacyServer) === LEGACY_SHA256, 'legacy V0.3 entry fingerprint changed');
@@ -120,7 +121,7 @@ export function buildReleaseArtifacts({candidate, legacyServer, accessModule, no
     status: 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED',
     license: 'AGPL-3.0-only',
     sourceCommit,
-    sourceBranch: 'feature/ds011-rb01-integrated-review',
+    sourceBranch,
     provenance: {
       source: 'GitHub tracked checkout only; no private archives or provider exports',
       candidateBuilder: 'npm run build',
@@ -167,7 +168,7 @@ async function main() {
     readFile(join(root, 'worker/access.mjs'), 'utf8'),
     readFile(join(root, 'worker/notifications.mjs'), 'utf8')
   ]);
-  const {files, manifest} = buildReleaseArtifacts({candidate: JSON.parse(candidateText), legacyServer, accessModule, notificationsModule, sourceCommit});
+  const {files, manifest} = buildReleaseArtifacts({candidate: JSON.parse(candidateText), legacyServer, accessModule, notificationsModule, sourceCommit, sourceBranch: process.env.GITHUB_HEAD_REF || process.env.GITHUB_REF_NAME || 'feature/ds011-rb01-integrated-review'});
   insist(await verifiedSourceCommit() === sourceCommit, 'source changed while preparing the package');
   const dest = process.argv[2] ? resolve(process.argv[2]) : join(root, 'release-review');
   await mkdir(dest, {recursive: true});

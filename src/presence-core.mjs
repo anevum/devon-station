@@ -147,6 +147,7 @@ export function presenceRestore(raw) {
  for (const value of raw.drafts.slice(0, PRESENCE_MAX_DRAFTS)) {
   try {
    const draft = presenceDraft(value, null, value.createdAt, value.id);
+   if (typeof value.updatedAt === 'string' && Number.isFinite(Date.parse(value.updatedAt))) draft.updatedAt = value.updatedAt;
    if (value.stage === 'ready' || value.stage === 'published') {
     if (!draft.privacyReviewed || draft.channels.some(c => !draft.captions[c])) continue;
     draft.stage = 'ready';
