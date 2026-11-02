@@ -22,7 +22,7 @@ const {setTimeout:delay} = require('node:timers/promises');
    w.HTMLElement.prototype.scrollIntoView=function(){};
    w.HTMLDialogElement.prototype.showModal=function(){this.open=true};
    w.HTMLDialogElement.prototype.close=function(){this.open=false};
-   w.fetch=async()=>new w.Response(JSON.stringify({error:'authentication_required'}),{status:401,headers:{'Content-Type':'application/json'}});
+   w.fetch=async()=>new Response(JSON.stringify({error:'authentication_required'}),{status:401,headers:{'Content-Type':'application/json'}});
   }
  });
  try {
