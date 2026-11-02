@@ -5,6 +5,9 @@ import {readFileSync} from 'node:fs';
 import {generateKeyPairSync,sign} from 'node:crypto';
 import {createNewsroomHandler} from '../worker/newsroom.mjs';
 import {createNewsroomConversationHandler} from '../worker/newsroom-conversations.mjs';
+import {exportSyntheticConversations,restoreSyntheticConversations} from '../worker/newsroom-conversation-recovery.mjs';
+import {restoreSyntheticEdition} from '../worker/newsroom-recovery.mjs';
+import {canonicalJSON,sha256} from '../worker/newsroom-contract.mjs';
 
 const ORIGIN='https://synthetic-newsroom.invalid',ORG='fictional_editorial_team';
 const manifest={schemaVersion:1,articles:[{id:'article-one',title:'Our fictional paper',blocks:[
@@ -169,4 +172,121 @@ test('identical revision IDs in a foreign organization never disclose another or
  assert.equal(foreign.status,404);assert.deepEqual(foreign.body,{error:'not_found'});
  l.env.NEWSROOM_ORG_ID=ORG;
  assert.equal((await request(l,'chat','reader','GET',p)).body.messages.length,1);
+});
+
+// Offline-only conversation recovery: never routed through the live Worker.
+async function recoveryCase(){
+ const src=fixture();const edition=await published(src);
+ const first=await request(src,'chat','commenter','POST',path(edition.revisionId)+'/messages',postPayload('archival-op-001','First-version question.'));
+ assert.equal(first.status,201);
+ const reply=await request(src,'chat','publisher','POST',path(edition.revisionId)+'/messages',postPayload('archival-op-002','First-version answer.'));
+ assert.equal(reply.status,201);
+ const revised=structuredClone(manifest);revised.articles[0].blocks[0].text='Edited copy in a separately published revision.';
+ const draft=await request(src,'editions','publisher','PUT',`/api/newsroom/drafts/${edition.id}`,{expectedGeneration:1,manifest:revised});assert.equal(draft.status,200);
+ const next=await request(src,'editions','publisher','POST',`/api/newsroom/drafts/${edition.id}/publish`,{expectedGeneration:2,operationId:'synthetic-publish-0002'});
+ assert.equal(next.status,201);
+ const postV2=await request(src,'chat','commenter','POST',path(next.body.revisionId)+'/messages',postPayload('archival-op-003','Second-version comment.'));
+ assert.equal(postV2.status,201);
+ const editions=await request(src,'editions','reader','GET',`/api/newsroom/editions/${edition.id}/export`);
+ assert.equal(editions.status,200);
+ const archive=await exportSyntheticConversations(src.env.NEWSROOM_DB,ORG,edition.id,{allowSyntheticExport:true});
+ return {src,edition,editions:editions.body,archive,oldId:edition.revisionId,newId:next.body.revisionId};
+}
+async function recoveryTarget(editions){
+ const target=fixture();
+ const restored=await restoreSyntheticEdition(target.env.NEWSROOM_DB,ORG,editions,{allowSyntheticRestore:true});
+ assert.equal(restored.restored,true);
+ return target;
+}
+async function rehashArchive(a){const {archiveSha256,...payload}=a;return {...payload,archiveSha256:await sha256(canonicalJSON(payload))};}
+
+test('offline export covers every message and restores exact two-revision anchors into an empty synthetic target',async()=>{
+ const {edition,editions,archive,oldId,newId}=await recoveryCase();
+ assert.equal(archive.kind,'newsroom-synthetic-conversation-archive');
+ assert.equal(archive.edition.editionId,edition.id);assert.equal(archive.messages.length,3);
+ assert.deepEqual(archive.revisions.map(r=>r.version),[1,2]);
+ const exported=JSON.parse(JSON.stringify(archive)); // portable, not tied to DB object identity
+ const target=await recoveryTarget(editions);
+ const result=await restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,exported,{allowSyntheticRestore:true});
+ assert.equal(result.restored,true);assert.equal(result.messageCount,3);
+ assert.equal(target.sqlite.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').get().n,3);
+ const old=await request(target,'chat','reader','GET',path(oldId));
+ const newer=await request(target,'chat','reader','GET',path(newId));
+ assert.equal(old.body.messages.length,2);assert.equal(newer.body.messages.length,1);
+ assert.equal(old.body.anchor.text,manifest.articles[0].blocks[0].text);
+ assert.notEqual(newer.body.anchor.text,old.body.anchor.text);
+ const twice=await exportSyntheticConversations(target.env.NEWSROOM_DB,ORG,edition.id,{allowSyntheticExport:true});
+ assert.deepEqual(twice,exported,'roundtrip preserves all operation IDs, authors, anchors, order, and hashes');
+ assert.equal(target.sqlite.prepare('SELECT value FROM unrelated_canary WHERE id=1').get().value,'preserved');
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,archive,{allowSyntheticRestore:true}),/restore_denied/);
+ assert.equal(target.sqlite.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').get().n,3);
+});
+
+test('explicit opt-in, organization, edition provenance and empty target are mandatory',async()=>{
+ const {editions,archive}=await recoveryCase();const target=await recoveryTarget(editions);
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,archive),/restore_denied/);
+ await assert.rejects(()=>exportSyntheticConversations(target.env.NEWSROOM_DB,ORG,archive.edition.editionId),/export_denied/);
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,'fictional_other',archive,{allowSyntheticRestore:true}),/restore_denied/);
+ const wrongRev=structuredClone(archive);wrongRev.revisions[0].sha256='f'.repeat(64);
+ const wrongArchive=await rehashArchive(wrongRev);
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,wrongArchive,{allowSyntheticRestore:true}),/restore_denied/);
+ target.sqlite.prepare("INSERT INTO nr_thread_messages (org_id,message_id,revision_id,block_id,author_sub,operation_id,request_sha256,body_text,created_at) VALUES(?,?,?,?,?,?,?,?,?)")
+  .run(ORG,'existing-message',archive.messages[0].revisionId,archive.messages[0].blockId,'commenter','preexisting-op',
+   'f'.repeat(64),'Existing record.',Date.now());
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,archive,{allowSyntheticRestore:true}),/restore_denied/);
+ assert.equal(target.sqlite.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').get().n,1);
+});
+
+test('tampered text, quoted paragraph digest, operation, author, and duplicate ID fail before writing',async()=>{
+ const {editions,archive}=await recoveryCase();
+ for(const change of [
+  a=>{a.messages[0].text='A silently edited comment.';},
+  a=>{a.messages[0].anchorSha256='0'.repeat(64);},
+  a=>{a.messages[0].requestSha256='0'.repeat(64);},
+  a=>{a.messages[1].messageId=a.messages[0].messageId;},
+  a=>{a.messages[1].operationId=a.messages[0].operationId;a.messages[1].authorSub=a.messages[0].authorSub;},
+  a=>{a.messages[0].authorSub='nonmember';},
+  a=>{a.messages[0].blockId='unknown-block';},
+ ]){
+  const bad=structuredClone(archive);change(bad);const target=await recoveryTarget(editions);
+  const tampered=await rehashArchive(bad);
+  await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,tampered,{allowSyntheticRestore:true}),/restore_denied/);
+  assert.equal(target.sqlite.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').get().n,0);
+ }
+});
+
+test('restoration is all-or-nothing when an insert fails after preflight',async()=>{
+ const {editions,archive}=await recoveryCase();const target=await recoveryTarget(editions);
+ target.sqlite.exec(`CREATE TRIGGER synthetic_forced_failure BEFORE INSERT ON nr_thread_messages
+ WHEN NEW.message_id='${archive.messages[1].messageId}' BEGIN SELECT RAISE(ABORT,'synthetic_injected_failure'); END;`);
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,archive,{allowSyntheticRestore:true}),/restore_denied/);
+ assert.equal(target.sqlite.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').get().n,0);
+ assert.equal(target.sqlite.prepare('SELECT value FROM unrelated_canary WHERE id=1').get().value,'preserved');
+});
+
+test('archived historical author must be pre-provisioned as eligible in synthetic target',async()=>{
+ const {editions,archive}=await recoveryCase();const target=await recoveryTarget(editions);
+ target.sqlite.prepare("UPDATE nr_memberships SET active=0 WHERE org_id=? AND subject='commenter'").run(ORG);
+ await assert.rejects(()=>restoreSyntheticConversations(target.env.NEWSROOM_DB,ORG,archive,{allowSyntheticRestore:true}),/restore_denied/);
+ assert.equal(target.sqlite.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').get().n,0);
+});
+
+test('export includes more than the 100-message reader page and rejects over-limit rather than truncating',async()=>{
+ const l=fixture(),edition=await published(l);
+ const statement=l.sqlite.prepare('INSERT INTO nr_thread_messages(org_id,message_id,revision_id,block_id,author_sub,operation_id,request_sha256,body_text,created_at) VALUES(?,?,?,?,?,?,?,?,?)');
+ for(let i=0;i<101;i++){
+  const text='Archive content '+i+'.';
+  const hash=await sha256(canonicalJSON({action:'comment',revisionId:edition.revisionId,blockId:'block-one',text}));
+  statement.run(ORG,'fake-message-'+i,edition.revisionId,'block-one','commenter','synthetic-archive-'+i,hash,text,Date.now()+i);
+ }
+ const read=await request(l,'chat','reader','GET',path(edition.revisionId));
+ assert.equal(read.body.messages.length,100);assert.equal(read.body.truncated,true);
+ const archive=await exportSyntheticConversations(l.env.NEWSROOM_DB,ORG,edition.id,{allowSyntheticExport:true});
+ assert.equal(archive.messages.length,101);
+ for(let i=101;i<=500;i++){
+  const text='Archive content '+i+'.';
+  const hash=await sha256(canonicalJSON({action:'comment',revisionId:edition.revisionId,blockId:'block-one',text}));
+  statement.run(ORG,'fake-message-'+i,edition.revisionId,'block-one','commenter','synthetic-archive-'+i,hash,text,Date.now()+i);
+ }
+ await assert.rejects(()=>exportSyntheticConversations(l.env.NEWSROOM_DB,ORG,edition.id,{allowSyntheticExport:true}),/export_denied/);
 });

@@ -3,6 +3,8 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {generateKeyPairSync,sign} from 'node:crypto';
 import {Miniflare} from 'miniflare';
+import {exportSyntheticConversations,restoreSyntheticConversations} from '../worker/newsroom-conversation-recovery.mjs';
+import {restoreSyntheticEdition} from '../worker/newsroom-recovery.mjs';
 
 const compatibilityDate=process.env.DS_WORKERD_COMPAT_DATE??'2026-07-30';
 if(!['2026-07-30','2026-10-28'].includes(compatibilityDate))throw Error('Unsupported synthetic compatibility date');
@@ -79,6 +81,39 @@ test(`workerd ${compatibilityDate}: two-member revision-anchored comments persis
   assert.equal((await(await call('reader','GET',path)).json()).messages.length,2);
   const newThread=await call('reader','GET',`/api/newsroom/conversations/${rev2}/block-one`);
   assert.equal(newThread.status,200);assert.equal((await newThread.json()).messages.length,0);
+  // A second ephemeral native D1 is an empty conversation target with restored
+  // identical publication sources and pre-provisioned fictional memberships.
+  const archive=await exportSyntheticConversations(db,org,editionId,{allowSyntheticExport:true});
+  assert.equal(archive.messages.length,2);
+  const publicationResponse=await call('reader','GET',`/api/newsroom/editions/${editionId}/export`);
+  assert.equal(publicationResponse.status,200);
+  const publication=await publicationResponse.json();
+  const target=new Miniflare({modules:true,modulesRoot:new URL('../',import.meta.url).pathname,
+   scriptPath:new URL('./newsroom-conversation-fixture.mjs',import.meta.url).pathname,
+   compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['NEWSROOM_DB'],
+   bindings:{APP_ORIGIN:origin,NEWSROOM_SYNTHETIC_ONLY:'true',NEWSROOM_ORG_ID:org,
+    ACCESS_ISSUER:issuer,ACCESS_AUD:audience,ACCESS_JWKS_URL:issuer+'/cdn-cgi/access/certs'},
+   outboundService:request=>{assert.equal(request.url,issuer+'/cdn-cgi/access/certs');return Response.json({keys:[jwk]});}});
+  try{
+   const dest=await target.getD1Database('NEWSROOM_DB');
+   await dest.prepare('CREATE TABLE independent_target_canary(value TEXT)').run();
+   await dest.prepare('INSERT INTO independent_target_canary(value) VALUES(?)').bind('intact').run();
+   await migrate(dest,'0004-newsroom-p1a.sql',14);
+   await migrate(dest,'0005-newsroom-conversations.sql',5);
+   await dest.prepare('INSERT INTO nr_organizations(org_id,label) VALUES(?,?)').bind(org,'Synthetic restored paper').run();
+   for(const [subject,role] of [['publisher','publisher'],['commenter','commenter'],['reader','reader']])
+    await dest.prepare('INSERT INTO nr_memberships(org_id,subject,role,active,created_at) VALUES(?,?,?,?,?)')
+     .bind(org,subject,role,1,Date.now()).run();
+   const editionRestore=await restoreSyntheticEdition(dest,org,publication,{allowSyntheticRestore:true});
+   assert.equal(editionRestore.restored,true);
+   const recovered=await restoreSyntheticConversations(dest,org,archive,{allowSyntheticRestore:true});
+   assert.equal(recovered.messageCount,2);
+   const secondExport=await exportSyntheticConversations(dest,org,editionId,{allowSyntheticExport:true});
+   assert.deepEqual(secondExport,archive);
+   assert.equal((await dest.prepare('SELECT value FROM independent_target_canary').first()).value,'intact');
+   await assert.rejects(()=>restoreSyntheticConversations(dest,org,archive,{allowSyntheticRestore:true}));
+   assert.equal((await dest.prepare('SELECT COUNT(*) AS n FROM nr_thread_messages').first()).n,2);
+  }finally{await target.dispose()}
   await db.prepare('UPDATE nr_memberships SET active=0 WHERE org_id=? AND subject=?').bind(org,'commenter').run();
   assert.equal((await call('commenter','GET',path)).status,404);
   await assert.rejects(()=>db.prepare('DELETE FROM nr_thread_messages WHERE org_id=?').bind(org).run());

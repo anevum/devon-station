@@ -22,3 +22,61 @@ The old RB01 owner-only Worker routes, Access policy, source journal, existing d
 Local synthetic SQLite transaction tests verify distinct identities, read/write roles, invalid JWT audience and forged role denial, inactive membership, direct SQL trigger enforcement, archive correction anchors, idempotency, request bounds and cross-origin behavior. The existing repository's CI must run at the exact committed head and, if possible, pinned native workerd/D1 tests should additionally exercise the new handler.
 
 Do not merge or deploy this stacked draft before the independently accepted RB01/01A release prerequisites. Real hosted tests additionally require explicit approval for a **separate nonclinical synthetic Cloudflare Worker/Access app/D1**, authorized actual test identities and a readback/rollback plan. After those checks, add a properly accessible discussion panel, scrolling/pagination, moderation and export/restore of conversations as separate bounded follow-ups. Do not treat a draft comment as a business decision.
+
+## Source-only recovery extension — synthetic conversation archive v1
+
+The offline module `worker/newsroom-conversation-recovery.mjs` exports
+`exportSyntheticConversations(db, orgId, editionId, {allowSyntheticExport:true})`
+and `restoreSyntheticConversations(db, orgId, archive, {allowSyntheticRestore:true})`.
+**Neither function is routed via HTTP**; it must never be passed a clinical or real-person dataset.
+The opt-in flags prevent accidental invocation from an unreviewed context.
+
+### Export contract
+
+- The archive is a portable JSON object with `schemaVersion:1`, fixed kind,
+  organization and edition identity, every published source revision ID/version/
+  SHA-256, and every immutable comment on those revisions (including comments
+  not visible in the 100-message reader page). Records retain `messageId`,
+  `authorSub`, `operationId`, `requestSha256`, exact `revisionId`/`blockId`,
+  body text, created-at, and the source paragraph digest.
+- Export is bounded to 20 revisions and **500 messages per edition**. If it
+  exceeds the bounds, it fails rather than returning a partial archive. This
+  is not yet suitable for growing conversations; future work needs verified
+  streaming/chunking and pagination.
+- `archiveSha256` is a non-keyed integrity checksum over canonical JSON; it
+  detects accidental changes. It is **not a digital signature**, identity
+  proof, encryption, audit attestation, or permission to share the file.
+
+### Offline recovery procedure
+
+1. Use a separately authorized *synthetic* isolated database with both additive
+   migrations applied; pre-provision the same fictional nonclinical organization
+   and the necessary fictional active author memberships. Do not import users,
+   passwords, Access claims, or permissions from an archive.
+2. Restore its matching immutable **published edition and all revisions first**
+   using the existing `restoreSyntheticEdition` process. The target must have
+   **zero conversation rows for the organization** before a conversation import.
+3. Restore the conversation archive with the explicit offline opt-in. It verifies
+   the envelope checksum, entire revision history and hashes, each existing
+   exact block text, message and operation integrity, author eligibility and
+   uniqueness before executing a single atomic D1/SQLite batch.
+4. Verify a re-export has identical canonical content and digest. Reimport to
+   the populated target must be refused without changing any row. The test
+   suite includes an injected halfway SQL failure and asserts zero partial
+   message rows plus preservation of unrelated data.
+
+**Limitations:** A conversation archive is **not** a standalone edition restore;
+its source revisions must already be installed. Old messages from a later-
+revoked member require that fictional author to be eligible in the temporary
+synthetic recovery target while the insert triggers run, then can be revoked
+again after verification. This is not permission to re-enable a real account.
+The recovery process requires a quiescent target (no concurrent writers)
+for its empty-target check and batch. No public restore endpoint, clinical
+retention policy, encrypted storage, independent identity verification, user
+migration, or live Cloudflare backup/restore has been approved or built.
+
+**Test evidence:** `node --test tests/newsroom-conversations.test.mjs`
+plus the dedicated native D1/workerd test (run in CI, not automatically
+assumed passing). The latter must prove a second independent ephemeral D1,
+matched edition history, comment roundtrip, reimport denial and canary
+preservation before source-verification status can be upgraded.
