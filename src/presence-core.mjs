@@ -31,7 +31,7 @@ function presenceChannels(value) {
  return channels;
 }
 export function presenceDraft(input, previous = null, at = new Date().toISOString(), id = presenceId()) {
- if (previous?.stage === 'published') throw Error('Published records are immutable. Create a new idea instead.');
+ if (previous?.stage === 'published' || Object.keys(previous?.published || {}).length) throw Error('A partially or fully published record cannot be edited. Create a new idea instead.');
  const channels = presenceChannels(input?.channels);
  const captions = {};
  for (const platform of PRESENCE_CHANNELS) captions[platform] = presenceString(input?.captions?.[platform], platform === 'threads' ? 500 : 2200, platform + ' caption');
