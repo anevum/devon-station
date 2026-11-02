@@ -58,3 +58,19 @@
 .page-presence .ps-goal-meter{height:8px;margin:12px 0;background:#263544;border-radius:10px;overflow:hidden}
 .page-presence .ps-goal-meter span{display:block;height:100%;background:linear-gradient(90deg,#68cad5,#b49ada);border-radius:inherit}
 @media(max-width:750px){.page-presence .ps-goal-grid{grid-template-columns:1fr}}
+
+/* Explicit encrypted backup UX; not a connection indicator or background sync. */
+.page-presence .ps-vault{margin-top:18px;border-color:#384757;background:radial-gradient(ellipse at 94% 0%,#6b59802a,transparent 50%),var(--panel)}
+.page-presence .ps-vault .panel-head{align-items:flex-start;gap:12px}
+.page-presence .ps-vault form{display:grid;gap:11px;min-width:0}
+.page-presence .ps-vault-grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:13px}
+.page-presence .ps-vault-grid label,.page-presence .ps-vault-file-label{display:grid;gap:6px;font-size:12px;color:var(--muted);min-width:0}
+.page-presence .ps-vault input[type=password],.page-presence .ps-vault input[type=file]{width:100%;min-width:0;min-height:44px;padding:10px;background:#0d1520;border:1px solid var(--line);border-radius:9px;color:var(--ink)}
+.page-presence .ps-vault-buttons{gap:8px;flex-wrap:wrap}
+.page-presence .ps-vault button{white-space:normal;overflow-wrap:anywhere}
+.page-presence .ps-vault-status{border:1px solid #324653;border-radius:10px;padding:12px;color:#c4d8de;background:#0b1822;margin:12px 0;font-size:12px;overflow-wrap:anywhere}
+.page-presence #ps-vault-preview{padding:13px;border:1px solid #668b8e;border-radius:12px;background:#1b2c35;margin:10px 0}
+.page-presence #ps-vault-preview[hidden]{display:none}
+.page-presence #ps-vault-preview p{margin:0 0 12px;font-size:12px;line-height:1.6}
+.page-presence #ps-vault-preview button{margin-right:9px;margin-bottom:6px}
+@media(max-width:650px){.page-presence .ps-vault-grid{grid-template-columns:1fr}.page-presence .ps-vault-buttons button{flex:1 1 160px}}
