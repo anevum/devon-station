@@ -131,6 +131,9 @@ The hardened `worker/access.mjs` is unchanged: Git blob
    documents, revision audits, push records and cache. Apply the additive journal
    migration twice there; verify source/grant and journal boundaries. Keep all
    rows and sensitive evidence private. This session performed no authentic export.
+   Use the [whole-database recovery evidence procedure](RB01-AUTHENTIC-RECOVERY.md)
+   and its read-only offline comparator after a separately approved restore;
+   matching local copies alone is not proof of a Cloudflare restore.
 5. **Prove guarded fallback on that target.** Use the preserved V0.3 server entry
    with the reviewed hardened Access module and reviewed assets/configuration.
    Verify named-user denial/allow behavior and push/state preservation before
