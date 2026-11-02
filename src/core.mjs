@@ -1,5 +1,5 @@
 export const AREAS=['Family & Home','Shinewell','Devon Works','Writing','ANEVUM','Incubator'];
-export const SECTIONS=['command','workspace','inbox','portfolio','works','infrastructure','writing','anevum','reviews','settings'];
+export const SECTIONS=['command','workspace','inbox','portfolio','works','infrastructure','writing','anevum','reviews','settings','presence'];
 export const PIPELINE=['Capture','Classify','Scope','Prioritize','Design','Build','Test','Review','Release','Maintain','Archive'];
 export const DEFAULTS={theme:'obsidian',accent:'cyan',density:'compact',motion:'system',contrast:'normal'};
 export function esc(value){return String(value??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));}
