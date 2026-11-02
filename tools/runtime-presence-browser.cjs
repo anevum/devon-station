@@ -43,6 +43,22 @@ const {join}=require('node:path');
    await page.locator('#ps-snapshot button[type=submit]').click();
    const sample=await page.evaluate(()=>JSON.parse(localStorage.getItem('devon-station:presence:v1')));
    if(sample.snapshots.length!==1||sample.snapshots[0].followers!==34||sample.snapshots[0].views!==0||sample.snapshots[0].engagements!==null)throw Error('Local metrics did not persist correctly');
+   // First-party WebCrypto runs in the actual responsive browser, never on the API.
+   const beforeVault=await page.evaluate(()=>localStorage.getItem('devon-station:presence:v1'));
+   const pass='Synthetic recovery passphrase 2026 for this test.';
+   await page.locator('#ps-vault-pass').fill(pass);
+   await page.locator('#ps-vault-repeat').fill(pass);
+   await page.locator('#ps-vault-form button[value=download]').click();
+   await page.waitForFunction(()=>document.querySelector('#ps-vault-status')?.textContent.includes('Encrypted file prepared.'),{timeout:12000});
+   if(await page.locator('#ps-vault-pass').inputValue())throw Error('Vault passphrase remained in the form');
+   if(await page.locator('#ps-vault-repeat').inputValue())throw Error('Vault confirmation remained in the form');
+   if(await page.evaluate(()=>localStorage.getItem('devon-station:presence:v1'))!==beforeVault)throw Error('Encrypted download altered device data');
+   // The synthetic runtime intentionally lacks the reviewed 0004 D1 migration.
+   // A private-vault request must fail without damaging the current local records.
+   await page.locator('#ps-vault-pass').fill(pass);
+   await page.locator('#ps-vault-form button[value=preview]').click();
+   await page.waitForFunction(()=>document.querySelector('#ps-vault-status')?.textContent.includes('not configured or available'),{timeout:12000});
+   if(await page.evaluate(()=>localStorage.getItem('devon-station:presence:v1'))!==beforeVault)throw Error('Unavailable private vault altered local records');
    const newOverflow=await page.evaluate(()=>document.documentElement.scrollWidth-window.innerWidth);
    if(newOverflow>1)throw Error('Insight panel overflow at '+width+': '+newOverflow);
    const undersized=await page.locator('#view button:visible, #view input:visible, #view select:visible').evaluateAll(els=>els.filter(el=>el.type!=='checkbox'&&el.getBoundingClientRect().height<43).map(el=>({tag:el.tagName,id:el.id,h:el.getBoundingClientRect().height})));
