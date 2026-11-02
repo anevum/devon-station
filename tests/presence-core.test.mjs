@@ -80,7 +80,7 @@ test('missing source metrics stay null; required followers never become fabricat
 test('snapshots are source/window-specific, idempotent and compare only different dates',()=>{
  let snapshots=presenceAddSnapshot([],presenceSnapshot(metric('instagram','2026-10-26',1)));
  assert.throws(()=>presenceAddSnapshot(snapshots,presenceSnapshot(metric('instagram','2026-10-26',1))),/already/);
- snapshots=presenceAddSnapshot(snapshots,presenceSnapshot(metric('instagram','2026-11-02',1,7)));
+ snapshots=presenceAddSnapshot(snapshots,presenceSnapshot(metric('instagram','2026-10-26',1,7)));
  let trend=presenceTrend(snapshots,'instagram');assert.equal(trend.net,null);
  snapshots=presenceAddSnapshot(snapshots,presenceSnapshot(metric('instagram','2026-11-02',44,7,1400,100)));
  trend=presenceTrend(snapshots,'instagram');assert.equal(trend.net,43);
