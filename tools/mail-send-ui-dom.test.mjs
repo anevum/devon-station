@@ -10,7 +10,7 @@ const operationId='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const deliveryId='123e4567-e89b-42d3-a456-426614174016';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
 const copy=d=>({...d,to:d.to.slice()});
-function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false}={}){
+function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{
   url:'https://station.example/#mail',runScripts:'outside-only'
  });
@@ -37,6 +37,11 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
   if(path==='/api/mail/drafts/save'){
    const updated={...records[0],revision:2,to:body.to,subject:body.subject,body:body.body};
    records[0]=updated;return reply({draft:copy(updated)});
+  }
+  if(path==='/api/mail/drafts/delete'){
+   assert.equal(body.id,savedId);assert.equal(body.revision,2);
+   if(pendingDelete)return reply({error:'mail_draft_pending_delivery'},409);
+   records.splice(0,1);return reply({deleted:true});
   }
   if(path==='/api/mail/outbox/prepare'){
    assert(outgoing,'UI may never prepare when outgoing is disabled');
@@ -232,5 +237,21 @@ test('outbox history rejects half-linked receipts and never enables resend',asyn
  assert.equal(count(x,'/api/mail/outbox/prepare'),0);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  assert(x.doc.querySelector('#mail-drafts').textContent.includes('Could not verify prior delivery'));
+ x.dom.window.close();
+});
+
+
+test('unresolved outgoing delivery blocks draft deletion without losing saved content',async()=>{
+ const x=await savedDraft(setup({pendingDelete:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const previous=x.records[0];
+ x.setConfirm(true);
+ x.doc.querySelector('[data-mail-draft-action="delete"]').click();await wait();
+ assert.equal(count(x,'/api/mail/drafts/delete'),1);
+ assert.equal(x.records.length,1);
+ assert.equal(x.records[0],previous);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('Deletion is blocked'));
+ assert(x.prompts[0].includes('does not cancel queued mail'));
  x.dom.window.close();
 });
