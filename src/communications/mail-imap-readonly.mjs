@@ -62,8 +62,8 @@ export function createReadOnlyImapProvider({connector} = {}) {
           const options = readonlyOptions({cursor, uidValidity, limit});
           const uids = parseSearchUids(await exchange(options.search, stepSignal), options.start).slice(0,limit);
           if (!uids.length) return {uidValidity, messages: []};
-          const raw = await exchange(`UID FETCH ${uids.join(',')} (UID FLAGS INTERNALDATE BODY.PEEK[HEADER.FIELDS (FROM SUBJECT DATE CONTENT-TYPE CONTENT-TRANSFER-ENCODING)] BODY.PEEK[TEXT])`, stepSignal);
-          // The connector must decode bounded MIME text/plain; never treat raw/HTML as safe text.
+          const raw = await exchange(`UID FETCH ${uids.join(',')} (UID FLAGS INTERNALDATE BODY.PEEK[])`, stepSignal);
+          // Full RFC 5322 octets are decoded by the trusted bounded MIME layer; never treat raw/HTML as safe text.
           if (!raw || !Array.isArray(raw.messages) || raw.messages.length > uids.length) reject('invalid_imap_fetch');
           const selected = new Set(uids), seen = new Set();
           for (const row of raw.messages) {
