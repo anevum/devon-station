@@ -6,7 +6,7 @@
 const path='/api/mail/drafts';
 const state={enabled:false,loaded:false,busy:false,items:[],selected:null,working:null,
  dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null,
- outgoingEnabled:false,pendingSend:null};
+ outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null};
 const element=(tag,kind,text)=>{
  const el=document.createElement(tag);
  if(kind)el.className=kind;
@@ -61,11 +61,38 @@ function render(){
  const refresh=action('Reload','reload');
  const create=action('New Draft','create');
  refresh.disabled=create.disabled=state.busy||!!state.pendingSend;
- controls.append(refresh,create);bar.append(controls);root.append(bar);
+ controls.append(refresh,create);
+ if(state.outboxEnabled){
+  const inspect=action(state.outboxLoaded?'Refresh Outbox History':'Inspect Outbox History','outbox-refresh');
+  inspect.disabled=state.busy;controls.append(inspect);
+ }
+ bar.append(controls);root.append(bar);
  const info=element('p','mail-draft-live',state.busy?'Saving drafts…':
   state.error||state.notice||(state.outgoingEnabled?'Outgoing mail requires a saved draft, separate preparation, and a second explicit confirmation.':'Drafts are private and never sent until sending is separately enabled.'));
  info.setAttribute('role','status');info.setAttribute('aria-live','polite');
  root.append(info);
+ if(state.outboxEnabled){
+  const history=element('section','mail-outbox-history');
+  history.setAttribute('aria-label','Durable outbox status history');
+  history.append(element('h3','mail-draft-heading','Delivery history · Status only'));
+  history.append(element('p','mail-draft-notice','Read-only receipts. No message contents or retry actions. Reloading does not cancel prepared mail.'));
+  if(state.outboxError)history.append(element('p','mail-draft-live',state.outboxError));
+  if(!state.outboxLoaded)history.append(element('p','mail-draft-empty','Select Inspect Outbox History to retrieve prior attempts.'));
+  else if(!state.outboxItems.length)history.append(element('p','mail-draft-empty','No saved delivery receipts.'));
+  else{
+   const list=element('ol','mail-outbox-list');
+   for(const entry of state.outboxItems){
+    const item=element('li','mail-outbox-item');item.dataset.outboxState=entry.state;
+    item.append(element('strong','',outboxStateLabel(entry.state)));
+    item.append(element('span','mail-draft-notice','Delivery '+entry.deliveryId));
+    item.append(element('time','mail-draft-notice','Updated '+new Date(entry.updatedAt).toLocaleString()));
+    item.append(element('p','mail-draft-notice',outboxStateAdvice(entry.state)));
+    list.append(item);
+   }
+   history.append(list);
+  }
+  root.append(history);
+ }
  if(!state.loaded){root.append(element('p','mail-draft-empty','Loading protected drafts…'));return;}
  if(state.items.length){
   const listing=element('div','mail-draft-list');
@@ -281,10 +308,46 @@ function closeSendReview(){
  state.notice='Review closed. The original saved draft and its separate outbox record have not been deleted or reconciled.';
  render();
 }
+const OUTBOX_STATES=Object.freeze(['queued','claimed','accepted','rejected','failed','uncertain']);
+function outboxStateLabel(status){
+ return ({queued:'Prepared / queued',claimed:'Claimed / unconfirmed',accepted:'Accepted by SMTP',
+  rejected:'Rejected by SMTP',failed:'Submission failed',uncertain:'Delivery uncertain'})[status];
+}
+function outboxStateAdvice(status){
+ if(status==='accepted')return 'Provider acceptance is not recipient delivery confirmation.';
+ if(status==='queued')return 'A prepared record exists. Do not prepare another copy without reconciliation.';
+ if(status==='claimed'||status==='uncertain')return 'May have been submitted. Do not retry; reconcile manually.';
+ return 'Terminal receipt. This delivery cannot be automatically retried.';
+}
+async function loadOutboxHistory(){
+ if(state.busy||!state.outboxEnabled)return;
+ state.busy=true;state.outboxError=null;render();
+ try{
+  const result=await api('/api/mail/outbox');
+  if(!result||!Array.isArray(result.outbox)||result.outbox.length>100)throw Error('bad_outbox_history');
+  const seen=new Set();
+  const list=result.outbox.map(row=>{
+   if(!row||typeof row.deliveryId!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(row.deliveryId)||
+      !OUTBOX_STATES.includes(row.state)||seen.has(row.deliveryId)||
+      typeof row.createdAt!=='string'||!Number.isFinite(Date.parse(row.createdAt))||
+      typeof row.updatedAt!=='string'||!Number.isFinite(Date.parse(row.updatedAt)))
+     throw Error('bad_outbox_history');
+   seen.add(row.deliveryId);
+   return {deliveryId:row.deliveryId,state:row.state,createdAt:row.createdAt,updatedAt:row.updatedAt};
+  });
+  state.outboxItems=list.reverse();state.outboxLoaded=true;
+ }catch(e){
+  state.outboxError=e.message==='mail_sign_in_required'?
+   'Owner session expired. Sign in again to inspect mail receipts.':
+   'Outbox status could not be verified. Do not resubmit or create another delivery.';
+ }finally{state.busy=false;render();}
+}
 document.addEventListener('click',e=>{
  const clicked=e.target.closest?.('[data-mail-draft-action]');
  if(!clicked||!host()?.contains(clicked))return;
  const a=clicked.dataset.mailDraftAction;
+ if(a==='outbox-refresh'){void loadOutboxHistory();return;}
  if(a==='send-prepare'){void prepareSend();return;}
  if(a==='send-submit'){void submitSend();return;}
  if(a==='send-status'){void checkSendStatus();return;}
@@ -307,17 +370,20 @@ document.addEventListener('click',e=>{
 document.addEventListener('input',e=>{
  if(!host()?.contains(e.target)||!e.target?.dataset?.mailDraftField||state.pendingSend)return;
  capture();state.dirty=true;state.pendingSave=null;
+ const review=host()?.querySelector('[data-mail-draft-action="send-prepare"]');
+ if(review)review.disabled=true;
 });
 globalThis.StationDrafts=Object.freeze({
- mount(container,enabled,outgoingEnabled=false){
+ mount(container,enabled,outgoingEnabled=false,outboxEnabled=false){
   if(!container)return;
   state.enabled=enabled===true;
   state.outgoingEnabled=state.enabled&&outgoingEnabled===true;
+  state.outboxEnabled=state.enabled&&outboxEnabled===true;
   if(!state.enabled)return;
   if(!state.loaded&&!state.busy)void reload();
   else render();
  }
 });
 const initial=host();
-if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true',initial.dataset.outgoingEnabled==='true');
+if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true',initial.dataset.outgoingEnabled==='true',initial.dataset.outboxEnabled==='true');
 })();
