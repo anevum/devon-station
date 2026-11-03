@@ -19,6 +19,24 @@ This additive, source-only change implements a GET-only, owner-bound `/api/finan
 - Configure only after independent permission review: `MERCURY_FINANCE_READ_TOKEN` is a separate backend **read-only** Mercury API token, not the token or authenticated session used by ChatGPT's Mercury connector. `ALPACA_FINANCE_PAPER_KEY`, `ALPACA_FINANCE_PAPER_SECRET`, `ALPACA_FINANCE_MODE=paper` are separate restricted paper broker credentials. Never commit credentials in public source, Notion, logs or client code.
 - Provider HTTP responses are byte-bounded (1.25 MB), time-bounded (8 seconds), redirect-rejecting and parsed with strict complete evidence checks. Failed providers only return coarse `unavailable` metadata, not provider response bodies or secrets. Response inherits `Cache-Control: no-store, private`.
 
+## Release packaging compatibility
+
+This source branch additionally updates the **review-only** RB01 package verifier
+(`tools/prepare-rb01-review.mjs`) to recognize the finance Worker import:
+the original 12-module recovery-only package remains valid, and the 13th
+`worker/finance-readonly.mjs` module becomes mandatory when
+`worker/index.mjs` imports it. Unreferenced additional modules and a missing
+imported finance module are rejected. The guarded legacy fallback **remains
+four modules** with no finance backend. Review manifests use the exact
+`sourceCommit` as provenance and leave `sourceBranch` unasserted, so a
+stacked or detached CI checkout is not misreported as RB01's original branch.
+
+`tests/release-preparation.test.mjs` adds synthetic module-graph acceptance
+and negative cases. This resolves an otherwise deterministic finance review
+bundle rejection after FIN01 expanded the generated bundle from 12 to 13
+modules. Only source/isolated tests are available while GitHub Actions remain
+queued; this does not authorize production packaging or deployment.
+
 ## Verification and release conditions
 
 The isolated finance adapter suite contains 15 synthetic test cases, including multi-page Mercury cursors, duplicate detection, failed second pages and external account exclusion. Run `node --test tests/finance-readonly.test.mjs tests/finance-route.test.mjs` and `npm test` at the *exact candidate head*, then the existing npm build, privacy checker and relevant Worker/runtime-browser suites. Test real signed owner/nonowner identities and provider sandbox/read-only entitlements before considering deployment. The source-only synthetic tests cannot prove Mercury API authorization, account onboarding, Alpaca access, or complete portfolio reconciliation.
