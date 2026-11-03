@@ -66,6 +66,34 @@ Requests use `credentials: same-origin`, `redirect: manual` and
   external frontend framework, CDN or external service is introduced.
 - No real banking or brokerage details are checked into source.
 
+## Integrated acceptance extensions
+
+The original DevonStation Node/Workerd testing framework now also covers
+Finance rather than relying exclusively on a standalone generated mockup:
+
+- `tests/finance-navigation.test.mjs` independently checks that the new
+  eleventh Finance section does **not** shift or falsely label the original
+  Alt 1 through Alt 0 keyboard shortcuts.
+- `tools/runtime-dom-check.cjs` uses the real hosted shell, actual
+  authenticated Worker router, signed synthetic owner and non-owner JWTs,
+  read-only finance source statuses and explicit cross-owner denial.
+- A second isolated DOM runtime launches with a strictly synthetic
+  Mercury checking/savings fixture (both unfunded at $0.00) and Alpaca
+  paper-only account and positions. The browser must show both zero-dollar
+  real-bank fixture cards, distinguish paper equity ($10,000.00),
+  decline to fabricate TPD%, and refuse a different signed subject.
+- `tools/runtime-browser-check.cjs` extends the existing 1440-, 390-
+  and 320-pixel **actual recovered shell** checks with Finance navigation,
+  source separation, explicit unavailable state, horizontal overflow,
+  focus/shortcut labels, touch targets and screenshots. This is a
+  synthetic Workerd/HTTP acceptance test; no outside provider is called.
+
+These new checks are committed test source and are **not claimed to have
+passed the complete repository CI** until the exact-head GitHub Actions
+runs finish. The isolated keyboard-map reproduction passed 2/2 locally.
+Financial fixtures are never enabled in a production Worker; they exist
+only in the local Node runtime test harness.
+
 ## Reproducible acceptance
 
 ```sh
