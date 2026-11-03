@@ -7,7 +7,7 @@ const response=(error,status)=>({status,body:{error}});
 
 // Independent send flag: enabling the outbox and sender registry cannot start SMTP.
 export function mailSendingEnabled(env,connect){
- return env?.MAIL_OUTBOX_ENABLED==='true' && env.MAIL_SEND_ENABLED==='true' &&
+ return env?.MAIL_OUTBOX_ENABLED==='true' && env.MAIL_DRAFTS_ENABLED==='true' && env.MAIL_SEND_ENABLED==='true' &&
   env.MAIL_SENDER_VERIFIED==='true' && env.MAIL_SMTP_ADDRESS===MAILBOX &&
   typeof env.MAIL_OWNER_SUB==='string' && env.MAIL_OWNER_SUB.length>0 &&
   typeof env.MAIL_SMTP_PASSWORD==='string' && env.MAIL_SMTP_PASSWORD.length<=256 &&
@@ -34,7 +34,7 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
    return {status:200,body:{receipt,sendingEnabled:mailSendingEnabled(env,connect)}};
   }
   if(url.pathname==='/api/mail/outbox/submit'&&request.method==='POST'){
-   if(!mailSendingEnabled(env,connect)||env.MAIL_DRAFTS_ENABLED!=='true')
+   if(!mailSendingEnabled(env,connect))
     return response('mail_send_not_enabled',503);
    const input=await readBody(request,4096);
    if(input?.confirmedByOwner!==true ||
