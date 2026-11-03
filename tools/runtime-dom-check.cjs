@@ -19,7 +19,13 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
   // Select the known fixture explicitly rather than assuming default sort order.
   // Keep the original project source-link assertion and wait for its redraw.
   const projectA=doc.querySelector('[data-ws-project="project-a"]');
-  if(!projectA)throw Error('synthetic project A missing from authorized scope');
+  if(!projectA){
+    const projectIds=[...doc.querySelectorAll('[data-ws-project]')].map(n=>n.getAttribute('data-ws-project'));
+    const observedLink=doc.querySelector('.ws-project-header a')?.getAttribute('href')??'absent';
+    // This test server has only synthetic project data, never live records.
+    console.error('Synthetic fixture project diagnostic',JSON.stringify({projectIds,observedLink,workspaceStatus:doc.querySelector('#ws-status')?.textContent||''}));
+    throw Error('synthetic project A missing from authorized scope');
+  }
   projectA.click();
   await until(()=>doc.querySelector('.ws-project-header a')?.href.includes('synthetic-project-a'),'selected project source link preserved');
   // Async redraw must preserve a keyboard user's place after reload/scope change.
