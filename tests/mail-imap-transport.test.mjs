@@ -20,7 +20,7 @@ function server({badUid=false, oversized=false, malformed=false, noLogin=false, 
       if(cmd.includes('EXAMINE')){respond('* FLAGS (\\Seen \\Answered)\r\n* OK [UIDVALIDITY 7] valid\r\n'+tag+' OK selected\r\n');return;}
       if(cmd.includes('UID SEARCH')){respond('* SEARCH 1\r\n'+tag+' OK done\r\n');return;}
       if(cmd.includes('UID FETCH')) {
-        const size=oversized?65537:message.length;
+        const size=oversized?262145:message.length;
         respond('* 1 FETCH (UID '+(badUid?'garbage':'1')+' FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 10:20:00 -0500" BODY[] {'+size+'}\r\n');
         if(!oversized)respond(message);
         respond((malformed?'oops':')')+'\r\n'+tag+' OK fetched\r\n');return;
