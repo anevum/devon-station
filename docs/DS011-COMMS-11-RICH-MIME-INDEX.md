@@ -1,0 +1,21 @@
+# DS011-COMMS-11 — Bounded rich MIME indexing and binary-attachment isolation
+
+**Status:** source-only / draft, **NOT DEPLOYED**. Stacked on COMMS-10 PR #29, COMMS-09 PR #27 and all earlier DS011 RB01 and Communications prerequisites.
+
+## Purpose and implementation
+- Replaced only the production **strict decoder injection** with a more interoperable MIME parser. `src/communications/mail-mime-text.mjs` remains in place for its original conservative tests and archival validation.
+- `src/communications/mail-mime-safe.mjs` parses bounded RFC 5322 messages using a pinned, dependency-free `postal-mime 4.2.0` ES module distribution. It supports standard multipart/alternative, Base64, quoted-printable, encoded subjects and HTML-only messages.
+- HTML is converted **server-side** to inert plain text. No HTML strings, remote URLs, tracking images, untrusted instructions, raw octets or attachment bytes are passed to D1 or inserted as HTML into the client. The existing UI still uses `textContent` and no active email links.
+- Binary attachments are parsed only into temporary Worker memory; the reader explicitly says attachment content is unavailable. Attachment download/persistence is **not implemented** and must not be claimed.
+- The transport now awaits the asynchronous bounded parser. Hard limits: raw literal 256 KiB; 10 messages per response; combined IMAP response approximately 2.7 MiB; MIME nesting 16; header budget 64 KiB; 48 MIME parts; nested RFC822 2; forwarded addresses 96; D1-indexed body 4,096 UTF-16 code units and subject 512. Exceeding an index constraint **rejects the sync before the atomic D1 commit** rather than silently discarding content and advancing UID cursor. Therefore large legitimate messages currently prevent synchronization; further storage and on-demand retrieval design is required before production.
+- Existing owner-subject binding, IMAP EXAMINE / UID SEARCH / UID FETCH PEEK-only policy, separate MAIL_DB requirement, and SMTP-off behavior remain unchanged. No production credentials or mail routing changed.
+- Tests cover multipart/alternative, HTML-only, encoded header decoding, isolated attachment bytes, malicious email markup, body and wire caps, excessive nesting, and a full synthetic TLS IMAP → owner API → D1 read path. Existing actual workerd tests must still pass.
+
+## Third-party provenance and license
+
+Copied the **published ES module build** of `postal-mime@4.2.0` and its MIT-0 license into `vendor/postal-mime` from the vendored npm build in `dougwithseismic/agent-desk` (`template/desks/kit/mail/vendor/postal-mime/`). That project's `vendor/README.md` identifies the upstream tarball SHA1 `82c050419201ef62735ae2f8e4d75464954b392c`, integrity SHA512 `QG5Rh8wY/zjwFF1lKWcBbwWcAWR5jWodmMPL4gMik43XDLebtWoAAPyG0lrE2kYYZ5IHTASrepGuGO0YIwNKAg==`, publisher Andris Reinman, published October 29, 2026, and notes that sourceMappingURL comments were removed. The upstream Git tag at `postalsys/postal-mime@v4.2.0` is commit `939a220bd518f54d98a088c315d7227e6215cae3`. License is in `vendor/postal-mime/LICENSE.txt`. This copy has been checked against the GitHub-hosted published-build vendor, **not** independently cryptographically verified against npm registry tarball in this environment; an upstream archive integrity check is an acceptance prerequisite.
+
+## Remaining critical release gaps
+No real Purelymail TLS/login/UID syncing has been tested; no persistent production MAIL_DB has been provisioned; no backup/restore or approved retention policy; no real owner session, tenant revocation or mail sender authorization verification; and no Sent/Drafts/Spam, folder operations, reply/threading, search, SMTP, outbox idempotence, full message/attachment persistence, customer isolation, or live deployment. Strict input limits are an interim testing boundary; this is **not yet a full email application**.
+
+Refer to [draft PR #29](https://github.com/devonalanakins/devon-station/pull/29) and [draft PR #27](https://github.com/devonalanakins/devon-station/pull/27) for upstream stack. Current Worker release-package module allowlist is 36 modules and still pins hardened Access and guarded fallback fingerprints. Keep all PRs draft and production unchanged until security/release gates pass.
