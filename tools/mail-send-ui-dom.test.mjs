@@ -10,7 +10,7 @@ const operationId='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const deliveryId='123e4567-e89b-42d3-a456-426614174016';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
 const copy=d=>({...d,to:d.to.slice()});
-function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false}={}){
+function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false,saveLocked=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{
   url:'https://station.example/#mail',runScripts:'outside-only'
  });
@@ -35,6 +35,8 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
    records.push(row);return reply({draft:copy(row)});
   }
   if(path==='/api/mail/drafts/save'){
+   if(saveLocked&&outbox.some(row=>row.draftId===savedId))
+    return reply({error:'mail_draft_delivery_locked'},409);
    const updated={...records[0],revision:2,to:body.to,subject:body.subject,body:body.body};
    records[0]=updated;return reply({draft:copy(updated)});
   }
@@ -253,5 +255,22 @@ test('unresolved outgoing delivery blocks draft deletion without losing saved co
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  assert(x.doc.querySelector('#mail-drafts').textContent.includes('Deletion is blocked'));
  assert(x.prompts[0].includes('does not cancel queued mail'));
+ x.dom.window.close();
+});
+
+test('saved draft cannot be overwritten after a linked SMTP attempt on another session',async()=>{
+ const x=await savedDraft(setup({saveLocked:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const original=x.records[0].body;
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'uncertain',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ update(x,'body','My new changes remain local and are not transmitted');
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ assert.equal(count(x,'/api/mail/drafts/save'),2,'server must explicitly reject the new operation');
+ assert.equal(x.records[0].body,original,'server copy is immutable');
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('Edits are blocked'));
+ assert(x.doc.querySelector('[data-mail-draft-field="body"]').value.includes('My new changes remain local'));
  x.dom.window.close();
 });
