@@ -159,7 +159,7 @@ test(`workerd ${compatibilityDate}: reordered FETCH commits only a complete fram
      writable:new WritableStream({write(chunk){
       const command=new TextDecoder().decode(chunk),tag=command.slice(0,5);commands.push(command);
       if(command.includes(' LOGIN '))respond(tag+' OK authenticated\r\n');
-      else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] valid\r\n'+tag+' OK selected\r\n');
+      else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] [UIDNEXT 2] valid\r\n'+tag+' OK selected\r\n');
       else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK found\r\n');
       else if(command.includes('UID FETCH')){
        respond('* 1 FETCH (BODY[] {'+payload.length+'}\r\n');respond(payload);
@@ -208,7 +208,11 @@ test(`workerd ${compatibilityDate}: incremental polling preserves indexed mail a
    {name:'empty new UIDVALIDITY cohort retains old mail',validity:8,start:1,uids:[],highest:0,imported:0,reset:true},
    {name:'new cohort arrival retains earlier cohorts',validity:8,start:1,uids:[2],highest:2,imported:1},
    {name:'exhausted UID ceiling performs only EXAMINE',validity:8,start:null,uids:[],highest:4294967295,imported:0,ceiling:true},
-   {name:'UIDVALIDITY reset after exhausted ceiling',validity:9,start:1,uids:[],highest:0,imported:0,reset:true}
+   {name:'UIDVALIDITY reset after exhausted ceiling',validity:9,start:1,uids:[],highest:0,imported:0,reset:true},
+   {name:'empty scan budget persists first watermark',validity:10,start:1,uids:[],highest:4096,uidNext:10000,imported:0,reset:true},
+   {name:'next poll resumes after persisted empty range',validity:10,start:4097,uids:[],highest:8192,uidNext:10000,imported:0},
+   {name:'last gap stops before future UID space',validity:10,start:8193,uids:[],highest:9999,uidNext:10000,imported:0},
+   {name:'later arrival is not skipped by prior empty scans',validity:10,start:10000,uids:[10000],highest:10000,uidNext:10001,imported:1}
   ];
   for(const scenario of cases)await t.test(scenario.name,async()=>{
    if(scenario.ceiling){
@@ -228,11 +232,15 @@ test(`workerd ${compatibilityDate}: incremental polling preserves indexed mail a
      writable:new WritableStream({write(chunk){
       const command=new TextDecoder().decode(chunk),tag=command.slice(0,5);commands.push(command);
       if(command.includes(' LOGIN '))respond(tag+' OK authenticated\r\n');
-      else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY '+scenario.validity+'] valid\r\n'+tag+' OK selected\r\n');
+      else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY '+scenario.validity+'] [UIDNEXT '+(scenario.uidNext??(scenario.error?12:Math.min(scenario.highest+1,4294967295)))+'] valid\r\n'+tag+' OK selected\r\n');
       else if(command.includes('UID SEARCH')){
        assert.notEqual(scenario.start,null);
-       assert.equal(command,tag+' UID SEARCH UID '+scenario.start+':4294967295\r\n');
-       respond('* SEARCH'+scenario.uids.map(uid=>' '+uid).join('')+'\r\n'+tag+' OK found\r\n');
+       const [,lower,upper]=/UID SEARCH UID ([0-9]+):([0-9]+)/.exec(command);
+       const lo=Number(lower),hi=Number(upper);
+       assert(lo>=scenario.start);assert(hi-lo<256);
+       assert(hi<(scenario.uidNext??(scenario.error?12:Math.min(scenario.highest+1,4294967295))));
+       const hits=scenario.error?scenario.uids:scenario.uids.filter(uid=>uid>=lo&&uid<=hi);
+       respond('* SEARCH'+hits.map(uid=>' '+uid).join('')+'\r\n'+tag+' OK found\r\n');
       }else if(command.includes('UID FETCH')){
        assert(!scenario.error,'invalid SEARCH must never reach FETCH');
        const uids=scenario.uids.slice().sort((a,b)=>a-b);

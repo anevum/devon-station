@@ -127,7 +127,7 @@ test('sanitized MIME fields can feed the already-restricted IMAP provider withou
   const commands = [];
   const connector = {async open(){return {async exchange(command){
     commands.push(command);
-    if (command.startsWith('EXAMINE')) return '* OK [UIDVALIDITY 7]';
+    if (command.startsWith('EXAMINE')) return '* OK [UIDVALIDITY 7] [UIDNEXT 2]';
     if (command.startsWith('UID SEARCH')) return '* SEARCH 1';
     if (command.startsWith('UID FETCH')) return {messages:[{
       uid:1,...decodeSinglePartPlainTextMime(content),timestamp:'2026-11-02T20:00:00Z',flags:[]}]};

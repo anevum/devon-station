@@ -27,7 +27,7 @@ function socketMock(payload=mime,{trailingMetadata=false,complete=true}={}) {
    writable:new WritableStream({write(chunk){const command=new TextDecoder().decode(chunk);calls.push(command);
     const tag=command.slice(0,5);
     if(command.includes(' LOGIN '))respond(tag+' OK logged in\r\n');
-    else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] selected\r\n'+tag+' OK done\r\n');
+    else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] [UIDNEXT 2] selected\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID FETCH')) {
       respond((trailingMetadata?'* 1 FETCH (BODY[] {':'* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {')+payload.byteLength+'}\r\n');

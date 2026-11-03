@@ -60,8 +60,9 @@ async function parseFetch(line, bytes, decodeMime) {
 
 function validateCommand(command) {
   if (command === 'EXAMINE "INBOX"') return 'examine';
-  if (/^UID SEARCH UID [1-9][0-9]*:4294967295$/.test(command) &&
-      UID(Number(command.slice(15, command.indexOf(':'))))) return 'search';
+  const search = /^UID SEARCH UID ([1-9][0-9]*):([1-9][0-9]*)$/.exec(command);
+  if (search && UID(Number(search[1])) && UID(Number(search[2])) &&
+      Number(search[2]) >= Number(search[1]) && Number(search[2])-Number(search[1]) < 256) return 'search';
   if (/^UID FETCH [1-9][0-9]*(?:,[1-9][0-9]*)* \(UID FLAGS INTERNALDATE BODY\.PEEK\[\]\)$/.test(command) &&
       command.length <= 350 && command.slice(10,command.indexOf(' (')).split(',').every(n=>UID(Number(n)))) return 'fetch';
   reject('imap_command_forbidden');

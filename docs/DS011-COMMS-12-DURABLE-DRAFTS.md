@@ -52,3 +52,15 @@ Production remains **NO-GO**. No DNS, forwarding, Access, secrets, production da
 - Chromium and authentic owner-device/provider acceptance remain pending under the earlier recorded environment and approval gates. Exact-head GitHub CI must pass independently; the previous head's workflows were still queued at session start. No reruns requested, production changes, live mail access or SMTP action occurred.
 
 **Next bounded implementation:** safe bounded SEARCH pagination for mailboxes exceeding the current 500-result cap. The existing 10-message FETCH, 256 KiB wire-message, 4 KiB indexed-text, full-fidelity-storage, retention/backup, upstream MIME archive-integrity and production approval gates remain unchanged. This increment remains source-only and NOT LIVE.
+
+## Bounded large-mailbox catch-up — November 3, 2026
+
+The previous next task (SEARCH pagination) is implemented. EXAMINE must provide exactly one valid UIDNEXT, as required by RFC 3501 §§6.3.2/2.3.1.1. Each sync searches at most sixteen inclusive 256-UID ranges, all below the observed UIDNEXT. Both SEARCH endpoints are validated; the wire transport rejects reversed, wildcard, oversized or out-of-protocol ranges. Existing raw-response/result limits remain intact rather than being raised for large inboxes.
+
+A trusted `scannedThrough` watermark extends the existing provider batch contract; reconciliation validates it against fetched UIDs, prior cursor and protocol limits. It advances the existing cursor only in the same atomic D1 CAS as the indexed messages. Partially consumed ranges stop at the last selected UID. Empty ranges can advance safely below UIDNEXT; future arrivals are not skipped. Missing FETCH results now reject the whole batch, including messages expunged between SEARCH and FETCH; retrying performs a fresh search. This intentionally favors retry over silently skipping a missing message.
+
+Verification: 289 Node tests and 35 foundation tests, full runtime DOM suites, 33 actual local workerd/D1 checks per pinned July/October compatibility run, 38-module/7-asset build and source privacy checks passed. A synthetic 601-message inbox drains in order across 61 ten-message polls using real Node SQLite, with no duplicate imports or omitted UIDs. Four additional owner-handler/synthetic-wire/real-local-D1 scenarios persist capped empty-range progress over multiple polls and then fetch a later arrival. Handler/transport run in Node; these remain synthetic provider tests, not live Purelymail or deployed Worker evidence.
+
+No schema migration is added. `highestUid` now also represents safely scanned historical empty UID space. All pre-existing retention, storage-size (5,000 indexed records / 4 KiB text), mailbox identity, MIME integrity, real browser/provider, exact-head CI and production approval gates still apply. No production, mailbox, forwarding, Access, secrets or SMTP action occurred.
+
+Next bounded implementation: explicit catch-up progress and cancellation in the existing Mail UI, so users can distinguish one completed batch from a fully caught-up inbox. No automatic background mailbox polling is introduced by this increment.
