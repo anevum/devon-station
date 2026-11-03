@@ -86,3 +86,34 @@ test('leaving finance aborts an in-flight fetch and cannot expose stale data',as
  assert(calls[0].options.signal.aborted);
  assert(!root.textContent.includes('$1,000.00'));
 });
+
+
+test('refresh clears old dollar amounts before awaiting another provider response',async()=>{
+ let respond;const pending=new Promise(resolve=>{respond=resolve});let calls=0;
+ const before=fixture();before.sources.mercury.accounts[0].currentCents='789000';
+ const after=fixture();after.sources.mercury.accounts[0].currentCents='988000';
+ const {ui,root}=harness(()=>++calls===1?json(before):pending);
+ ui.mounted('finance');await settle();
+ assert.match(root.textContent,/\$7,890\.00/,'initial valid bank evidence loaded');
+ root.querySelector('#finance-refresh').click();
+ assert.doesNotMatch(root.textContent,/\$7,890\.00/,'stale bank amounts must disappear synchronously');
+ assert.match(root.textContent,/Not verified/);
+ assert.match(root.textContent,/Retrieving private read-only sources/);
+ respond(json(after));await settle();
+ assert.match(root.textContent,/\$9,880\.00/,'new verified bank evidence visible');
+ assert.doesNotMatch(root.textContent,/\$7,890\.00/,'old evidence cannot be resurrected');
+});
+
+test('a denied refresh never restores an earlier valid bank value',async()=>{
+ let respond;const pending=new Promise(resolve=>{respond=resolve});let calls=0;
+ const before=fixture();before.sources.mercury.accounts[0].currentCents='789000';
+ const {ui,root}=harness(()=>++calls===1?json(before):pending);
+ ui.mounted('finance');await settle();
+ assert.match(root.textContent,/\$7,890\.00/);
+ root.querySelector('#finance-refresh').click();
+ assert.doesNotMatch(root.textContent,/\$7,890\.00/);
+ respond(new Response('rejected',{status:403}));await settle();
+ assert.match(root.textContent,/Sign-in or owner authorization is required/);
+ assert.doesNotMatch(root.textContent,/\$7,890\.00/);
+ assert.doesNotMatch(root.textContent,/\$0\.00/,'a failed source must not become a fake zero');
+});
