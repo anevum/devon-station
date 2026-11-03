@@ -113,3 +113,6 @@ export function createSqliteMailStore(db) {
     }
   });
 }
+
+// Share the exact validated record/cursor contract with the D1-compatible store.
+export {validateNext as validateMailStoreSnapshot};
