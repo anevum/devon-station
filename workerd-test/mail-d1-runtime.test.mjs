@@ -266,6 +266,7 @@ test(`workerd ${compatibilityDate}: incremental polling preserves indexed mail a
     assert.equal(result.status,200);const receipt=await result.json();
     assert.equal(receipt.imported,scenario.imported);assert.equal(receipt.updated,0);
     assert.equal(receipt.uidValidityReset,scenario.reset??false);
+    assert.equal(receipt.hasMore,scenario.highest < (scenario.uidNext??Math.min(scenario.highest+1,4294967295))-1);
     assert.deepEqual(receipt.cursor,{uidValidity:scenario.validity,highestUid:scenario.highest});
     assert.deepEqual(after.cursor,receipt.cursor);assert.equal(after.revision,before.revision+1);
     assert.equal(after.records.length,before.records.length+scenario.imported);

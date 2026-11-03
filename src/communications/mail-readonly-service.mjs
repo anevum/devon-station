@@ -124,6 +124,8 @@ export async function pollReadOnlyMailbox({registry, context, mailboxId, store, 
     const batch = await providerStep(() => session.fetchBatch(Object.freeze({cursor:existing.cursor ?? null,
       limit,peek:true,readOnly:true,signal:controller.signal})), controller.signal);
     if (controller.signal.aborted) throw new MailReadOnlyError('provider_timeout',504);
+    if (Object.hasOwn(batch,'hasMore') && typeof batch.hasMore !== 'boolean')
+      throw new MailReadOnlyError('invalid_readonly_progress',502);
     clearTimeout(timer); // Provider deadline must not abort an in-flight atomic database commit.
     const proposal = reconcileImapBatch({registry,context,mailboxId,cursor:existing.cursor ?? null,
       batch,existing:existing.records});
@@ -137,7 +139,7 @@ export async function pollReadOnlyMailbox({registry, context, mailboxId, store, 
     }
     return Object.freeze({installationId:scope.installationId,mailboxId,revision:committed.revision,
       imported:proposal.imported,updated:proposal.updated,uidValidityReset:proposal.uidValidityReset,
-      cursor:proposal.cursor});
+      cursor:proposal.cursor,hasMore:typeof batch.hasMore === 'boolean'?batch.hasMore:null});
   } finally {
     clearTimeout(timer);
     // Client should release the read-only session even if parsing, CAS or timeout failed.

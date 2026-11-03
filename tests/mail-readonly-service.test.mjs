@@ -268,3 +268,18 @@ test('untrusted source instructions are inert text and never become agent comman
   assert(inbox.messages[0].text.includes('rm -rf'));
   assert.equal(Object.keys(inbox).includes('actions'),false);
 });
+
+test('continuation is confirmed only after a successful commit; legacy providers remain unknown',async()=>{
+ for(const hasMore of [true,false,undefined]){
+  const imap=provider({uidValidity:7,messages:[message()],...(hasMore===undefined?{}:{hasMore})});
+  const h=harness({providers:{'mock-imap':imap.transport}});
+  const result=await pollReadOnlyMailbox(h);
+  assert.equal(result.hasMore,hasMore??null);assert.equal(h.store.calls.commits,1);
+ }
+});
+test('malformed provider continuation fails before any D1 write',async()=>{
+ const imap=provider({uidValidity:7,messages:[message()],hasMore:'false'});
+ const h=harness({providers:{'mock-imap':imap.transport}});
+ await assert.rejects(pollReadOnlyMailbox(h),errorCode('invalid_readonly_progress'));
+ assert.equal(h.store.calls.commits,0);assert.equal(imap.calls.closes,1);
+});

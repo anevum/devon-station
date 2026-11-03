@@ -4,7 +4,7 @@
 .mail-identity{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
 .mail-identity strong{font-size:14px;font-weight:610}
 .mail-small,.mail-list-title,.mail-time,.mail-eyebrow,.mail-footnote{font-size:11px;color:var(--muted)}
-.mail-controls{display:flex;gap:8px}
+.mail-controls{display:flex;gap:8px;flex-wrap:wrap}
 .mail-controls button{min-width:145px}
 .mail-banner{margin:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font-size:12px;color:var(--muted)}
 .mail-live{margin:0;min-height:18px;color:var(--muted);font-size:12px}
@@ -27,7 +27,7 @@
 .mail-body{white-space:pre-wrap;line-height:1.65;font-size:13px;overflow-wrap:anywhere;user-select:text}
 .mail-footnote{margin:25px 0 0}
 .mail-placeholder{display:grid;min-height:250px;place-items:center;text-align:center;color:var(--muted);font-size:12px}
-@media(max-width:790px){.mail-layout{grid-template-columns:1fr}.mail-list{max-height:36vh;border-right:0;border-bottom:1px solid var(--line)}.mail-reader{max-height:none;min-height:260px;padding:20px}.mail-header{align-items:flex-start;flex-wrap:wrap}.mail-controls{width:100%}.mail-controls button{width:100%}}
+@media(max-width:790px){.mail-layout{grid-template-columns:1fr}.mail-list{max-height:36vh;border-right:0;border-bottom:1px solid var(--line)}.mail-reader{max-height:none;min-height:260px;padding:20px}.mail-header{align-items:flex-start;flex-wrap:wrap}.mail-controls{width:100%}.mail-controls button{width:100%;min-width:0;white-space:normal}}
 @media(max-width:450px){#station-mail{padding-bottom:env(safe-area-inset-bottom)}.mail-header{padding:14px}.mail-reader-subject{font-size:19px}.mail-message{min-height:88px}}
 @media(prefers-reduced-motion:reduce){.mail-message,.mail-action{transition:none!important}}
 

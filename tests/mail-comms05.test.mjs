@@ -66,7 +66,7 @@ test('UIDNEXT avoids SEARCH and FETCH when the mailbox is already caught up',asy
  const {session,commands}=await imapSession();
  try{
   assert.deepEqual(await session.fetchBatch({...batchOptions,cursor:{uidValidity:7,highestUid:1}}),
-   {uidValidity:7,messages:[]});
+   {uidValidity:7,messages:[],hasMore:false});
   assert.deepEqual(commands,['EXAMINE "INBOX"']);
  }finally{await session.close();}
 });
@@ -75,7 +75,7 @@ test('UID ceiling and an empty new UIDVALIDITY cohort perform only EXAMINE',asyn
   const {session,commands}=await imapSession({validity,uidNext:1});
   try{
    assert.deepEqual(await session.fetchBatch({...batchOptions,cursor:{uidValidity:7,highestUid:4294967295}}),
-    {uidValidity:validity,messages:[]});
+    {uidValidity:validity,messages:[],hasMore:false});
    assert.deepEqual(commands,['EXAMINE "INBOX"']);
   }finally{await session.close();}
  }
@@ -131,7 +131,7 @@ test('601-message mailbox drains across bounded pages without omissions or dupli
   for(let i=0;i<61;i++){
    const result=await pollReadOnlyMailbox({registry,context:{installationId:'personal',principalId:'worker'},
     mailboxId:'hello',store,providers:{purelymail:createReadOnlyImapProvider({connector})},limit:10});
-   imported+=result.imported;assert.equal(result.updated,0);
+   imported+=result.imported;assert.equal(result.updated,0);assert.equal(result.hasMore,i<60);
   }
   const snapshot=await store.readSnapshot(scope);
   assert.equal(imported,601);assert.equal(snapshot.records.length,601);
@@ -155,7 +155,7 @@ test('bounded empty scans progress only below UIDNEXT and missing FETCH results 
   mailbox:{provider:'purelymail',mode:'imap',address:'hello@devonakins.com'},peek:true,readOnly:true});
  try{
   const result=await session.fetchBatch({...batchOptions,cursor:null});
-  assert.deepEqual(result,{uidValidity:7,messages:[],scannedThrough:4096});
+  assert.deepEqual(result,{uidValidity:7,messages:[],scannedThrough:4096,hasMore:true});
   assert.equal(commands.length,17);assert.equal(commands.at(-1),'UID SEARCH UID 3841:4096');
  }finally{await session.close();}
  const missing=await imapSession({uidNext:4,search:'* SEARCH 2 3',messages:[{...row,uid:3}]});

@@ -64,3 +64,13 @@ Verification: 289 Node tests and 35 foundation tests, full runtime DOM suites, 3
 No schema migration is added. `highestUid` now also represents safely scanned historical empty UID space. All pre-existing retention, storage-size (5,000 indexed records / 4 KiB text), mailbox identity, MIME integrity, real browser/provider, exact-head CI and production approval gates still apply. No production, mailbox, forwarding, Access, secrets or SMTP action occurred.
 
 Next bounded implementation: explicit catch-up progress and cancellation in the existing Mail UI, so users can distinguish one completed batch from a fully caught-up inbox. No automatic background mailbox polling is introduced by this increment.
+
+## Explicit catch-up controls — November 3, 2026
+
+The Mail UI now distinguishes a single sync batch from an explicit user-started catch-up run capped at ten batches. Trusted provider `hasMore` metadata is validated before the existing CAS and returned only after commit; absent metadata remains unknown (`null`) for legacy adapters, and the client refuses to auto-continue without a boolean. The Purelymail adapter always supplies the flag relative to its checked UIDNEXT snapshot.
+
+The UI displays confirmed batch/import counts, remaining catch-up work and snapshot-qualified completion. Stop After Batch and navigation stop subsequent POSTs after the in-flight batch settles; this does not abort/undo a database commit. Interrupted or malformed responses retain confirmed counts and explicitly warn that an unconfirmed request may have committed. Reload Cached Inbox performs authenticated GETs only. Session expiry stops continuation and removes cached messages from view. No automatic/background polling, SMTP action or new persistence is added.
+
+Passed locally: 291 Node tests, 35 foundation tests, 33 actual local workerd/D1 checks per pinned compatibility run, full runtime DOM suites including 12 mail UI cases, integrated 38-module/7-asset build, privacy and diff checks. UI cases cover explicit initiation, snapshot completion, ten-batch cap, stop during pending request, navigation, partial failure, malformed continuation, expired owner session and safe cached reload. Actual Chromium/mobile/device layout remains pending under the recorded browser-download blocker; DOM tests are not visual acceptance. No live provider, production or release approval claim.
+
+Next bounded task: inbox pagination in the existing reader, exposing indexed messages beyond the current first 50. All earlier production, retention/backup, full-fidelity-storage, MIME integrity, real-provider and exact-head CI gates remain in force.

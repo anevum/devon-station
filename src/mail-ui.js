@@ -3,7 +3,7 @@
 (function(){
   'use strict';
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
-  const state={phase:'checking',status:null,items:[],selected:null,total:0,error:null,busy:false,initialized:false,receipt:null};
+  const state={phase:'checking',status:null,items:[],selected:null,total:0,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null};
   function node(tag,className,text){
     const el=document.createElement(tag);
     if(className)el.className=className;
@@ -52,9 +52,17 @@
     const sub=node('span','mail-small',state.status?.configured?'Purelymail · Owner-only · Read-only':'Purelymail · Setup incomplete');
     who.append(sub);
     const controls=node('div','mail-controls');
-    const refresh=button(state.busy?'Synchronizing…':'Synchronize Inbox','sync');
+    const refresh=button(state.phase==='syncing'?'Synchronizing…':state.hasMore===true?'Sync Next Batch':'Synchronize Inbox','sync');
     refresh.disabled=state.busy || !state.status?.configured;
     controls.append(refresh);
+    if(state.phase==='syncing'){
+      const stop=button(state.stopRequested?'Stopping after batch…':'Stop After Batch','stop');
+      stop.disabled=state.stopRequested;controls.append(stop);
+    }else{
+      const catchup=button('Catch Up · Up to 10 Batches','catchup');
+      catchup.disabled=state.busy||!state.status?.configured;controls.append(catchup);
+      const reload=button('Reload Cached Inbox','reload');reload.disabled=state.busy;controls.append(reload);
+    }
     header.append(who,controls);
     root.append(header);
     if(state.status?.draftsEnabled){const draftHost=node('section','mail-drafts-host');draftHost.id='mail-drafts';draftHost.dataset.draftsEnabled='true';draftHost.setAttribute('aria-label','Stored unsent drafts');root.append(draftHost);}
@@ -68,7 +76,7 @@
       unavailable:'Account is not configured in this installation. No mailbox connection was attempted.',
       ready: state.receipt || 'Cached inbox records. Synchronization only runs when you select Synchronize Inbox.',
       loading:'Loading previously synchronized messages…',
-      syncing:'Synchronizing with the mail provider…',
+      syncing:'Batch '+((state.run?.batches??0)+1)+' in progress. '+(state.run?.batches??0)+' confirmed; '+(state.run?.imported??0)+' new messages saved.'+(state.stopRequested?' Will stop after this batch.':''),
       error:state.error || 'Unable to load mail. Your existing mailbox remains unchanged.'
     };
     live.textContent=phase[state.phase]||phase.ready;
@@ -123,7 +131,7 @@
     if(state.busy)return;
     state.busy=true;
     state.phase='checking';
-    state.error=null;
+    state.error=null;state.receipt=null;state.hasMore=null;
     render();
     try{
       const status=await json(URLS.status);
@@ -145,20 +153,35 @@
         'Unable to read the private mailbox. No messages were sent or changed.';
     }finally{state.busy=false;render();}
   }
-  async function sync(){
+  async function sync(maxBatches=1){
     if(state.busy || !state.status?.configured)return;
-    state.busy=true;state.phase='syncing';state.error=null;state.receipt=null;render();
+    state.busy=true;state.phase='syncing';state.error=null;state.receipt=null;
+    state.stopRequested=false;state.run={batches:0,imported:0,updated:0};render();
     try {
-      const result=await json(URLS.sync,'POST');
-      if(!Number.isSafeInteger(result.imported)||!Number.isSafeInteger(result.updated))
-        throw Error('invalid_mail_response');
+      for(let i=0;i<maxBatches;i++){
+        const result=await json(URLS.sync,'POST');
+        if(!Number.isSafeInteger(result.imported)||result.imported<0||result.imported>100||
+           !Number.isSafeInteger(result.updated)||result.updated<0||result.updated>100||
+           typeof result.hasMore!=='boolean')throw Error('invalid_mail_response');
+        state.run.batches++;state.run.imported+=result.imported;state.run.updated+=result.updated;
+        state.hasMore=result.hasMore;
+        if(state.stopRequested||!result.hasMore||!document.getElementById('station-mail'))break;
+        if(i+1<maxBatches)render();
+      }
       const latest=sanitizeResponse(await json(URLS.inbox));
       state.items=latest.messages;state.total=latest.total;
       if(!state.items.some(x=>x.key===state.selected))state.selected=state.items[0]?.key??null;
-      state.receipt='Synchronization completed: '+result.imported+' new, '+result.updated+' updated.';
+      state.receipt=state.run.batches+' batch(es) confirmed: '+state.run.imported+' new, '+state.run.updated+' updated. '+
+        (state.stopRequested?'Stopped after the current batch. ':'')+
+        (state.hasMore?'More catch-up remains. Select Sync Next Batch or Catch Up to continue.':
+          'Caught up to the provider snapshot checked during this run; later arrivals need another check.');
       state.phase='ready';
-    }catch{
-      state.phase='error';state.error='Synchronization failed. No successful delivery or import is claimed.';
+    }catch(error){
+      state.phase='error';
+      state.error=error?.message==='mail_sign_in_required'?'Owner session expired. Sign in again.':
+        'Confirmation or inbox refresh unavailable. '+state.run.batches+' batch(es) confirmed, '+state.run.imported+
+        ' new messages saved. An unconfirmed request may still have committed; reload before retrying.';
+      if(error?.message==='mail_sign_in_required'){state.items=[];state.total=0;state.selected=null;}
     }finally{state.busy=false;render();}
   }
   document.addEventListener('click',e=>{
@@ -166,6 +189,9 @@
     if(!button || !document.getElementById('station-mail')?.contains(button))return;
     const action=button.dataset.mailAction;
     if(action==='sync'){void sync();return;}
+    if(action==='catchup'){void sync(10);return;}
+    if(action==='reload'){void start();return;}
+    if(action==='stop'){state.stopRequested=true;render();return;}
     if(action==='select'){
       const key=button.dataset.mailKey;
       if(state.items.some(x=>x.key===key)){state.selected=key;render();}
@@ -173,7 +199,7 @@
   });
   globalThis.StationMail=Object.freeze({
     mounted(section){
-      if(section!=='mail')return;
+      if(section!=='mail'){if(state.phase==='syncing')state.stopRequested=true;return;}
       render();
       if(!state.initialized){state.initialized=true;void start();}
     },
