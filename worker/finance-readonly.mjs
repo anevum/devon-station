@@ -2,6 +2,10 @@
 const MERCURY_URL='https://api.mercury.com/api/v1/accounts?limit=1000&order=asc';
 const ALPACA_PAPER='https://paper-api.alpaca.markets';
 const MAX_BYTES=1250000;
+// IEEE-754 cannot preserve arbitrary cents in very large JSON numbers.
+// Below 2^44 dollars, double rounding remains strictly below half a cent;
+// decimal strings retain their full exact cent precision beyond this bound.
+const MAX_SAFE_NUMERIC_DOLLARS=2**44;
 const MERCURY_PAGE_LIMIT=100;
 const MERCURY_MAX_PAGES=10;
 const MERCURY_MAX_ACCOUNTS=1000;
@@ -22,6 +26,8 @@ const sourceStatus=(status)=>({status,readOnly:true});
 /** Cents encoded as strings: never round floats or lose financial precision. */
 export function cents(value){
  if(typeof value!=='number'&&typeof value!=='string')problem('finance_invalid_amount');
+ if(typeof value==='number'&&(!Number.isFinite(value)||Math.abs(value)>MAX_SAFE_NUMERIC_DOLLARS))
+  problem('finance_invalid_amount');
  const text=String(value);
  if(!/^-?(?:0|[1-9]\d{0,14})(?:\.\d{1,2})?$/.test(text))problem('finance_invalid_amount');
  const negative=text.startsWith('-');
