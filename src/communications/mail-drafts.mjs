@@ -54,8 +54,10 @@ const SELECT='SELECT draft_id,revision,recipients_json,subject,body_text,updated
 const INSERT='INSERT INTO comms_mail_drafts (installation_id,mailbox_id,owner_sub,draft_id,revision,recipients_json,subject,body_text,created_at,updated_at,last_operation) SELECT ?,?,?,?,1,\'[]\',\'\',\'\',?,?,? WHERE (SELECT COUNT(*) FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=?)<20 ON CONFLICT(installation_id,mailbox_id,owner_sub,draft_id) DO NOTHING';
 const UPDATE='UPDATE comms_mail_drafts SET recipients_json=?,subject=?,body_text=?,updated_at=?,last_operation=?,revision=revision+1 WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND revision=? AND revision<1000000000';
 const REMOVE='DELETE FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND revision=?';
+const REMOVE_SAFE=REMOVE+" AND NOT EXISTS (SELECT 1 FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND state IN ('queued','claimed','uncertain'))";
+const PENDING='SELECT 1 AS pending FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND state IN (\'queued\',\'claimed\',\'uncertain\') LIMIT 1';
 const changes=result=>result?.meta?.changes;
-export function createD1DraftStore(db,{now=()=>new Date().toISOString()}={}){
+export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectPendingOutbox=false}={}){
  if(!db||typeof db.prepare!=='function')throw error('mail_drafts_storage_unavailable',503);
  const get=async(s,id)=> {
    try{return await db.prepare(SELECT).bind(...s,id).first();}
@@ -106,10 +108,21 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString()}={}){
   async remove(scope,{id,revision}={}){
    const s=validScope(scope),key=validId(id),rev=validRevision(revision);
    let result;
-   try{result=await db.prepare(REMOVE).bind(...s,key,rev).run();}
+   try{result=await db.prepare(protectPendingOutbox?REMOVE_SAFE:REMOVE)
+    .bind(...s,key,rev,...(protectPendingOutbox?[...s,key]:[])).run();}
    catch{throw error('mail_draft_storage_failed',502);}
    if(changes(result)===1)return {deleted:true};
-   if(!(await get(s,key)))throw error('mail_draft_not_found',404);
+   const row=await get(s,key);
+   if(!row)throw error('mail_draft_not_found',404);
+   if(row.revision!==rev)throw error('mail_draft_conflict',409);
+   if(protectPendingOutbox){
+    // The DELETE itself is atomic with the NOT EXISTS guard; this lookup only
+    // distinguishes a blocked deletion from a stale revision for the owner.
+    let pending;
+    try{pending=await db.prepare(PENDING).bind(...s,key).first();}
+    catch{throw error('mail_draft_storage_failed',502);}
+    if(pending)throw error('mail_draft_pending_delivery',409);
+   }
    throw error('mail_draft_conflict',409);
   }
  });
