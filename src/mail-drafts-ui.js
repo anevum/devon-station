@@ -338,6 +338,8 @@ async function loadOutboxHistory(){
   });
   state.outboxItems=list.reverse();state.outboxLoaded=true;
  }catch(e){
+  // Never display previously cached delivery states after a failed owner read.
+  state.outboxItems=[];state.outboxLoaded=false;
   state.outboxError=e.message==='mail_sign_in_required'?
    'Owner session expired. Sign in again to inspect mail receipts.':
    'Outbox status could not be verified. Do not resubmit or create another delivery.';
