@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "node --test runtime.test.mjs mail-d1-runtime.test.mjs mail-drafts-runtime.test.mjs mail-recovery-runtime.test.mjs"
+    "test": "node --test runtime.test.mjs mail-d1-runtime.test.mjs mail-drafts-runtime.test.mjs mail-recovery-runtime.test.mjs mail-outbox-runtime.test.mjs"
   },
   "devDependencies": {
     "miniflare": "4.20260730.0"

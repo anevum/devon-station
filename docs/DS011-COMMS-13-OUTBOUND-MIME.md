@@ -1,0 +1,9 @@
+# DS011-COMMS-13 — guarded outgoing plain-text MIME preparation
+
+Lifecycle: source-only/draft, not deployed; no provider SMTP connection, no network send, no outbox.
+
+This pure module prepares one UTF-8 text/plain RFC 5322 message from an existing validated durable draft, using the exact registry sender eligibility decision. The caller must provide trusted server-owned registry, principal, mailbox and sender. It refuses unverified send rights, an unverified provider identity, cross-installation identity, client-provided header surprises, missing recipients, Bcc/CC/HTML/attachments it cannot represent, invalid delivery IDs and dates, header injection, malformed UTF-16 and invalid line endings.
+
+Output separates the fixed sender and recipient SMTP envelope from the encoded message. The plain text body uses CRLF-normalized UTF-8 MIME base64 lines of at most 76 characters; Unicode subjects use length-bounded RFC 2047 encoded words; recipient headers fold and are not used for envelope authorization. Message-ID is deterministic from the future server-owned delivery UUID, but this alone is NOT idempotent SMTP delivery. This module does not touch DNS, Cloudflare or real messages.
+
+Local Node 22 isolated verification: 7 passing focused tests (sender gates, exact formatting, Unicode, line folding, header injections and invalid content). Full repository dependency/CI acceptance remains separate. Next deliverables are a durable owner-scoped outbox with CAS and explicit send approval, a TLS-only authenticated SMTP transport, a provider roundtrip in an authorized isolated environment, and user-visible explicit sending controls. Until then there is no send UI, no send endpoint and no live mail delivery. All RB01, COMMS-12, retention/backup, browser/Access and production NO-GO gates remain in force.

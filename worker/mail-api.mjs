@@ -1,5 +1,6 @@
 // COMMS-09 owner-only mail read APIs. No SMTP, implicit polling, credential responses or DNS changes.
 // Deployment requires a separately approved isolated MAIL_DB binding and MAIL_IMAP_PASSWORD secret.
+import {handleMailOutboxApi} from './mail-outbox-api.mjs';
 import {createMailRegistry} from '../src/communications/mail-core.mjs';
 import {createD1MailStore} from '../src/communications/mail-d1-store.mjs';
 import {createReadOnlyImapProvider} from '../src/communications/mail-imap-readonly.mjs';
@@ -17,12 +18,12 @@ function isEnabled(env) {
     typeof env.MAIL_IMAP_PASSWORD === 'string' && env.MAIL_IMAP_PASSWORD.length > 0 &&
     env.MAIL_DB && typeof env.MAIL_DB.prepare === 'function' && typeof env.MAIL_DB.batch === 'function';
 }
-function registry() {
+function registry(sendVerified=false) {
   return createMailRegistry({
     installations:[{id:'personal',domain:'devonakins.com'}],
-    mailboxes:[{id:'hello',installationId:'personal',address:MAILBOX,provider:'purelymail',mode:'imap',sendVerified:false}],
-    identities:[{mailboxId:'hello',address:MAILBOX,kind:'primary',sendVerified:false}],
-    grants:[{installationId:'personal',principalId:'owner',mailboxId:'hello',capabilities:['read','sync','draft']}]
+    mailboxes:[{id:'hello',installationId:'personal',address:MAILBOX,provider:'purelymail',mode:'imap',sendVerified}],
+    identities:[{mailboxId:'hello',address:MAILBOX,kind:'primary',sendVerified}],
+    grants:[{installationId:'personal',principalId:'owner',mailboxId:'hello',capabilities:sendVerified?['read','sync','draft','send']:['read','sync','draft']}]
   });
 }
 const numberParam=(value, fallback, min, max) => {
@@ -34,6 +35,7 @@ const numberParam=(value, fallback, min, max) => {
 export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(!user?.subject || !env?.MAIL_OWNER_SUB || user.subject !== env.MAIL_OWNER_SUB)
     return status('mail_owner_not_authorized',403);
+  if(url.pathname.startsWith('/api/mail/outbox'))return handleMailOutboxApi({request,url,user,env,readBody,registry:registry(env.MAIL_SENDER_VERIFIED==='true')});
   const ready=isEnabled(env) && typeof connect==='function';
   if(url.pathname==='/api/mail/status' && request.method==='GET')
     return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:false,draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
