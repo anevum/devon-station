@@ -57,7 +57,8 @@
     controls.append(refresh);
     header.append(who,controls);
     root.append(header);
-    const notice=node('p','mail-banner','Receiving is read-only. Sending, drafts, HTML and attachments are not enabled in this release.');
+    if(state.status?.draftsEnabled){const draftHost=node('section','mail-drafts-host');draftHost.id='mail-drafts';draftHost.dataset.draftsEnabled='true';draftHost.setAttribute('aria-label','Stored unsent drafts');root.append(draftHost);}
+    const notice=node('p','mail-banner',state.status?.draftsEnabled?'Sending, HTML and attachments are not enabled in this release. Drafts are stored privately but never sent.':'Receiving is read-only. Sending, drafts, HTML and attachments are not enabled in this release.');
     root.append(notice);
     const live=node('p','mail-live');
     live.setAttribute('role','status');
@@ -116,6 +117,7 @@
     }
     body.append(listing,reader);
     root.append(body);
+    if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true);
   }
   async function start(){
     if(state.busy)return;

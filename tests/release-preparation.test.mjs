@@ -15,10 +15,10 @@ const modules = [
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs',
-  'worker/mail-api.mjs',
+  'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
-    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs'].map(name=>'src/communications/'+name),
+    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs'].map(name=>'src/communications/'+name),
   ...['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs','decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs','pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs'].map(name=>'vendor/postal-mime/'+name)
 ];
 function syntheticCandidate() {
@@ -43,7 +43,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
-  assert.equal(first.manifest.candidate.moduleCount, 36);
+  assert.equal(first.manifest.candidate.moduleCount, 38);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
   assert.equal(first.manifest.intendedIsolatedRuntime.verifiedOnLiveOctoberRuntime, false);

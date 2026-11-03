@@ -1,1 +1,11 @@
-{"name":"devonstation-workerd-test","private":true,"type":"module","scripts":{"test":"node --test runtime.test.mjs mail-d1-runtime.test.mjs"},"devDependencies":{"miniflare":"4.20260730.0"}}
+{
+  "name": "devonstation-workerd-test",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test runtime.test.mjs mail-d1-runtime.test.mjs mail-drafts-runtime.test.mjs"
+  },
+  "devDependencies": {
+    "miniflare": "4.20260730.0"
+  }
+}
