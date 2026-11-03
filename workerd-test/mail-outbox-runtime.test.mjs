@@ -4,6 +4,7 @@ import {createStation} from '../worker/index.mjs';
 import {Miniflare} from 'miniflare';
 import {readFile} from 'node:fs/promises';
 import {createD1Outbox,createOutboxDispatcher} from '../src/communications/mail-outbox.mjs';
+import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
 const compatibilityDate=process.env.DS_WORKERD_COMPAT_DATE??'2026-07-30';
 const scope={installationId:'personal',mailboxId:'hello',ownerSub:'synthetic-owner'};
 const id='123e4567-e89b-42d3-a456-426614174000',claim='123e4567-e89b-42d3-a456-426614174001';
@@ -14,9 +15,13 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("synthetic outbox")}}',compatibilityDate,d1Databases:['MAIL']});
  try{
   const db=await mf.getD1Database('MAIL');
-  const sql=await readFile(new URL('../worker/migrations/0006-comms-outbox.sql',import.meta.url),'utf8');
-  await db.prepare(sql.split('\n').filter(x=>!x.startsWith('--')).join('\n').replace(/;\s*$/,'')).run();
+  for(const name of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql']){
+   const sql=await readFile(new URL('../worker/migrations/'+name,import.meta.url),'utf8');
+   for(const statement of sql.split('\n').filter(x=>!/^\s*--/.test(x)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
+    await db.prepare(statement).run();
+  }
   const store=createD1Outbox(db,scope),peer=createD1Outbox(db,{...scope,ownerSub:'other'});
+  const draftStore=createD1DraftStore(db);
   const dispatcher=createOutboxDispatcher({store,registry,context,mailboxId:'hello',from,
    connect:()=>assert.fail('unapproved network'),credentials:async()=>undefined});
   await t.test('explicit approval, deterministic enqueue replay and immutable payload',async()=>{
@@ -65,12 +70,44 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
     await assert.rejects(send.submit({deliveryId,signal:new AbortController().signal}),/not_queued/);assert.equal(connections,1);
    }
   });
+  await t.test('saved draft revision is durably unique, owner scoped and replay safe',async()=>{
+   const draftId='123e4567-e89b-42d3-a456-426614174080';
+   const first='123e4567-e89b-42d3-a456-426614174081',second='123e4567-e89b-42d3-a456-426614174082';
+   await draftStore.create(scope,draftId);
+   await draftStore.save(scope,{id:draftId,revision:1,
+    operationId:'123e4567-e89b-42d3-a456-426614174083',...draft});
+   const dispatcher=createOutboxDispatcher({store,draftStore,ownerSub:scope.ownerSub,
+    registry,context,mailboxId:'hello',from});
+   const prepare=deliveryId=>dispatcher.enqueueSavedDraft({deliveryId,draftId,draftRevision:2,approvedByOwner:true});
+   const results=await Promise.allSettled([prepare(first),prepare(second)]);
+   assert.equal(results.filter(x=>x.status==='fulfilled').length,1);
+   assert.equal(results.filter(x=>x.status==='rejected'&&x.reason?.code==='outbox_draft_already_prepared').length,1);
+   const confirmed=results[0].status==='fulfilled'?first:second;
+   const receipt=await prepare(confirmed);
+   assert.equal(receipt.deliveryId,confirmed);assert.equal(receipt.draftId,draftId);assert.equal(receipt.draftRevision,2);
+   assert.equal((await store.list()).filter(x=>x.draftId===draftId&&x.draftRevision===2).length,1);
+   await assert.rejects(dispatcher.enqueueSavedDraft({deliveryId:first,draftId,draftRevision:3,approvedByOwner:true}),e=>e?.code==='outbox_draft_stale'||e?.code==='outbox_conflict');
+   assert.equal(await draftStore.read({...scope,ownerSub:'other'},draftId),null);
+   const foreign=createOutboxDispatcher({store:peer,draftStore,ownerSub:'other',registry,context,mailboxId:'hello',from});
+   await assert.rejects(foreign.enqueueSavedDraft({deliveryId:'123e4567-e89b-42d3-a456-426614174084',
+    draftId,draftRevision:2,approvedByOwner:true}),e=>e?.code==='outbox_draft_stale');
+   await draftStore.save(scope,{id:draftId,revision:2,
+    operationId:'123e4567-e89b-42d3-a456-426614174085',to:draft.to,subject:'Updated',body:draft.body});
+   await assert.rejects(prepare('123e4567-e89b-42d3-a456-426614174086'),e=>e?.code==='outbox_draft_stale');
+   const next=await dispatcher.enqueueSavedDraft({deliveryId:'123e4567-e89b-42d3-a456-426614174087',
+    draftId,draftRevision:3,approvedByOwner:true});
+   assert.equal(next.draftRevision,3);
+   const listing=JSON.stringify(await store.list());assert(!listing.includes(draft.body));assert(!listing.includes('recipient@'));
+  });
   await t.test('owner Worker API prepares and lists durable outbox without exposing SMTP',async()=>{
    const base='https://station.example',station=createStation({},async()=>({email:'owner@example.test',subject:scope.ownerSub}),fetch,()=>assert.fail('HTTP must not open SMTP'));
-   const env={APP_ORIGIN:base,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,MAIL_OUTBOX_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',MAIL_DB:db};
+   const env={APP_ORIGIN:base,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,MAIL_OUTBOX_ENABLED:'true',MAIL_DRAFTS_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',MAIL_DB:db};
+   const draftId='123e4567-e89b-42d3-a456-426614174090';
+   await draftStore.create(scope,draftId);
+   await draftStore.save(scope,{id:draftId,revision:1,operationId:'123e4567-e89b-42d3-a456-426614174091',...draft});
    const request=(path,method='GET',body)=>new Request(base+path,{method,...(body?{headers:{Origin:base,'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
    const deliveryId='123e4567-e89b-42d3-a456-426614174013';
-   const saved=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draft,approvedByOwner:true}),env);
+   const saved=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draftId,draftRevision:2,approvedByOwner:true}),env);
    assert.equal(saved.status,200);assert.equal((await saved.json()).sendingEnabled,false);
    const mailStatus=await station.fetch(request('/api/mail/status'),env);
    assert.equal(mailStatus.status,200);
@@ -81,7 +118,7 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
    assert(!JSON.stringify(await listed.json()).includes(draft.body));
    assert.equal((await station.fetch(request('/api/mail/outbox/submit','POST',{deliveryId}),env)).status,503);
    assert.equal((await station.fetch(request('/api/mail/outbox'),{...env,MAIL_OWNER_SUB:'other'})).status,403);
-   assert.equal((await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId:'123e4567-e89b-42d3-a456-426614174014',draft,approvedByOwner:true}),{...env,MAIL_SENDER_VERIFIED:'false'})).status,400);
+   assert.equal((await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId:'123e4567-e89b-42d3-a456-426614174014',draftId,draftRevision:2,approvedByOwner:true}),{...env,MAIL_SENDER_VERIFIED:'false'})).status,400);
   });
 
    await t.test('owner-confirmed SMTP HTTP route requires independent flags, immutable preparation and never retries',async()=>{
@@ -105,7 +142,10 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
     const station=createStation({},async()=>({email:'owner@example.test',subject:scope.ownerSub}),fetch,smtpConnect);
     const env={APP_ORIGIN:origin,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,
      MAIL_OUTBOX_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
-     MAIL_SMTP_ADDRESS:from,MAIL_SMTP_PASSWORD:'synthetic-app-password',MAIL_DB:db};
+     MAIL_SMTP_ADDRESS:from,MAIL_SMTP_PASSWORD:'synthetic-app-password',MAIL_DRAFTS_ENABLED:'true',MAIL_DB:db};
+    const draftId='123e4567-e89b-42d3-a456-426614174092';
+    await draftStore.create(scope,draftId);
+    await draftStore.save(scope,{id:draftId,revision:1,operationId:'123e4567-e89b-42d3-a456-426614174093',...draft});
     const request=(path,method='GET',body)=>new Request(origin+path,{method,
      ...(body?{headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
     const deliveryId='123e4567-e89b-42d3-a456-426614174015',confirmation={deliveryId,confirmedByOwner:true};
@@ -118,7 +158,7 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
     assert.equal((await station.fetch(submit({...confirmation,from:'other@example.test'}),enabled)).status,400);
     assert.equal((await station.fetch(submit(confirmation),enabled)).status,409);
     assert.equal(sockets,0);
-    const prepared=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draft,approvedByOwner:true}),enabled);
+    const prepared=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draftId,draftRevision:2,approvedByOwner:true}),enabled);
     assert.equal(prepared.status,200);assert.equal((await prepared.json()).receipt.state,'queued');
     assert.equal(sockets,0);
     const accepted=await station.fetch(submit(confirmation),enabled);
