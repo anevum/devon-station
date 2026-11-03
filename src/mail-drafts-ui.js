@@ -36,11 +36,16 @@ async function api(url,body){
  if(!res.ok){
    // Only read a bounded, explicitly recognized error code from our own API.
    // A 409 for this saved-draft revision means another durable delivery exists.
-   if(url==='/api/mail/outbox/prepare'&&res.status===409&&
-      res.headers.get('content-type')?.toLowerCase().includes('application/json')){
+   if(res.status===409&&
+      res.headers.get('content-type')?.toLowerCase().includes('application/json')&&
+      (url==='/api/mail/outbox/prepare'||url==='/api/mail/drafts/delete')){
     const errorBody=await res.json();
-    if(errorBody?.error==='outbox_draft_already_prepared')throw Error('outbox_draft_already_prepared');
-    if(errorBody?.error==='outbox_draft_stale')throw Error('outbox_draft_stale');
+    if(url==='/api/mail/outbox/prepare'&&errorBody?.error==='outbox_draft_already_prepared')
+     throw Error('outbox_draft_already_prepared');
+    if(url==='/api/mail/outbox/prepare'&&errorBody?.error==='outbox_draft_stale')
+     throw Error('outbox_draft_stale');
+    if(url==='/api/mail/drafts/delete'&&errorBody?.error==='mail_draft_pending_delivery')
+     throw Error('mail_draft_pending_delivery');
    }
    const code=res.status===409?'mail_draft_conflict':res.status===401||res.status===403?
     'mail_sign_in_required':'mail_draft_request_failed';
@@ -230,7 +235,7 @@ async function save(){
 }
 async function remove(){
  if(state.busy||state.pendingSend||!state.working)return;
- if(!globalThis.confirm?.('Permanently delete this unsent draft?'))return;
+ if(!globalThis.confirm?.('Permanently delete this saved draft? This does not cancel queued mail; the server blocks deletion while delivery is unresolved.'))return;
  const d=state.working;
  state.busy=true;state.error=null;state.notice=null;render();
  try{
@@ -238,7 +243,9 @@ async function remove(){
   if(response?.deleted!==true)throw Error('mail_draft_invalid_response');
   state.items=state.items.filter(x=>x.id!==d.id);state.selected=null;state.working=null;
   state.dirty=false;state.pendingSave=null;state.notice='Draft deleted by explicit user action.';
- }catch(e){state.error=e.message==='mail_draft_conflict'?
+ }catch(e){state.error=e.message==='mail_draft_pending_delivery'?
+  'This draft has an unresolved outgoing delivery. Deletion is blocked; inspect its outbox status.':
+  e.message==='mail_draft_conflict'?
   'Draft changed before deletion; reload it first.':'Could not confirm deletion. Draft may still exist.';}
  finally{state.busy=false;render();}
 }
