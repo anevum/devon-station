@@ -138,7 +138,7 @@
     }
     body.append(listing,reader);
     root.append(body);
-    if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true);
+    if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true,state.status?.outboxEnabled===true);
   }
   async function start(){
     if(state.busy)return;
