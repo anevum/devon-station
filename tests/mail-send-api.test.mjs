@@ -5,7 +5,7 @@ import {mailSendingEnabled,handleMailOutboxApi} from '../worker/mail-outbox-api.
 const from='hello@devonakins.com';
 const env=Object.freeze({
  MAIL_OUTBOX_ENABLED:'true',MAIL_SEND_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
- MAIL_OWNER_SUB:'synthetic-owner',MAIL_SMTP_ADDRESS:from,
+ MAIL_OWNER_SUB:'synthetic-owner',MAIL_DRAFTS_ENABLED:'true',MAIL_SMTP_ADDRESS:from,
  MAIL_SMTP_PASSWORD:'synthetic-password',MAIL_DB:{prepare(){}}
 });
 const connect=()=>assert.fail('No test may open an SMTP socket');
