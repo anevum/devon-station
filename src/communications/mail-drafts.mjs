@@ -93,7 +93,7 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
    let result;
    try{result=await db.prepare(protectLinkedOutbox?UPDATE_SAFE:UPDATE)
      .bind(JSON.stringify(payload.to),payload.subject,payload.body,
-     at,operation,...s,key,rev,...(protectLinkedOutbox?[...s,key]:[])).run();}
+      at,operation,...s,key,rev,...(protectLinkedOutbox?[...s,key]:[])).run();}
    catch{throw error('mail_draft_storage_failed',502);}
    const row=await get(s,key);
    if(!row)throw error('mail_draft_not_found',404);
@@ -104,7 +104,7 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
        throw error('mail_draft_conflict',409);
      return stored;
    }
-   if(changes(result)!==1){
+    if(changes(result)!==1){
      // A previous save can be replayed idempotently; all NEW revisions are
      // refused once a delivery snapshot exists, regardless of SMTP state.
      if(row.revision===rev&&protectLinkedOutbox){
