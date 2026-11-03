@@ -36,10 +36,14 @@ test(`workerd ${compatibilityDate}: COMMS-07 real local D1 snapshot transaction 
     const store = createD1MailStore(db);
     const migration = await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql', import.meta.url), 'utf8');
 
+    // Miniflare D1 exec() parses SQL strings, but rejects a comment-only first line
+    // as an empty statement. Strip full-line SQL comments for local test setup only.
+    // Do not edit or run the candidate migration against a remote database.
+    const migrationSQL = migration.split('\n').filter(line => !/^\s*--/.test(line)).join('\n');
     await t.test('explicit migration is mandatory and idempotent', async () => {
       await assert.rejects(store.readSnapshot(scope), hasCode('mail_d1_read_failed'));
-      await db.exec(migration);
-      await db.exec(migration);
+      await db.exec(migrationSQL);
+      await db.exec(migrationSQL);
       assert.deepEqual(await store.readSnapshot(scope), { ...scope, revision: 0, cursor: null, records: [] });
     });
 
