@@ -27,7 +27,7 @@ function setup({outgoing=true,submitFails=false}={}){
   const body=options.body?JSON.parse(options.body):undefined;
   calls.push({path,body,method:options.method,credentials:options.credentials,redirect:options.redirect});
   if(path==='/api/mail/status')
-   return reply({configured:false,draftsEnabled:true,outgoingEnabled:outgoing,address:'hello@devonakins.com'});
+   return reply({configured:false,draftsEnabled:true,outgoingEnabled:outgoing,outboxEnabled:true,address:'hello@devonakins.com'});
   if(path==='/api/mail/drafts')return reply({drafts:records.map(copy)});
   if(path==='/api/mail/drafts/create'){
    const row={id:body.id,revision:1,from:'hello@devonakins.com',
@@ -132,5 +132,39 @@ test('uncertain server outcome forbids retries and reports durable outbox state'
  assert(x.doc.querySelector('#mail-drafts').textContent.includes('uncertain'));
  assert.equal(count(x,'/api/mail/outbox/submit'),1);
  assert.equal(count(x,'/api/mail/outbox/prepare'),1);
+ x.dom.window.close();
+});
+
+test('fresh browser instance inspects durable receipts with sending disabled, without retransmitting',async()=>{
+ const x=setup({outgoing:false});
+ x.outbox.push({deliveryId,state:'uncertain',createdAt:'2026-11-03T16:00:00.000Z',
+  updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();
+ assert.equal(count(x,'/api/mail/outbox'),0,'status reads must be explicitly requested');
+ assert.equal(x.doc.querySelector('[data-mail-draft-action="send-prepare"]'),null);
+ const inspect=x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]');assert(inspect);
+ inspect.click();await wait();
+ const history=x.doc.querySelector('[aria-label="Durable outbox status history"]');
+ assert(history);assert(history.textContent.includes('Delivery uncertain'));
+ assert(history.textContent.includes(deliveryId));
+ assert(history.textContent.includes('Do not retry'));
+ assert.equal(history.querySelectorAll('a[href],button,script,img,iframe').length,0);
+ assert.equal(count(x,'/api/mail/outbox'),1);
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.dom.window.close();
+});
+
+test('malformed stored receipt fails closed and never becomes executable DOM',async()=>{
+ const x=setup({outgoing:false});
+ x.outbox.push({deliveryId:'<script>injected()</script>',state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();
+ x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ const history=x.doc.querySelector('[aria-label="Durable outbox status history"]');
+ assert(history.textContent.includes('could not be verified'));
+ assert(!history.textContent.includes('injected()'));
+ assert.equal(history.querySelectorAll('script,img,iframe,a[href]').length,0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });
