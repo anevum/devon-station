@@ -64,3 +64,39 @@ Verification: 289 Node tests and 35 foundation tests, full runtime DOM suites, 3
 No schema migration is added. `highestUid` now also represents safely scanned historical empty UID space. All pre-existing retention, storage-size (5,000 indexed records / 4 KiB text), mailbox identity, MIME integrity, real browser/provider, exact-head CI and production approval gates still apply. No production, mailbox, forwarding, Access, secrets or SMTP action occurred.
 
 Next bounded implementation: explicit catch-up progress and cancellation in the existing Mail UI, so users can distinguish one completed batch from a fully caught-up inbox. No automatic background mailbox polling is introduced by this increment.
+
+## Explicit catch-up controls — November 3, 2026
+
+The Mail UI now distinguishes a single sync batch from an explicit user-started catch-up run capped at ten batches. Trusted provider `hasMore` metadata is validated before the existing CAS and returned only after commit; absent metadata remains unknown (`null`) for legacy adapters, and the client refuses to auto-continue without a boolean. The Purelymail adapter always supplies the flag relative to its checked UIDNEXT snapshot.
+
+The UI displays confirmed batch/import counts, remaining catch-up work and snapshot-qualified completion. Stop After Batch and navigation stop subsequent POSTs after the in-flight batch settles; this does not abort/undo a database commit. Interrupted or malformed responses retain confirmed counts and explicitly warn that an unconfirmed request may have committed. Reload Cached Inbox performs authenticated GETs only. Session expiry stops continuation and removes cached messages from view. No automatic/background polling, SMTP action or new persistence is added.
+
+Passed locally: 291 Node tests, 35 foundation tests, 33 actual local workerd/D1 checks per pinned compatibility run, full runtime DOM suites including 12 mail UI cases, integrated 38-module/7-asset build, privacy and diff checks. UI cases cover explicit initiation, snapshot completion, ten-batch cap, stop during pending request, navigation, partial failure, malformed continuation, expired owner session and safe cached reload. Actual Chromium/mobile/device layout remains pending under the recorded browser-download blocker; DOM tests are not visual acceptance. No live provider, production or release approval claim.
+
+Next bounded task: inbox pagination in the existing reader, exposing indexed messages beyond the current first 50. All earlier production, retention/backup, full-fidelity-storage, MIME integrity, real-provider and exact-head CI gates remain in force.
+
+## Revision-pinned cached inbox pages — November 3, 2026
+
+The existing reader now exposes Older/Newer controls, exact message ranges and 50-message pages. It keeps only the current page in memory. Page GETs carry the snapshot revision obtained from the first page. The existing single-SELECT D1 snapshot makes revision checks consistent: a changed index returns 409, retains the visible page and disables further paging until cached reload or successful sync. Reload/sync returns to the newest page. No page action opens IMAP or modifies provider flags/messages.
+
+Responses must match requested offset, 50-item limit, revision and expected row count. Invalid responses/network failures retain the previous page; owner-session expiry clears cached rows and selection. Page and sync requests serialize through the existing busy guard. New pager controls use native disabled buttons, an accessible navigation label, wrapping layout and minimum 44-pixel height; actual Chromium/mobile layout acceptance remains pending.
+
+Passed locally: 292 Node tests, 35 foundation tests, full runtime DOM suites including 17 Mail UI cases, and 34 real local workerd/D1 checks per pinned compatibility date. A 123-message local D1 index is read across three owner HTTP pages, without duplicates/omissions, then rejects an old revision after a concurrent index commit. Invalid revision tokens, other-owner denial, stale/malformed UI pages, session expiry, request serialization and post-sync reset are covered. Build remains 38 Worker modules / 7 assets; privacy/diff checks pass. No provider socket is used by pagination tests.
+
+Capacity clarification: the generic service/Node SQLite contract allows up to 5,000 records, but the actual D1 adapter intentionally remains capped at **500 records and 256 KiB serialized snapshot payload**. Earlier 601-message drain evidence used Node SQLite, not D1. This pagination change does not raise either D1 cap or alter retention. No production data, DNS/forwarding, Access, secrets, mailbox contents, deployment or SMTP action changed.
+
+Next bounded release task: isolated backup/restore rehearsal for inbox and unsent drafts, using synthetic data only. Existing exact-head CI, browser/provider, MIME archive-integrity, full-fidelity storage, retention/encryption and production approval gates remain open.
+
+## Isolated mail cold-recovery rehearsal — November 3, 2026
+
+Added `workerd-test/mail-recovery-runtime.test.mjs` to the normal pinned-runtime test command. It uses only synthetic records and temporary file-backed Miniflare D1, closes the runtime before copying all persistence files (including SQLite sidecars), records/reloads a SHA-256 manifest, and restores only into a fresh persistence directory. There is no production restore endpoint or new application capability exposed to users.
+
+The rehearsal preserves every row of the inbox, mailbox cursor/revision/retry state, owner-scoped drafts and an unrelated sentinel table. It verifies two installations and two draft-owner subjects, retained UIDVALIDITY cohorts, an empty-space scan watermark, exact successful save replay, altered-replay/stale-write denial, a new post-recovery save and a second process/runtime restart. Source data deliberately diverges after backup to prove the restored point is independent. Corrupt backups fail before target creation; interrupted copy removes only the fresh target; existing targets are refused without changes.
+
+Integrity checks run on a disposable clone: even read-only SQLite access can update shared-memory sidecars. The original backup's complete file fingerprints remain unchanged throughout. All copied SQLite databases pass `integrity_check` and `foreign_key_check`; exactly one contains the application mail tables. The manifest detects accidental corruption; it is not a signature or encrypted backup format. All temporary state is removed in cleanup, with dependent phases failing fast.
+
+Passed locally: 292 Node tests, 44 actual local workerd/D1 checks on each pinned July 30/October 28 compatibility run, integrated 38-module/7-asset build and privacy/diff checks. The ten new counted checks are the recovery suite plus its nine phases. No application source or production settings changed.
+
+This is **local, quiesced, version-pinned Miniflare persistence recovery**, not Cloudflare-hosted D1 export/Time Travel, online backup, live owner recovery, approved encryption/retention, or a production disaster-recovery procedure. Exact-head CI, provider/browser acceptance and the existing release approvals remain open. No production database, mailbox, DNS/forwarding, Access, secrets, service deployment or SMTP action was touched.
+
+Next priority: diagnose the persistent GitHub Actions queue so independent exact-head CI can execute before further release integration.

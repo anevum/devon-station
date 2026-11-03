@@ -127,3 +127,17 @@ test('reordered FETCH persists through owner API, while premature tagged OK cann
   assert.equal((await inbox.json()).messages[0].text,'An inert message.\n');
  }finally{db.close();}
 });
+
+test('inbox revision query is bounded and invalid tokens never reach provider sockets',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db),mock=socketMock();
+ const station=createStation({},auth,fetch,mock.connect);
+ try{
+  for(const query of ['-1','01','1.5','9007199254740992','nope','1&revision=2'])
+   assert.equal((await station.fetch(req('/api/mail/inbox?revision='+query),env(binding))).status,400);
+  const empty=await station.fetch(req('/api/mail/inbox?revision=0'),env(binding));
+  assert.equal(empty.status,200);assert.equal((await empty.json()).revision,0);
+  const conflict=await station.fetch(req('/api/mail/inbox?revision=1'),env(binding));
+  assert.equal(conflict.status,409);assert.deepEqual(await conflict.json(),{error:'mailbox_revision_conflict'});
+  assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
+ }finally{db.close();}
+});

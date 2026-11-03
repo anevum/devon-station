@@ -124,6 +124,8 @@ export async function pollReadOnlyMailbox({registry, context, mailboxId, store, 
     const batch = await providerStep(() => session.fetchBatch(Object.freeze({cursor:existing.cursor ?? null,
       limit,peek:true,readOnly:true,signal:controller.signal})), controller.signal);
     if (controller.signal.aborted) throw new MailReadOnlyError('provider_timeout',504);
+    if (Object.hasOwn(batch,'hasMore') && typeof batch.hasMore !== 'boolean')
+      throw new MailReadOnlyError('invalid_readonly_progress',502);
     clearTimeout(timer); // Provider deadline must not abort an in-flight atomic database commit.
     const proposal = reconcileImapBatch({registry,context,mailboxId,cursor:existing.cursor ?? null,
       batch,existing:existing.records});
@@ -137,7 +139,7 @@ export async function pollReadOnlyMailbox({registry, context, mailboxId, store, 
     }
     return Object.freeze({installationId:scope.installationId,mailboxId,revision:committed.revision,
       imported:proposal.imported,updated:proposal.updated,uidValidityReset:proposal.uidValidityReset,
-      cursor:proposal.cursor});
+      cursor:proposal.cursor,hasMore:typeof batch.hasMore === 'boolean'?batch.hasMore:null});
   } finally {
     clearTimeout(timer);
     // Client should release the read-only session even if parsing, CAS or timeout failed.
@@ -149,10 +151,11 @@ export async function pollReadOnlyMailbox({registry, context, mailboxId, store, 
 }
 
 /** Explicit `read` privilege is separate from service-only `sync` privilege. */
-export async function listReadOnlyInbox({registry,context,mailboxId,store,limit = 25,offset = 0} = {}) {
+export async function listReadOnlyInbox({registry,context,mailboxId,store,limit = 25,offset = 0,expectedRevision = null} = {}) {
   requirePermission(registry, context, mailboxId, 'read');
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_PAGE ||
-      !Number.isSafeInteger(offset) || offset < 0 || offset > MAX_RECORDS) {
+      !Number.isSafeInteger(offset) || offset < 0 || offset > MAX_RECORDS ||
+      (expectedRevision !== null && !isSafeInt(expectedRevision))) {
     throw new MailReadOnlyError('invalid_inbox_page',400);
   }
   if (!store || typeof store.readSnapshot !== 'function') {
@@ -160,6 +163,8 @@ export async function listReadOnlyInbox({registry,context,mailboxId,store,limit 
   }
   const scope=scopeOf(context,mailboxId);
   const snapshot=safeSnapshot(await store.readSnapshot(scope),scope);
+  if (expectedRevision !== null && snapshot.revision !== expectedRevision)
+    throw new MailReadOnlyError('mailbox_revision_conflict',409);
   // Project only known plain-text fields. Never return storage/provider object wholesale.
   const rows=snapshot.records.slice().sort((a,b)=>
     Date.parse(b.timestamp)-Date.parse(a.timestamp) || b.uidValidity-a.uidValidity || b.uid-a.uid)

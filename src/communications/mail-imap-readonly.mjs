@@ -74,10 +74,10 @@ export function createReadOnlyImapProvider({connector} = {}) {
           const uidValidity = parseUidValidity(examine);
           const uidNext = parseUidNext(examine);
           const options = readonlyOptions({cursor, uidValidity, limit});
-          if (options.start === null) return {uidValidity, messages: []};
+          if (options.start === null) return {uidValidity, messages: [], hasMore:false};
           // Never scan future UID space: arrivals after EXAMINE have UID >= UIDNEXT.
           const last = uidNext - 1;
-          if (options.start > last) return {uidValidity, messages: []};
+          if (options.start > last) return {uidValidity, messages: [], hasMore:false};
           let start = options.start, scannedThrough = start - 1;
           const uids = [];
           for (let windows = 0; windows < MAX_SEARCH_WINDOWS && start <= last && uids.length < limit; windows++) {
@@ -89,7 +89,7 @@ export function createReadOnlyImapProvider({connector} = {}) {
             scannedThrough = selected.length < found.length ? selected.at(-1) : end;
             start = end + 1;
           }
-          if (!uids.length) return {uidValidity, messages: [], scannedThrough};
+          if (!uids.length) return {uidValidity, messages: [], scannedThrough, hasMore:scannedThrough < last};
           const raw = await exchange(`UID FETCH ${uids.join(',')} (UID FLAGS INTERNALDATE BODY.PEEK[])`, stepSignal);
           // Full RFC 5322 octets are decoded by the trusted bounded MIME layer; never treat raw/HTML as safe text.
           if (!raw || !Array.isArray(raw.messages) || raw.messages.length !== uids.length) reject('invalid_imap_fetch');
@@ -102,7 +102,7 @@ export function createReadOnlyImapProvider({connector} = {}) {
             }
             seen.add(row.uid);
           }
-          return {uidValidity, messages: raw.messages, scannedThrough};
+          return {uidValidity, messages: raw.messages, scannedThrough, hasMore:scannedThrough < last};
         },
         async close() {if (closed) return; closed = true; await connection.close();}
       });
