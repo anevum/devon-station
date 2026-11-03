@@ -13,7 +13,7 @@ const connect=()=>assert.fail('No test may open an SMTP socket');
 test('independent opt-in and verified owner/provider configuration required to enable sending',()=>{
  assert.equal(mailSendingEnabled(env,connect),true);
  for(const change of [
-  {MAIL_SEND_ENABLED:undefined},{MAIL_OUTBOX_ENABLED:undefined},
+  {MAIL_SEND_ENABLED:undefined},{MAIL_OUTBOX_ENABLED:undefined},{MAIL_DRAFTS_ENABLED:undefined},
   {MAIL_SENDER_VERIFIED:undefined},{MAIL_SMTP_ADDRESS:'other@example.test'},
   {MAIL_SMTP_PASSWORD:undefined},{MAIL_SMTP_PASSWORD:'bad password'},
   {MAIL_SMTP_PASSWORD:''},{MAIL_SMTP_PASSWORD:'x'.repeat(257)},
