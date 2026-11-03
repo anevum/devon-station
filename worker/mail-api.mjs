@@ -4,7 +4,7 @@ import {createMailRegistry} from '../src/communications/mail-core.mjs';
 import {createD1MailStore} from '../src/communications/mail-d1-store.mjs';
 import {createReadOnlyImapProvider} from '../src/communications/mail-imap-readonly.mjs';
 import {createPurelymailImapConnector} from '../src/communications/mail-imap-transport.mjs';
-import {decodeSinglePartPlainTextMime} from '../src/communications/mail-mime-text.mjs';
+import {decodeSafeMime} from '../src/communications/mail-mime-safe.mjs';
 import {listReadOnlyInbox, pollReadOnlyMailbox, listReadOnlyMailboxes} from '../src/communications/mail-readonly-service.mjs';
 
 const MAILBOX = 'hello@devonakins.com';
@@ -54,7 +54,7 @@ export async function handleMailApi({request,url,user,env,connect}) {
       const connector=createPurelymailImapConnector({
         connect,
         credentials: async username=>username===MAILBOX?env.MAIL_IMAP_PASSWORD:undefined,
-        decodeMime:decodeSinglePartPlainTextMime
+        decodeMime:decodeSafeMime
       });
       const result=await pollReadOnlyMailbox({
         registry:mailRegistry,context:scope,mailboxId:'hello',store,
