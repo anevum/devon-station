@@ -6,7 +6,7 @@ const ID=/^[a-z][a-z0-9-]{0,62}$/;
 const fail=code=>{throw Object.assign(new Error(code),{code});};
 const id=value=>{if(typeof value!=='string'||!UUID.test(value))fail('outbox_invalid_id');return value;};
 const columns='installation_id=? AND mailbox_id=? AND owner_sub=? AND delivery_id=?';
-const linkage='installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND draft_revision=?';
+const linkage='installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=?';
 const revision=value=>{
  if(!Number.isSafeInteger(value)||value<1||value>1000000000)fail('outbox_invalid_draft_revision');
  return value;
@@ -52,8 +52,9 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString()}={}){
      own.payload_json!==encoded)fail('outbox_conflict');
     return receipt(own);
    }
+   // A unique index serializes competing IDs across *all* revisions of this draft.
    const linked=await db.prepare('SELECT delivery_id FROM comms_outbox WHERE '+linkage)
-    .bind(...parts,draftId,draftRevision).first();
+    .bind(...parts,draftId).first();
    if(linked)fail('outbox_draft_already_prepared');
    const current=await db.prepare('SELECT revision,recipients_json,subject,body_text FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=?')
     .bind(...parts,draftId).first();
