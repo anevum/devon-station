@@ -9,7 +9,7 @@ modules['worker/mail-api.mjs']=await readFile(resolve(root,'worker/mail-api.mjs'
 for(const name of ['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs']){
  modules['src/communications/'+name]=await readFile(resolve(root,'src','communications',name),'utf8');
 }
-for(const name of ['address-parser.js','base64-decoder.js','base64-encoder.js','chunk-writer.js','decode-strings.js','errors.js','html-entities.js','mime-node.js','otp-token.js','pass-through-decoder.js','postal-mime.js','qp-decoder.js','text-format.js','types.js']){
+for(const name of ['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs','decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs','pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs']){
  modules['vendor/postal-mime/'+name]=await readFile(resolve(root,'vendor','postal-mime',name),'utf8');
 }
 await mkdir(resolve(root,'deployment'),{recursive:true});await writeFile(resolve(root,'deployment/modules.json'),JSON.stringify(modules));console.log('Built protected Worker with '+Object.keys(assets).length+' assets and '+Object.keys(modules).length+' modules');
