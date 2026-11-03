@@ -58,7 +58,7 @@ async function providerGET(url,headers,transport,expectArray=false){
 
 function readMercuryPage(data){
  if(!data||!Array.isArray(data.accounts)||data.accounts.length>MERCURY_PAGE_LIMIT||
-    !data.page||typeof data.page!=='object'||Array.isArray(data.page))
+    !data.page||typeof data.page!=='object'||Array.isArray(data.page)||!Object.hasOwn(data.page,'nextPage'))
   problem('finance_incomplete_accounts');
  const nextPage=data.page.nextPage??null;
  if(nextPage!==null&&(!UUID.test(nextPage)||data.accounts.length===0))
