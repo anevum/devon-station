@@ -16,7 +16,12 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
  try{
   dom=await make();let doc=dom.window.document;
   try{await until(()=>doc.querySelector('#ws-summary'),'workspace loaded');}catch(e){console.error('BOOT ERRORS',errors);console.error('VIEW',doc.querySelector('#view')?.textContent.slice(0,1500));console.error('BODY',doc.body.textContent.slice(-400));throw e;}
-  const source=doc.querySelector('.ws-project-header a');if(!source.href.includes('synthetic-project-a'))throw Error('source missing');
+  // Select the known fixture explicitly rather than assuming default sort order.
+  // Keep the original project source-link assertion and wait for its redraw.
+  const projectA=doc.querySelector('[data-ws-project="project-a"]');
+  if(!projectA)throw Error('synthetic project A missing from authorized scope');
+  projectA.click();
+  await until(()=>doc.querySelector('.ws-project-header a')?.href.includes('synthetic-project-a'),'selected project source link preserved');
   // Async redraw must preserve a keyboard user's place after reload/scope change.
   const reload=doc.querySelector('#ws-reload');reload.focus();reload.click();
   await until(()=>doc.querySelector('#ws-reload')!==reload&&!doc.querySelector('#ws-reload').disabled,'workspace keyboard reload');
