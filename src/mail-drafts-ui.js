@@ -34,6 +34,14 @@ async function api(url,body){
  if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}
  const res=await fetch(url,options);
  if(!res.ok){
+   // Only read a bounded, explicitly recognized error code from our own API.
+   // A 409 for this saved-draft revision means another durable delivery exists.
+   if(url==='/api/mail/outbox/prepare'&&res.status===409&&
+      res.headers.get('content-type')?.toLowerCase().includes('application/json')){
+    const errorBody=await res.json();
+    if(errorBody?.error==='outbox_draft_already_prepared')throw Error('outbox_draft_already_prepared');
+    if(errorBody?.error==='outbox_draft_stale')throw Error('outbox_draft_stale');
+   }
    const code=res.status===409?'mail_draft_conflict':res.status===401||res.status===403?
     'mail_sign_in_required':'mail_draft_request_failed';
    throw Error(code);
@@ -248,17 +256,23 @@ async function prepareSend(){
  const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body};
  state.busy=true;state.error=null;state.notice=null;render();
  try{
-  const result=await api('/api/mail/outbox/prepare',{deliveryId,draft:snapshot,approvedByOwner:true});
+  const result=await api('/api/mail/outbox/prepare',{deliveryId,draftId:draft.id,draftRevision:draft.revision,approvedByOwner:true});
   if(result?.receipt?.deliveryId!==deliveryId||result.receipt.state!=='queued')
    throw Error('mail_outbox_invalid_receipt');
   state.pendingSend={deliveryId,draft:snapshot,draftId:draft.id,revision:draft.revision,phase:'queued',attempted:false};
   state.notice='Email prepared for review. Nothing has been submitted to SMTP.';
  }catch(e){
-  // The server may have stored this exact snapshot even if its reply was lost.
-  // Preserve the ID; never silently create a replacement or send on preparation.
-  state.pendingSend={deliveryId,draft:snapshot,draftId:draft.id,revision:draft.revision,phase:'preparation-unconfirmed',attempted:false};
-  state.error=e.message==='mail_sign_in_required'?'Owner session expired; do not send.':
-   'Preparation receipt unavailable. No SMTP send was requested. Check this delivery in the outbox before proceeding.';
+  if(e.message==='outbox_draft_already_prepared'||e.message==='outbox_draft_stale'){
+   state.pendingSend=null;state.outboxLoaded=false;state.outboxItems=[];
+   state.error=e.message==='outbox_draft_already_prepared'?
+    'This saved draft revision already has a durable delivery. Inspect Outbox History; do not create another copy.':
+    'The saved draft changed or was deleted before preparation. Reload drafts and review the latest revision.';
+  }else{
+   // Lost responses may follow a successful D1 commit; preserve the delivery ID.
+   state.pendingSend={deliveryId,draft:snapshot,draftId:draft.id,revision:draft.revision,phase:'preparation-unconfirmed',attempted:false};
+   state.error=e.message==='mail_sign_in_required'?'Owner session expired; do not send.':
+    'Preparation receipt unavailable. No SMTP send was requested. Check this delivery in the outbox before proceeding.';
+  }
  }finally{state.busy=false;render();}
 }
 async function submitSend(){
