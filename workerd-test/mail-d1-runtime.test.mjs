@@ -39,11 +39,16 @@ test(`workerd ${compatibilityDate}: COMMS-07 real local D1 snapshot transaction 
     // Miniflare D1 exec() parses SQL strings, but rejects a comment-only first line
     // as an empty statement. Strip full-line SQL comments for local test setup only.
     // Do not edit or run the candidate migration against a remote database.
-    const migrationSQL = migration.split('\n').filter(line => !/^\s*--/.test(line)).join('\n');
+    const migrationStatements = migration.split('\n').filter(line => !/^\s*--/.test(line))
+      .join('\n').split(';').map(statement => statement.trim()).filter(Boolean);
+    assert.equal(migrationStatements.length, 3, 'expected two tables and one index');
+    const applyLocalMigration = async () => {
+      for (const statement of migrationStatements) await db.prepare(statement).run();
+    };
     await t.test('explicit migration is mandatory and idempotent', async () => {
       await assert.rejects(store.readSnapshot(scope), hasCode('mail_d1_read_failed'));
-      await db.exec(migrationSQL);
-      await db.exec(migrationSQL);
+      await applyLocalMigration();
+      await applyLocalMigration();
       assert.deepEqual(await store.readSnapshot(scope), { ...scope, revision: 0, cursor: null, records: [] });
     });
 
