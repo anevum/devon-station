@@ -10,7 +10,7 @@ test('hosted packaging removes private inventory, has no embedded private source
  const bundle=JSON.parse(readFileSync('deployment/modules.json','utf8'));
  for(const name of ['index.mjs','worker/index.mjs','worker/access.mjs','worker/notifications.mjs','worker/state.mjs','worker/portfolio.mjs','worker/workspace.mjs','worker/workspace-journal.mjs','src/workspace-backup.mjs','foundation/src/foundation.mjs','foundation/src/access-scope-bridge.mjs','foundation/interop/approved-portfolio.mjs'])assert(Object.hasOwn(bundle,name),name);
  for(const name of ['worker/mail-api.mjs',...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs'].map(name=>'src/communications/'+name)])assert(Object.hasOwn(bundle,name),name);
- for(const name of ['address-parser.js','base64-decoder.js','base64-encoder.js','chunk-writer.js','decode-strings.js','errors.js','html-entities.js','mime-node.js','otp-token.js','pass-through-decoder.js','postal-mime.js','qp-decoder.js','text-format.js','types.js'])assert(Object.hasOwn(bundle,'vendor/postal-mime/'+name),name);
+ for(const name of ['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs','decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs','pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs'])assert(Object.hasOwn(bundle,'vendor/postal-mime/'+name),name);
  assert.equal(Object.keys(bundle).length,36);
  assert.match(bundle['index.mjs'],/^import \{connect\} from 'cloudflare:sockets';/);
  const assets=JSON.parse(bundle['index.mjs'].match(/const assets=(.*);\nexport default/s)[1]);
