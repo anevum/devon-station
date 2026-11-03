@@ -5,15 +5,13 @@
  */
 import {PURELYMAIL} from './mail-onboarding.mjs';
 import {prepareOutgoingPlainText} from './mail-outbound-wire.mjs';
+import {isValidMailAddress} from './mail-drafts.mjs';
 
 const enc=new TextEncoder();
 const DECODER=new TextDecoder('utf-8',{fatal:true});
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-// Match the canonical saved-draft recipient grammar. A narrower SMTP-only
-// check would reject valid prepared messages *after* the one-time outbox claim.
-const EMAIL=/^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
-const envelopeEmail=value=>typeof value==='string'&&value.length>=3&&value.length<=254&&
- EMAIL.test(value)&&!value.includes('..');
+// Same address validation as the D1 draft and MIME paths. Never narrow it
+// after the one-time delivery claim; pre-claim MIME validation already ran.
 const MAX_LINE=512;
 const MAX_REPLY_BYTES=8192;
 const MAX_REPLY_LINES=32;
@@ -36,11 +34,11 @@ export function createPurelymailSmtpTransport({connect,credentials,claimDelivery
       if(!claim||claim.deliveryId!==deliveryId||claim.status!=='claimed'||claim.approvedByOwner!==true)
         reject('smtp_delivery_not_approved');
       const {from,registry,context,mailboxId,draft,date}=claim;
-      if(!envelopeEmail(from)||!authValue(from))
+      if(!isValidMailAddress(from)||!authValue(from))
         reject('smtp_sender_invalid');
       const prepared=prepareOutgoingPlainText({registry,context,mailboxId,from,draft,deliveryId,date});
       if(prepared.envelopeFrom!==from||prepared.envelopeTo.length<1||prepared.envelopeTo.length>20||
-        prepared.envelopeTo.some(to=>!envelopeEmail(to))||prepared.byteLength>MAX_WIRE_BYTES||
+        prepared.envelopeTo.some(to=>!isValidMailAddress(to))||prepared.byteLength>MAX_WIRE_BYTES||
         !prepared.wire.endsWith('\r\n')||/(^|\r\n)\./.test(prepared.wire)||
         /(?<!\r)\n|\r(?!\n)/.test(prepared.wire))reject('smtp_wire_invalid');
       let password;
