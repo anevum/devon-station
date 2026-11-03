@@ -106,7 +106,7 @@ function render(){
  form.append(actions);root.append(form);
  if(state.pendingSend){
   const outgoing=state.pendingSend;
-  const review=element('section','mail-outbox-review');review.setAttribute('aria-label','Review outgoing email before submission');
+  const review=element('section','mail-outbox-review');review.setAttribute('aria-label','Review outgoing email before submission');review.dataset.outboxState=outgoing.phase;
   review.append(element('h3','mail-draft-heading','Outgoing email review'));
   review.append(element('p','mail-draft-notice','Preparation never sends email. SMTP acceptance is not recipient delivery. Uncertain results must never be resent automatically.'));
   const metadata=element('dl','mail-details');
