@@ -1,6 +1,6 @@
 // COMMS-09 owner-only mail read APIs. No SMTP, implicit polling, credential responses or DNS changes.
 // Deployment requires a separately approved isolated MAIL_DB binding and MAIL_IMAP_PASSWORD secret.
-import {handleMailOutboxApi} from './mail-outbox-api.mjs';
+import {handleMailOutboxApi,mailSendingEnabled} from './mail-outbox-api.mjs';
 import {createMailRegistry} from '../src/communications/mail-core.mjs';
 import {createD1MailStore} from '../src/communications/mail-d1-store.mjs';
 import {createReadOnlyImapProvider} from '../src/communications/mail-imap-readonly.mjs';
@@ -38,7 +38,7 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(url.pathname.startsWith('/api/mail/outbox'))return handleMailOutboxApi({request,url,user,env,readBody,registry:registry(env.MAIL_SENDER_VERIFIED==='true'),connect});
   const ready=isEnabled(env) && typeof connect==='function';
   if(url.pathname==='/api/mail/status' && request.method==='GET')
-    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:false,draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
+    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect),draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
   if(url.pathname.startsWith('/api/mail/drafts'))return handleMailDraftApi({request,url,user,env,readBody});
   if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync'].includes(url.pathname))
     return status('not_found',404);
