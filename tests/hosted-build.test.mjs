@@ -9,7 +9,9 @@ test('hosted packaging removes private inventory, has no embedded private source
  assert(src.includes("connect-src 'self'"));assert(src.includes('Private storage connected')||src.includes('Private storage synced'));
  const bundle=JSON.parse(readFileSync('deployment/modules.json','utf8'));
  for(const name of ['index.mjs','worker/index.mjs','worker/access.mjs','worker/notifications.mjs','worker/state.mjs','worker/portfolio.mjs','worker/workspace.mjs','worker/workspace-journal.mjs','src/workspace-backup.mjs','foundation/src/foundation.mjs','foundation/src/access-scope-bridge.mjs','foundation/interop/approved-portfolio.mjs'])assert(Object.hasOwn(bundle,name),name);
- assert.equal(Object.keys(bundle).length,12);
+ for(const name of ['worker/mail-api.mjs',...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs'].map(name=>'src/communications/'+name)])assert(Object.hasOwn(bundle,name),name);
+ assert.equal(Object.keys(bundle).length,21);
+ assert.match(bundle['index.mjs'],/^import \{connect\} from 'cloudflare:sockets';/);
  const assets=JSON.parse(bundle['index.mjs'].match(/const assets=(.*);\nexport default/s)[1]);
  for(const [name,size] of [['icon-192.png',192],['icon-512.png',512],['apple-touch-icon.png',180]]){
   const encoded=assets['/icons/'+name];assert.equal(encoded.type,'image/png');const bytes=Buffer.from(encoded.body,'base64');assert.equal(bytes.readUInt32BE(16),size);assert.equal(bytes.readUInt32BE(20),size);assert.deepEqual(bytes,readFileSync('pwa/icons/'+name));
