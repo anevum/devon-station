@@ -1,8 +1,8 @@
 // COMMS-11: convert bounded untrusted RFC 5322/MIME into inert, minimal owner-index fields.
 // The parser may decode HTML only into text. Raw HTML, binary attachments, URLs, credentials,
 // and arbitrary headers NEVER enter persistent D1 or the public client API.
-import PostalMime from '../../vendor/postal-mime/postal-mime.js';
-import {htmlToText} from '../../vendor/postal-mime/text-format.js';
+import PostalMime from '../../vendor/postal-mime/postal-mime.mjs';
+import {htmlToText} from '../../vendor/postal-mime/text-format.mjs';
 
 const MAX_WIRE_BYTES=256*1024;
 const MAX_BODY_CHARS=4096;
