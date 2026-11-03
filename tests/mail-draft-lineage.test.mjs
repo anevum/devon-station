@@ -124,3 +124,39 @@ test('scope boundary, unique-index scope and legacy outbox inserts remain intact
  const row=await outbox.read(UUID.first);assert.equal(row.draftId,UUID.draft);
  assert(!JSON.stringify(await outbox.list()).includes(sample.body),'listing never includes saved body or recipients');
 });
+
+
+test('pending outgoing delivery blocks draft deletion atomically without affecting another owner',async t=>{
+ const {sqlite,d1,drafts,outbox,dispatcher}=fixture(t);
+ await seed(drafts);
+ const locked=createD1DraftStore(d1,{now:()=> '2026-11-03T10:00:00.000Z',protectPendingOutbox:true});
+ await prepare(dispatcher,UUID.first);
+ await drafts.create(peer,UUID.draft);
+ assert.deepEqual(await locked.remove(peer,{id:UUID.draft,revision:1}),{deleted:true},
+  'owner-scoped pending delivery must not block other owners');
+ for(const status of ['queued','claimed','uncertain']){
+  if(status==='claimed')await outbox.claim(UUID.first,UUID.alternate);
+  if(status==='uncertain')await outbox.finish(UUID.first,UUID.alternate,'uncertain');
+  await assert.rejects(locked.remove(owner,{id:UUID.draft,revision:2}),
+   isCode('mail_draft_pending_delivery'),status+' draft deletion must be blocked');
+  assert.equal((await drafts.read(owner,UUID.draft)).revision,2);
+  assert.equal((await outbox.read(UUID.first)).state,status);
+ }
+ assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM comms_mail_drafts WHERE owner_sub=?').get(owner.ownerSub).n,1);
+});
+
+test('resolved SMTP acceptance permits explicit draft deletion but preserves immutable delivery record',async t=>{
+ const {d1,drafts,outbox,dispatcher}=fixture(t);
+ await seed(drafts);
+ const locked=createD1DraftStore(d1,{protectPendingOutbox:true});
+ await prepare(dispatcher,UUID.first);
+ await assert.rejects(locked.remove(owner,{id:UUID.draft,revision:1}),
+  isCode('mail_draft_conflict'),'a stale revision must not delete or expose delivery state');
+ await outbox.claim(UUID.first,UUID.alternate);
+ await outbox.finish(UUID.first,UUID.alternate,'accepted');
+ assert.deepEqual(await locked.remove(owner,{id:UUID.draft,revision:2}),{deleted:true});
+ assert.equal(await drafts.read(owner,UUID.draft),null);
+ const row=await outbox.read(UUID.first);
+ assert.equal(row.state,'accepted');
+ assert.equal(row.draftId,UUID.draft,'deleting resolved draft must retain audit linkage');
+});
