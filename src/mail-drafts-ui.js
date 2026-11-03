@@ -38,7 +38,7 @@ async function api(url,body){
    // A 409 for this saved-draft revision means another durable delivery exists.
    if(res.status===409&&
       res.headers.get('content-type')?.toLowerCase().includes('application/json')&&
-      (url==='/api/mail/outbox/prepare'||url==='/api/mail/drafts/delete')){
+      (url==='/api/mail/outbox/prepare'||url==='/api/mail/drafts/delete'||url==='/api/mail/drafts/save')){
     const errorBody=await res.json();
     if(url==='/api/mail/outbox/prepare'&&errorBody?.error==='outbox_draft_already_prepared')
      throw Error('outbox_draft_already_prepared');
@@ -46,6 +46,8 @@ async function api(url,body){
      throw Error('outbox_draft_stale');
     if(url==='/api/mail/drafts/delete'&&errorBody?.error==='mail_draft_pending_delivery')
      throw Error('mail_draft_pending_delivery');
+    if(url==='/api/mail/drafts/save'&&errorBody?.error==='mail_draft_delivery_locked')
+     throw Error('mail_draft_delivery_locked');
    }
    const code=res.status===409?'mail_draft_conflict':res.status===401||res.status===403?
     'mail_sign_in_required':'mail_draft_request_failed';
@@ -227,7 +229,9 @@ async function save(){
   state.dirty=false;state.pendingSave=null;
   state.notice='Draft saved at revision '+state.working.revision+'. No message was sent.';
  }catch(e){
-  state.error=e.message==='mail_draft_conflict'?
+  state.error=e.message==='mail_draft_delivery_locked'?
+   'This draft is linked to a previous delivery. Edits are blocked to preserve the message that may have been sent. Copy your changes into a new draft.':
+   e.message==='mail_draft_conflict'?
    'Another version was saved. Copy your unsaved edits before reloading; no overwrite occurred.':
    e.message==='mail_sign_in_required'?'Owner session expired; your unsaved edits remain in this page.':
    'Save confirmation unavailable. Select Save Draft to retry this exact operation.';
