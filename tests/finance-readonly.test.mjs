@@ -71,18 +71,31 @@ test('owner binding rejects before any upstream calls',async()=>{
 });
 
 test('malformed, duplicated and incomplete account evidence fails closed',()=>{
- assert.throws(()=>mercuryProjection({accounts:[mercury.accounts[0],mercury.accounts[0]]}));
+ assert.throws(()=>mercuryProjection({...mercury,accounts:[mercury.accounts[0],mercury.accounts[0]]}));
  assert.throws(()=>mercuryProjection({...mercury,page:{nextPage:'99999999-9999-4999-8999-999999999999'}}));
- assert.throws(()=>mercuryProjection({accounts:[{...mercury.accounts[0],currentBalance:null}]}));
- assert.throws(()=>mercuryProjection({accounts:[{...mercury.accounts[0],availableBalance:Infinity}]}));
- assert.throws(()=>mercuryProjection({accounts:[{...mercury.accounts[0],name:'x\nscript'}]}));
- assert.throws(()=>mercuryProjection({accounts:[{...mercury.accounts[0],status:'unrecognized'}]}));
+ assert.throws(()=>mercuryProjection({...mercury,accounts:[{...mercury.accounts[0],currentBalance:null}]}));
+ assert.throws(()=>mercuryProjection({...mercury,accounts:[{...mercury.accounts[0],availableBalance:Infinity}]}));
+ assert.throws(()=>mercuryProjection({...mercury,accounts:[{...mercury.accounts[0],name:'x\nscript'}]}));
+ assert.throws(()=>mercuryProjection({...mercury,accounts:[{...mercury.accounts[0],status:'unrecognized'}]}));
 });
 
 test('monetary parsing preserves cents and rejects fractions, NaN and exponent',()=>{
  assert.equal(cents('1200.04'),'120004');assert.equal(cents('-20.01'),'-2001');
  assert.equal(cents(0),'0');assert.equal(cents('0.1'),'10');
  for(const bad of ['1.001','NaN','1e5','10000000000000000',NaN,Infinity,null,{}])assert.throws(()=>cents(bad));
+});
+
+test('Alpaca documented account lifecycle states remain observable in paper-only mode',()=>{
+ for(const status of [
+  'PAPER_ONLY','ONBOARDING','SUBMISSION_FAILED','ACCOUNT_UPDATED','APPROVED',
+  'ACCOUNT_CLOSED','ACCOUNT_CLOSED_PENDING','LIMITED',
+ ]) {
+  const result=alpacaPaperProjection({...alpaca,status},positions);
+  assert.equal(result.status,'available',status);
+  assert.equal(result.mode,'paper',status);
+  assert.equal(result.accountStatus,status.toLowerCase());
+  assert.equal(result.tpd.valuePct,null);
+ }
 });
 
 test('Alpaca paper projector rejects malformed evidence',()=>{
