@@ -109,6 +109,14 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
    const deliveryId='123e4567-e89b-42d3-a456-426614174013';
    const saved=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draftId,draftRevision:2,approvedByOwner:true}),env);
    assert.equal(saved.status,200);assert.equal((await saved.json()).sendingEnabled,false);
+   const duplicate=await station.fetch(request('/api/mail/outbox/prepare','POST',
+    {deliveryId:'123e4567-e89b-42d3-a456-426614174094',
+     draftId,draftRevision:2,approvedByOwner:true}),env);
+   assert.equal(duplicate.status,409);
+   assert.equal((await duplicate.json()).error,'outbox_draft_already_prepared');
+   const untrusted=await station.fetch(request('/api/mail/outbox/prepare','POST',
+    {deliveryId:'123e4567-e89b-42d3-a456-426614174095',draft,approvedByOwner:true}),env);
+   assert.equal(untrusted.status,400,'HTTP preparation must not accept browser-supplied message content');
    const mailStatus=await station.fetch(request('/api/mail/status'),env);
    assert.equal(mailStatus.status,200);
    const readiness=await mailStatus.json();
