@@ -62,6 +62,10 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString()}={}){
    catch{throw error('mail_draft_storage_failed',502);}
  };
  return Object.freeze({
+  async read(scope,draftId){
+   const row=await get(validScope(scope),validId(draftId));
+   return row?mapRow(row):null;
+  },
   async list(scope){
    const s=validScope(scope);
    let response;
