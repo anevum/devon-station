@@ -2,7 +2,8 @@
 // Not a TLS socket, credential vault or MIME parser; no live provider connection here.
 import {PURELYMAIL} from './mail-onboarding.mjs';
 const MAX_SEARCH = 500;
-const safeUid = n => Number.isSafeInteger(n) && n > 0;
+const MAX_UID = 0xffffffff;
+const safeUid = n => Number.isSafeInteger(n) && n > 0 && n <= MAX_UID;
 function reject(code) {const e = new Error(code); e.code = code; throw e;}
 export function parseUidValidity(reply) {
   if (typeof reply !== 'string' || reply.length > 2048 || /[\x00-\x08\x0b\x0c\x0e-\x1f]/.test(reply)) reject('invalid_imap_examine');
@@ -24,10 +25,15 @@ export function parseSearchUids(reply, startingUid) {
 function readonlyOptions({cursor, uidValidity, limit}) {
   if (!safeUid(uidValidity) || !Number.isSafeInteger(limit) || limit < 1 || limit > 50) reject('invalid_imap_options');
   if (cursor !== null && cursor !== undefined && (!safeUid(cursor.uidValidity) ||
-      !Number.isSafeInteger(cursor.highestUid) || cursor.highestUid < 0)) reject('invalid_imap_options');
+      !Number.isSafeInteger(cursor.highestUid) || cursor.highestUid < 0 || cursor.highestUid > MAX_UID)) reject('invalid_imap_options');
   const start = cursor?.uidValidity === uidValidity ? cursor.highestUid + 1 : 1;
+  // A stable UIDVALIDITY cohort cannot assign another UID above the protocol ceiling.
+  // Still EXAMINE first so a new cohort restarts correctly from one.
+  if (start === MAX_UID + 1) return {search:null};
   if (!safeUid(start)) reject('invalid_imap_options');
-  return {start, search: `UID SEARCH UID ${start}:*`};
+  // A wildcard endpoint can reverse the range and return an already indexed last UID.
+  // A finite upper bound keeps out-of-range results invalid instead of filtering them away.
+  return {start, search: `UID SEARCH UID ${start}:${MAX_UID}`};
 }
 /** Only the four audited read-only verbs below may reach a trusted connector. */
 export function createReadOnlyImapProvider({connector} = {}) {
@@ -60,6 +66,7 @@ export function createReadOnlyImapProvider({connector} = {}) {
           if (closed || wantsPeek !== true || wantsReadOnly !== true) reject('imap_readonly_required');
           const uidValidity = parseUidValidity(await exchange('EXAMINE "INBOX"', stepSignal));
           const options = readonlyOptions({cursor, uidValidity, limit});
+          if (options.search === null) return {uidValidity, messages: []};
           const uids = parseSearchUids(await exchange(options.search, stepSignal), options.start).slice(0,limit);
           if (!uids.length) return {uidValidity, messages: []};
           const raw = await exchange(`UID FETCH ${uids.join(',')} (UID FLAGS INTERNALDATE BODY.PEEK[])`, stepSignal);

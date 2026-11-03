@@ -5,7 +5,7 @@ const enc = new TextEncoder();
 const LIMIT = 256 * 1024;
 const MAX_LINE = 8192;
 const MAX_REPLY = 10 * (LIMIT + MAX_LINE) + 32768;
-const UID = n => Number.isSafeInteger(n) && n > 0;
+const UID = n => Number.isSafeInteger(n) && n > 0 && n <= 0xffffffff;
 const reject = code => {throw Object.assign(new Error(code), {code});};
 const ascii = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max &&
   !/[\x00-\x1f\x7f]/.test(value);
@@ -60,9 +60,10 @@ async function parseFetch(line, bytes, decodeMime) {
 
 function validateCommand(command) {
   if (command === 'EXAMINE "INBOX"') return 'examine';
-  if (/^UID SEARCH UID [1-9][0-9]*:\*$/.test(command)) return 'search';
+  if (/^UID SEARCH UID [1-9][0-9]*:4294967295$/.test(command) &&
+      UID(Number(command.slice(15, command.indexOf(':'))))) return 'search';
   if (/^UID FETCH [1-9][0-9]*(?:,[1-9][0-9]*)* \(UID FLAGS INTERNALDATE BODY\.PEEK\[\]\)$/.test(command) &&
-      command.length <= 350) return 'fetch';
+      command.length <= 350 && command.slice(10,command.indexOf(' (')).split(',').every(n=>UID(Number(n)))) return 'fetch';
   reject('imap_command_forbidden');
 }
 

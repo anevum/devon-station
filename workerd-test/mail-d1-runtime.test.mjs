@@ -185,3 +185,86 @@ test(`workerd ${compatibilityDate}: reordered FETCH commits only a complete fram
   }
  }finally{await mf.dispose();}
 });
+
+// Handler and wire fixture run in Node; every snapshot transaction uses real local D1.
+test(`workerd ${compatibilityDate}: incremental polling preserves indexed mail and cursor across idle/error/reset cases`,async t=>{
+ const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("isolated incremental poll")}}',
+  compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['MAIL_POLL']});
+ try{
+  const db=await mf.getD1Database('MAIL_POLL');
+  const migration=await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql',import.meta.url),'utf8');
+  for(const sql of migration.split('\n').filter(line=>!/^\s*--/.test(line)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
+   await db.prepare(sql).run();
+  const store=createD1MailStore(db),base='https://station.example';
+  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
+   MAIL_IMAP_ADDRESS:'hello@devonakins.com',MAIL_IMAP_PASSWORD:'synthetic-only',MAIL_DB:db};
+  const cases=[
+   {name:'empty first mailbox',validity:7,start:1,uids:[],highest:0,imported:0},
+   {name:'first sparse arrival',validity:7,start:1,uids:[5],highest:5,imported:1},
+   {name:'idle mailbox with indexed messages',validity:7,start:6,uids:[],highest:5,imported:0},
+   {name:'stale search result rejected',validity:7,start:6,uids:[5],error:true},
+   {name:'duplicate search result rejected',validity:7,start:6,uids:[9,9],error:true},
+   {name:'sparse arrivals sorted before fetch',validity:7,start:6,uids:[11,9],highest:11,imported:2},
+   {name:'empty new UIDVALIDITY cohort retains old mail',validity:8,start:1,uids:[],highest:0,imported:0,reset:true},
+   {name:'new cohort arrival retains earlier cohorts',validity:8,start:1,uids:[2],highest:2,imported:1},
+   {name:'exhausted UID ceiling performs only EXAMINE',validity:8,start:null,uids:[],highest:4294967295,imported:0,ceiling:true},
+   {name:'UIDVALIDITY reset after exhausted ceiling',validity:9,start:1,uids:[],highest:0,imported:0,reset:true}
+  ];
+  for(const scenario of cases)await t.test(scenario.name,async()=>{
+   if(scenario.ceiling){
+    const previous=await store.readSnapshot(scope);
+    await store.commitSnapshot({scope,expectedRevision:previous.revision,
+     next:{records:previous.records,cursor:{uidValidity:8,highestUid:4294967295}}});
+   }
+   const before=await store.readSnapshot(scope);let controller,closed=false;const commands=[];
+   const respond=value=>{
+    const data=typeof value==='string'?new TextEncoder().encode(value):value;
+    for(let i=0;i<data.length;i+=5)controller.enqueue(data.slice(i,i+5));
+   };
+   const connect=(target,options)=>{
+    assert.deepEqual(target,{hostname:'imap.purelymail.com',port:993});
+    assert.deepEqual(options,{secureTransport:'on'});
+    return {opened:Promise.resolve(),readable:new ReadableStream({start(c){controller=c;respond('* OK ready\r\n');}}),
+     writable:new WritableStream({write(chunk){
+      const command=new TextDecoder().decode(chunk),tag=command.slice(0,5);commands.push(command);
+      if(command.includes(' LOGIN '))respond(tag+' OK authenticated\r\n');
+      else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY '+scenario.validity+'] valid\r\n'+tag+' OK selected\r\n');
+      else if(command.includes('UID SEARCH')){
+       assert.notEqual(scenario.start,null);
+       assert.equal(command,tag+' UID SEARCH UID '+scenario.start+':4294967295\r\n');
+       respond('* SEARCH'+scenario.uids.map(uid=>' '+uid).join('')+'\r\n'+tag+' OK found\r\n');
+      }else if(command.includes('UID FETCH')){
+       assert(!scenario.error,'invalid SEARCH must never reach FETCH');
+       const uids=scenario.uids.slice().sort((a,b)=>a-b);
+       assert.equal(command,tag+' UID FETCH '+uids.join(',')+' (UID FLAGS INTERNALDATE BODY.PEEK[])\r\n');
+       for(const [i,uid] of uids.entries()){
+        const payload=new TextEncoder().encode('From: author@example.org\r\nSubject: Synthetic '+uid+'\r\nContent-Type: text/plain\r\n\r\nInert message '+uid);
+        respond('* '+(i+1)+' FETCH (BODY[] {'+payload.length+'}\r\n');respond(payload);
+        respond(' UID '+uid+' FLAGS () INTERNALDATE "02-Nov-2026 12:00:00 -0500")\r\n');
+       }
+       respond(tag+' OK fetched\r\n');
+      }else assert.fail('unexpected command');
+     }}),async close(){if(!closed){closed=true;controller.close();}}};
+   };
+   const station=createStation({},async()=>({email:'owner@example.org',subject:'synthetic-owner'}),fetch,connect);
+   const result=await station.fetch(new Request(base+'/api/mail/sync',{method:'POST',
+    headers:{Origin:base,'Content-Type':'application/json'},body:'{}'}),env);
+   assert.equal(closed,true);
+   const after=await store.readSnapshot(scope);
+   if(scenario.error){
+    assert.equal(result.status,502);assert.deepEqual(await result.json(),{error:'mail_operation_failed'});
+    assert.deepEqual(after,before);
+   }else{
+    assert.equal(result.status,200);const receipt=await result.json();
+    assert.equal(receipt.imported,scenario.imported);assert.equal(receipt.updated,0);
+    assert.equal(receipt.uidValidityReset,scenario.reset??false);
+    assert.deepEqual(receipt.cursor,{uidValidity:scenario.validity,highestUid:scenario.highest});
+    assert.deepEqual(after.cursor,receipt.cursor);assert.equal(after.revision,before.revision+1);
+    assert.equal(after.records.length,before.records.length+scenario.imported);
+    for(const record of before.records)assert.deepEqual(after.records.find(x=>x.key===record.key),record);
+   }
+   assert.equal(commands.some(x=>x.includes('UID FETCH')),!scenario.error&&scenario.uids.length>0);
+   if(scenario.start===null)assert.equal(commands.length,2); // LOGIN and EXAMINE only.
+  });
+ }finally{await mf.dispose();}
+});

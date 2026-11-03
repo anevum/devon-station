@@ -37,7 +37,7 @@ test('native TLS socket is pinned, framed FETCH is parsed and flags/timestamps p
   const s=server();const conn=await open(s);
   assert.deepEqual(s.parameters(),{target:{hostname:'imap.purelymail.com',port:993},options:{secureTransport:'on'}});
   assert.match(await conn.exchange('EXAMINE "INBOX"'),/UIDVALIDITY 7/);
-  assert.equal(await conn.exchange('UID SEARCH UID 1:*'),'* SEARCH 1');
+  assert.equal(await conn.exchange('UID SEARCH UID 1:4294967295'),'* SEARCH 1');
   const fetched=await conn.exchange('UID FETCH 1 (UID FLAGS INTERNALDATE BODY.PEEK[])');
   assert.deepEqual(fetched,{messages:[{uid:1,from:'author@example.org',subject:'Test',text:'Message content',timestamp:'2026-11-02T15:20:00.000Z',flags:['seen']}]});
   assert(s.received().every(line=>!/(EXPUNGE|APPEND|\bSTORE\b|\bSELECT\b)/.test(line)));
@@ -56,7 +56,7 @@ test('secrets absent means no outbound connection',async()=>{
 });
 test('never executes write or caller supplied non-audited commands',async()=>{
  const s=server(),conn=await open(s);
- for (const cmd of ['SELECT "INBOX"','UID STORE 1 +FLAGS (\\Seen)','UID FETCH 1 (BODY[])','UID FETCH 1 (UID FLAGS INTERNALDATE BODY.PEEK[])\r\nA1234 EXPUNGE'])
+ for (const cmd of ['UID SEARCH UID 1:*','UID SEARCH UID 0:4294967295','UID SEARCH UID 4294967296:4294967295','UID SEARCH UID 1:4294967296','UID FETCH 4294967296 (UID FLAGS INTERNALDATE BODY.PEEK[])','SELECT "INBOX"','UID STORE 1 +FLAGS (\\Seen)','UID FETCH 1 (BODY[])','UID FETCH 1 (UID FLAGS INTERNALDATE BODY.PEEK[])\r\nA1234 EXPUNGE'])
    await assert.rejects(conn.exchange(cmd),/imap_command_forbidden/);
  assert.equal(s.received().length,1);await conn.close();
 });

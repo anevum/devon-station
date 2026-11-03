@@ -47,3 +47,64 @@ test('synthetic IMAP and real SQLite compose with existing authorization service
  assert(commands.every(cmd=>!/(SELECT|STORE|EXPUNGE|APPEND)/.test(cmd)));
  await assert.rejects(listReadOnlyInbox({registry,context,mailboxId:'hello',store}),/mailbox_not_authorized/);db.close();
 });
+
+async function imapSession({validity=7,search='* SEARCH',messages=[]}={}){
+ const commands=[];
+ const connector={async open(){return {async exchange(command){
+  commands.push(command);
+  if(command.startsWith('EXAMINE'))return '* OK [UIDVALIDITY '+validity+'] valid';
+  if(command.startsWith('UID SEARCH'))return search;
+  if(command.startsWith('UID FETCH'))return {messages};
+  assert.fail('unexpected command');
+ },async close(){}};}};
+ const session=await createReadOnlyImapProvider({connector}).openReadOnly({
+  mailbox:{provider:'purelymail',mode:'imap',address:'hello@devonakins.com'},readOnly:true,peek:true});
+ return {session,commands};
+}
+const batchOptions={peek:true,readOnly:true,limit:10};
+test('incremental empty poll uses a finite UID upper bound and never FETCHes old mail',async()=>{
+ const {session,commands}=await imapSession();
+ try{
+  assert.deepEqual(await session.fetchBatch({...batchOptions,cursor:{uidValidity:7,highestUid:1}}),
+   {uidValidity:7,messages:[]});
+  assert.deepEqual(commands,['EXAMINE "INBOX"','UID SEARCH UID 2:4294967295']);
+ }finally{await session.close();}
+});
+test('UID ceiling skips SEARCH until UIDVALIDITY changes, then starts a new cohort at one',async()=>{
+ for(const validity of [7,8]){
+  const {session,commands}=await imapSession({validity});
+  try{
+   assert.deepEqual(await session.fetchBatch({...batchOptions,cursor:{uidValidity:7,highestUid:4294967295}}),
+    {uidValidity:validity,messages:[]});
+   assert.deepEqual(commands,validity===7?['EXAMINE "INBOX"']:
+    ['EXAMINE "INBOX"','UID SEARCH UID 1:4294967295']);
+  }finally{await session.close();}
+ }
+});
+test('protocol UID bounds and stale, duplicate, oversized or malformed SEARCH results fail closed',async()=>{
+ assert.deepEqual(parseSearchUids('* SEARCH',2),[]);
+ assert.deepEqual(parseSearchUids('* SEARCH 4294967295',4294967295),[4294967295]);
+ for(const response of ['* SEARCH 1','* SEARCH 2 2','* SEARCH 0','* SEARCH 4294967296','* SEARCH 9007199254740992','* SEARCH 2\r\n* SEARCH 3'])
+  assert.throws(()=>parseSearchUids(response,2),/invalid_imap_search/);
+ assert.throws(()=>parseSearchUids('* SEARCH',4294967296),/invalid_imap_search/);
+ assert.throws(()=>parseSearchUids('* SEARCH '+Array.from({length:501},(_,i)=>i+2).join(' '),2),/imap_search_limit/);
+ assert.throws(()=>parseUidValidity('* OK [UIDVALIDITY 4294967296]'),/invalid_imap_examine/);
+ const {session,commands}=await imapSession();
+ try{
+  await assert.rejects(session.fetchBatch({...batchOptions,cursor:{uidValidity:7,highestUid:4294967296}}),/invalid_imap_options/);
+  assert.deepEqual(commands,['EXAMINE "INBOX"']);
+ }finally{await session.close();}
+});
+test('finite SEARCH sorts sparse new UIDs, enforces fetch limit and still rejects stale hits',async()=>{
+ const fresh={uid:3,from:row.from,subject:row.subject,text:row.text,timestamp:row.timestamp,flags:[]};
+ const {session,commands}=await imapSession({search:'* SEARCH 11 3 7',messages:[fresh]});
+ try{
+  assert.deepEqual((await session.fetchBatch({...batchOptions,limit:1,cursor:{uidValidity:7,highestUid:1}})).messages,[fresh]);
+  assert.deepEqual(commands,['EXAMINE "INBOX"','UID SEARCH UID 2:4294967295','UID FETCH 3 (UID FLAGS INTERNALDATE BODY.PEEK[])']);
+ }finally{await session.close();}
+ const bad=await imapSession({search:'* SEARCH 1'});
+ try{
+  await assert.rejects(bad.session.fetchBatch({...batchOptions,cursor:{uidValidity:7,highestUid:1}}),/invalid_imap_search/);
+  assert.equal(bad.commands.length,2);
+ }finally{await bad.session.close();}
+});
