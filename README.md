@@ -6,7 +6,7 @@ DevonStation is an independent, personal operations workspace project. The targe
 
 **Recovery pending.** The existing development archive includes private operational snapshots and must **not** be published wholesale. This repository does not yet contain a verified standalone application. A README is not evidence that the deployed service has been migrated here.
 
-[Draft recovery PR #1](https://github.com/anevum/devon-station/pull/1) preserves selected server components and synthetic tests. The UI and complete release tooling are not recovered there; privacy, licensing, and recovery checks remain open. The draft is not a deployment candidate.
+[Draft recovery PR #1](https://github.com/devonalanakins/devon-station/pull/1) preserves selected server components and synthetic tests. The UI and complete release tooling are not recovered there; privacy, licensing, and recovery checks remain open. The draft is not a deployment candidate.
 
 ## Import criteria
 
@@ -18,4 +18,4 @@ DevonStation is an independent, personal operations workspace project. The targe
 
 Development continues on the existing source until a verified cutover. Do not replace the working application with a newly generated skeleton.
 
-Project index: [anevum/anevum](https://github.com/anevum/anevum) · Organization handoff: [GitHub reorganization](https://github.com/anevum/anevum/blob/main/handoffs/ANEVUM.OPS.PACKAGE.2026-10-30.002.md)
+Project index: [Anevum project registry](https://github.com/devonalanakins/anevum) · Historical handoff: [GitHub reorganization](https://github.com/devonalanakins/anevum/blob/main/handoffs/ANEVUM.OPS.PACKAGE.2026-10-30.002.md)
