@@ -10,7 +10,7 @@ const operationId='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const deliveryId='123e4567-e89b-42d3-a456-426614174016';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
 const copy=d=>({...d,to:d.to.slice()});
-function setup({outgoing=true,submitFails=false,duplicateDraft=false}={}){
+function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{
   url:'https://station.example/#mail',runScripts:'outside-only'
  });
@@ -47,7 +47,7 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false}={}){
    assert.equal(body.draftRevision,2);
    assert.equal(body.draft,undefined,'browser may never submit message text to prepare');
    if(duplicateDraft)return reply({error:'outbox_draft_already_prepared'},409);
-   outbox.push({deliveryId:body.deliveryId,draftId:body.draftId,draftRevision:body.draftRevision,state:'queued'});
+   outbox.push({deliveryId:body.deliveryId,draftId:body.draftId,draftRevision:body.draftRevision,state:'queued',createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:00:00.000Z'});
    return reply({receipt:{deliveryId:body.deliveryId,draftId:body.draftId,draftRevision:2,state:'queued'},sendingEnabled:true});
   }
   if(path==='/api/mail/outbox/submit'){
@@ -59,7 +59,7 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false}={}){
    return reply({receipt:{deliveryId:body.deliveryId,state:'accepted'},
     deliveryConfirmed:false,automaticRetry:false});
   }
-  if(path==='/api/mail/outbox')return reply({outbox:outbox.map(row=>({...row})),sendingEnabled:outgoing});
+  if(path==='/api/mail/outbox')return outboxReadFails?reply({error:'unavailable'},503):reply({outbox:outbox.map(row=>({...row})),sendingEnabled:outgoing});
   throw Error('Unexpected external URL '+path);
  };
  dom.window.eval(mail);dom.window.eval(drafts);
@@ -186,5 +186,51 @@ test('preparing an already-linked saved revision never opens SMTP or creates ano
  assert.equal(x.outbox.length,0);
  assert(x.doc.querySelector('#mail-drafts').textContent.includes('already has a durable delivery'));
  assert.equal(x.doc.querySelector('[data-mail-draft-action="send-submit"]'),null);
+ x.dom.window.close();
+});
+
+test('saved draft with a prior delivery revision is blocked even after another save',async()=>{
+ const x=await savedDraft(setup());
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:1,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ const prepare=x.doc.querySelector('[data-mail-draft-action="send-prepare"]');assert(prepare);
+ prepare.click();await wait();
+ assert.equal(count(x,'/api/mail/outbox'),1);
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0,'cannot prepare a different revision of a previously attempted draft');
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('delivery already exists'));
+ const inspect=x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]');assert(inspect);
+ inspect.click();await wait();
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('Recorded delivery'));
+ const entry=x.doc.querySelector('[data-mail-draft-id="'+savedId+'"]');assert(entry);
+ assert(entry.textContent.includes('Accepted by SMTP'));
+ assert.equal(x.doc.querySelector('[data-mail-draft-action="send-prepare"]').disabled,true);
+ assert.equal(x.doc.querySelectorAll('script,img,iframe').length,0);
+ x.dom.window.close();
+});
+
+test('prior delivery lookup failures prevent prepare and do not allocate a delivery ID',async()=>{
+ const x=await savedDraft(setup({outboxReadFails:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const prepare=x.doc.querySelector('[data-mail-draft-action="send-prepare"]');assert(prepare);
+ prepare.click();await wait();
+ assert.equal(count(x,'/api/mail/outbox'),1);
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert.equal(x.outbox.length,0);
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('Could not verify prior delivery'));
+ x.dom.window.close();
+});
+
+test('outbox history rejects half-linked receipts and never enables resend',async()=>{
+ const x=await savedDraft(setup());
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ x.outbox.push({deliveryId,draftId:savedId,state:'queued',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ x.doc.querySelector('[data-mail-draft-action="send-prepare"]').click();await wait();
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('Could not verify prior delivery'));
  x.dom.window.close();
 });
