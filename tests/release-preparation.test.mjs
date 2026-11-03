@@ -38,6 +38,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
+  assert.equal(first.manifest.sourceBranch, null, 'source branch must not be guessed from a commit');
   assert.equal(first.manifest.candidate.moduleCount, 12);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
@@ -123,6 +124,7 @@ test('clean-checkout CLI rebuilds a tampered ignored bundle and produces identic
   run();
   const manifest=JSON.parse(readFileSync(join(f.dir,'release-review/manifest.json'),'utf8'));
   assert.equal(manifest.sourceCommit,f.commit);
+  assert.equal(manifest.sourceBranch,null,'detached or stacked CI source branch must not be misrepresented');
   const first=readFileSync(join(f.dir,'release-review/SHA256SUMS'),'utf8');
   const candidate=JSON.parse(readFileSync(join(f.dir,'deployment/modules.json'),'utf8'));
   candidate['worker/state.mjs']+='\n// fabricated stale bundle alteration';
