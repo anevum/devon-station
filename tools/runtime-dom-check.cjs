@@ -23,7 +23,7 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
     const projectIds=[...doc.querySelectorAll('[data-ws-project]')].map(n=>n.getAttribute('data-ws-project'));
     const observedLink=doc.querySelector('.ws-project-header a')?.getAttribute('href')??'absent';
     // This test server has only synthetic project data, never live records.
-    console.error('Synthetic fixture project diagnostic',JSON.stringify({projectIds,observedLink,workspaceStatus:doc.querySelector('#ws-status')?.textContent||''}));
+    console.error('Synthetic fixture project diagnostic',JSON.stringify({projectIds,observedLink,workspaceStatus:doc.querySelector('#ws-status')?.textContent||'',workspaceHtml:doc.querySelector('#station-workspace')?.innerHTML.slice(0,1800),rawScriptTail:doc.querySelector('script')?.textContent.slice(-200)}));
     throw Error('synthetic project A missing from authorized scope');
   }
   projectA.click();
