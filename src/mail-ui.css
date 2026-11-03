@@ -76,3 +76,9 @@ textarea.mail-draft-field{resize:vertical;min-height:180px}
 .mail-outbox-item[data-outbox-state="uncertain"],.mail-outbox-item[data-outbox-state="claimed"]{border-color:var(--warn)}
 .mail-outbox-item[data-outbox-state="accepted"]{border-color:var(--accent)}
 @media(max-width:600px){.mail-outbox-history{padding:12px}.mail-outbox-list{grid-template-columns:1fr}}
+
+/* COMMS-19: owner-scoped saved-draft reconciliation badges. SMTP acceptance != recipient delivery. */
+.mail-draft-entry{display:grid;gap:5px}
+.mail-draft-delivery-status{display:block;font-size:11px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
+.mail-draft-delivery-status[data-outbox-state="accepted"]{color:var(--accent)}
+.mail-draft-delivery-status[data-outbox-state="claimed"],.mail-draft-delivery-status[data-outbox-state="uncertain"]{color:var(--warn)}
