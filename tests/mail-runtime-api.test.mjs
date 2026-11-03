@@ -16,7 +16,7 @@ function d1Double(db) {
    catch(e){db.exec('ROLLBACK');throw e;}
  }};
 }
-function socketMock() {
+function socketMock(payload=mime) {
  let controller,closed=false,calls=[];
  const respond = bytes => {const raw=typeof bytes==='string'?new TextEncoder().encode(bytes):bytes;
   for(let pos=0;pos<raw.length;pos+=11)controller.enqueue(raw.slice(pos,pos+11));};
@@ -30,8 +30,8 @@ function socketMock() {
     else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] selected\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID FETCH')) {
-      respond('* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {'+mime.byteLength+'}\r\n');
-      respond(mime);respond(')\r\n'+tag+' OK done\r\n');
+      respond('* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {'+payload.byteLength+'}\r\n');
+      respond(payload);respond(')\r\n'+tag+' OK done\r\n');
     } else throw new Error('unexpected command');
    }}),
    async close(){if(!closed){closed=true;controller.close();}}
@@ -79,13 +79,16 @@ test('owner-triggered IMAP TLS read-only sync persists in isolated D1 and return
  assert.equal(mock.closed(),true);
  db.close();
 });
-test('message containing unsupported HTML fails without any database write',async()=>{
+test('unsupported HTML MIME fails without writing a D1 transaction',async()=>{
  const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
- const mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
- const prior=await station.fetch(req('/api/mail/inbox'),env(binding));
- assert.equal(prior.status,200);
- const sync=await station.fetch(req('/api/mail/sync','POST'),{...env(binding),MAIL_IMAP_PASSWORD:'synthetic-password'});
- assert.equal(sync.status,200); // ordinary plain text fixture is supported
- assert.equal(binding.batches,1);
+ const html=new TextEncoder().encode('From: Author <author@example.org>\r\nSubject: Unsafe\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<img src="https://tracking.example/pixel">');
+ const mock=socketMock(html),station=createStation({},auth,fetch,mock.connect);
+ const sync=await station.fetch(req('/api/mail/sync','POST'),env(binding));
+ assert.equal(sync.status,502);
+ assert.deepEqual(await sync.json(),{error:'mail_operation_failed'});
+ assert.equal(binding.batches,0);
+ const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
+ assert.equal(inbox.status,200);
+ assert.equal((await inbox.json()).messages.length,0);
  db.close();
 });
