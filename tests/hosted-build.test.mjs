@@ -15,6 +15,10 @@ test('hosted packaging removes private inventory, has no embedded private source
   const encoded=assets['/icons/'+name];assert.equal(encoded.type,'image/png');const bytes=Buffer.from(encoded.body,'base64');assert.equal(bytes.readUInt32BE(16),size);assert.equal(bytes.readUInt32BE(20),size);assert.deepEqual(bytes,readFileSync('pwa/icons/'+name));
  }
  assert.equal(assets['/LICENSE.txt'].body,readFileSync('LICENSE','utf8'));assert(src.includes('License and source'));
+ assert(src.includes('station-finance'),'Finance section missing from hosted shell');
+ assert(src.includes('StationFinance'),'Finance screen runtime missing from hosted shell');
+ assert(src.includes('finance-grid'),'Finance responsive CSS missing from hosted shell');
+ assert(src.includes('devonstation-financial-readonly-v1'),'Finance contract missing from hosted shell');
  const manifest=JSON.parse(assets['/manifest.webmanifest'].body);assert.equal(manifest.icons.length,2);assert(src.includes('rel="apple-touch-icon"'));
  assert(!bundle['index.mjs'].includes('privateDataLoaded\\":true'));
 });
