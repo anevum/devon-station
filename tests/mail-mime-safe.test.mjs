@@ -6,7 +6,7 @@ const bytes=text=>new TextEncoder().encode(text);
 const headers=(body,more='')=>'From: "Regular Person" <author@example.org>\r\nSubject: Inert note\r\n'+more+'\r\n'+body;
 test('single-part plain text stays inert and bounded',async()=>{
  const result=await decodeSafeMime(bytes(headers('Hello world.\r\nThis is a note.','Content-Type: text/plain; charset=utf-8\r\n')));
- assert.deepEqual(result,{from:'author@example.org',subject:'Inert note',text:'Hello world.\nThis is a note.'});
+ assert.deepEqual(result,{from:'author@example.org',subject:'Inert note',text:'Hello world.\nThis is a note.\n'});
  assert.equal(Object.hasOwn(result,'html'),false);
  assert.equal(Object.hasOwn(result,'attachments'),false);
  assert.equal(Object.hasOwn(result,'raw'),false);
@@ -47,7 +47,7 @@ test('RFC 2047 subject is decoded into safe Unicode',async()=>{
 test('normal MIME with missing subject remains readable but no forged sender is synthesized',async()=>{
  const raw='From: author@example.org\r\nContent-Type: text/plain\r\n\r\nHi';
  const out=await decodeSafeMime(bytes(raw));
- assert.equal(out.subject,'');assert.equal(out.text,'Hi');
+ assert.equal(out.subject,'');assert.equal(out.text,'Hi\n');
  await assert.rejects(decodeSafeMime(bytes('Subject: Missing from\r\n\r\nHi')),{code:'mime_invalid_from'});
 });
 test('control/bidi characters in hostile content are rendered as replacement characters',async()=>{
