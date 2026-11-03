@@ -3,6 +3,7 @@ import {authorizedIdentity} from './access.mjs';
 import {validEndpoint,deviceId,endpointHash,sendGenericPush,PushDispatchError,safePushServiceFailure} from './notifications.mjs';
 import {getOwnerState,saveOwnerState} from './state.mjs';
 import {getCachedPortfolio,refreshPortfolio} from './portfolio.mjs';
+import {financialSummary} from './finance-readonly.mjs';
 const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 const csp="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const pushReady=env=>Boolean(env.DB&&env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT);
@@ -50,6 +51,11 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch){re
   }
   if(request.method==='POST'&&['/api/workspace/propose','/api/workspace/decide'].includes(url.pathname))return json(await mutateWorkspace(env.DB,user,env,scope,url.pathname.endsWith('/propose')?'propose':'decide',await readBody(request,8192)));
   return json({error:'method_not_allowed'},405);
+ }
+ if(url.pathname==='/api/finance/summary'){
+  if(request.method!=='GET')return json({error:'method_not_allowed'},405);
+  if(url.search)return json({error:'unexpected_query'},400);
+  return json(await financialSummary(env,user,transport));
  }
  if(url.pathname==='/api/portfolio'&&request.method==='GET'){if(!env.DB)return json({error:'storage_unavailable'},503);return json(await getCachedPortfolio(env.DB,user.subject,!!(env.NOTION_READ_TOKEN&&env.NOTION_PORTFOLIO_SOURCE_ID)));}
  if(url.pathname==='/api/portfolio/refresh'&&request.method==='POST'){if(!env.DB)return json({error:'storage_unavailable'},503);return json(await refreshPortfolio(env.DB,user.subject,env,transport));}

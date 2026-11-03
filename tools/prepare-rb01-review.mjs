@@ -13,6 +13,7 @@ const EXPECTED_MODULES = [
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
 ];
+const FINANCE_MODULE = 'worker/finance-readonly.mjs';
 const LEGACY_SHA256 = 'b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c8c94';
 const ACCESS_SHA256 = '1f3127c82f2079f82685f8f4ee56a82c390cf36dd7ef36273b4623e9ab3c9654';
 const ACCESS_GIT_BLOB = '69ec253eddfe6ad26268bef2d2a270cd3faa947d';
@@ -94,7 +95,11 @@ function describeBundle(modules, requireHostedMarker = true) {
 export function buildReleaseArtifacts({candidate, legacyServer, accessModule, notificationsModule, sourceCommit}) {
   insist(/^[a-f0-9]{40}$/.test(sourceCommit), 'source must have an exact commit');
   insist(candidate && typeof candidate === 'object' && !Array.isArray(candidate), 'candidate JSON is invalid');
-  insist(Object.keys(candidate).length === EXPECTED_MODULES.length && EXPECTED_MODULES.every(p => typeof candidate[p] === 'string'), 'candidate module graph changed');
+  // The original recovery-only 12-module format remains accepted. A finance
+  // import requires exactly the 13th reviewed module; unused extras are denied.
+  const financeImported = /\bfrom\s+['"]\.\/finance-readonly\.mjs['"]/.test(candidate['worker/index.mjs'] || '');
+  const requiredModules = financeImported ? [...EXPECTED_MODULES, FINANCE_MODULE] : EXPECTED_MODULES;
+  insist(Object.keys(candidate).length === requiredModules.length && requiredModules.every(p => typeof candidate[p] === 'string'), 'candidate module graph changed');
   insist(sha256(legacyServer) === LEGACY_SHA256, 'legacy V0.3 entry fingerprint changed');
   insist(sha256(accessModule) === ACCESS_SHA256 && gitBlob(accessModule) === ACCESS_GIT_BLOB, 'reviewed hardened Access implementation changed');
   insist(candidate['worker/access.mjs'] === accessModule && candidate['worker/notifications.mjs'] === notificationsModule, 'candidate authentication or notifications differ from source');
@@ -120,7 +125,7 @@ export function buildReleaseArtifacts({candidate, legacyServer, accessModule, no
     status: 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED',
     license: 'AGPL-3.0-only',
     sourceCommit,
-    sourceBranch: 'feature/ds011-rb01-integrated-review',
+    sourceBranch: null, // Exact sourceCommit is authoritative; CI checkout may be detached.
     provenance: {
       source: 'GitHub tracked checkout only; no private archives or provider exports',
       candidateBuilder: 'npm run build',

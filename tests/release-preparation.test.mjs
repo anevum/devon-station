@@ -38,6 +38,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
+  assert.equal(first.manifest.sourceBranch, null, 'source branch must not be guessed from a commit');
   assert.equal(first.manifest.candidate.moduleCount, 12);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
@@ -60,6 +61,25 @@ test('changed authentication, legacy source, missing modules and embedded privat
   assert.throws(() => prepare(incomplete), /module graph/);
   const privateCandidate = syntheticCandidate(); privateCandidate['worker/index.mjs'] = '"privateDataLoaded":true';
   assert.throws(() => prepare(privateCandidate), /private-data marker/);
+});
+
+
+test('review-only package accepts imported finance module, but refuses missing or extra finance code', () => {
+  const candidate = syntheticCandidate();
+  candidate['worker/index.mjs'] = "import {financialSummary} from './finance-readonly.mjs';\n";
+  candidate['worker/finance-readonly.mjs'] = 'export const financialSummary = () => ({readOnly:true});\n';
+  const result = prepare(candidate);
+  assert.equal(result.manifest.candidate.moduleCount, 13);
+  assert(Object.hasOwn(JSON.parse(result.files['candidate.modules.json']), 'worker/finance-readonly.mjs'));
+  assert.equal(result.manifest.guardedFallback.moduleCount, 4, 'fallback must not gain finance access');
+
+  const missing = {...candidate};
+  delete missing['worker/finance-readonly.mjs'];
+  assert.throws(() => prepare(missing), /module graph/, 'do not accept an unresolved Worker import');
+
+  const unused = syntheticCandidate();
+  unused['worker/finance-readonly.mjs'] = candidate['worker/finance-readonly.mjs'];
+  assert.throws(() => prepare(unused), /module graph/, 'do not allow an unreferenced financial provider module');
 });
 
 function fixture(t,complete=false) {
@@ -104,6 +124,7 @@ test('clean-checkout CLI rebuilds a tampered ignored bundle and produces identic
   run();
   const manifest=JSON.parse(readFileSync(join(f.dir,'release-review/manifest.json'),'utf8'));
   assert.equal(manifest.sourceCommit,f.commit);
+  assert.equal(manifest.sourceBranch,null,'detached or stacked CI source branch must not be misrepresented');
   const first=readFileSync(join(f.dir,'release-review/SHA256SUMS'),'utf8');
   const candidate=JSON.parse(readFileSync(join(f.dir,'deployment/modules.json'),'utf8'));
   candidate['worker/state.mjs']+='\n// fabricated stale bundle alteration';
