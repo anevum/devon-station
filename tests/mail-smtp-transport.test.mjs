@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createPurelymailSmtpTransport} from '../src/communications/mail-smtp-transport.mjs';
+import {isValidMailAddress,validateDraftPayload} from '../src/communications/mail-drafts.mjs';
 const id='123e4567-e89b-42d3-a456-426614174000';
 const owner={installationId:'personal',principalId:'owner'};
 const from='hello@devonakins.com';
@@ -125,4 +126,32 @@ test('caller cannot submit without an abort signal and valid delivery UUID',asyn
   await assert.rejects(h.transport.submit({deliveryId:id}),hasCode('smtp_submission_invalid'));
   await assert.rejects(h.transport.submit({deliveryId:'bad',signal:AbortSignal.timeout(1000)}),hasCode('smtp_submission_invalid'));
   assert.equal(h.claims(),0);
+});
+
+
+test('every draft-accepted address uses the same grammar at SMTP RCPT TO',async()=>{
+  // Drafts were previously willing to save these while SMTP rejected them
+  // AFTER the one-time outbox claim, permanently failing a valid delivery.
+  const recipients=['Jane.Doe@Example.com','first!second@example.com',
+    "o'hara@example.net",'user%tag@example.org','UPPER+alerts@EXAMPLE.org'];
+  for(const recipient of recipients){
+    assert.equal(isValidMailAddress(recipient),true,recipient);
+    const saved=validateDraftPayload({to:[recipient],subject:'Recipient parity',body:'Plain text'});
+    const h=harness({claim:{...claim,draft:{...claim.draft,to:saved.to}}});
+    const outcome=await submit(h);
+    assert.equal(outcome.accepted,true,recipient);
+    assert(h.s.commands.includes('RCPT TO:<'+recipient+'>\r\n'),recipient);
+    assert.equal(h.s.data.length,1,'exactly one DATA write');
+    assert.equal(h.claims(),1,'exactly one delivery claim');
+    assert.equal(h.s.closed(),1,'socket closed');
+  }
+});
+
+test('SMTP and persisted drafts reject the same malformed envelope addresses',()=>{
+  for(const address of ['a..b@example.com','name@-example.com',
+    'name@example','name with spaces@example.com','name@example..com']){
+    assert.equal(isValidMailAddress(address),false,address);
+    assert.throws(()=>validateDraftPayload({to:[address],subject:'Safety',body:'text'}),
+      e=>e?.code==='invalid_mail_draft_recipient',address);
+  }
 });
