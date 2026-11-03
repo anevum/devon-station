@@ -55,8 +55,12 @@ Requests use `credentials: same-origin`, `redirect: manual` and
   `tests/finance-view.test.mjs`, `tests/finance-ui.test.mjs`.
 - Updated: `src/core.mjs`, `src/app.js`,
   `tools/build-hosted-shell.mjs`, and `tests/hosted-build.test.mjs`.
-- FIN01 also fixes the previously missing `worker/finance-readonly.mjs`
-  entry in the generated Worker module bundle and its packaging test.
+- FIN01 packages `worker/finance-readonly.mjs` into the generated Worker
+  registry and now updates the review-only release validator to preserve the
+  original 12-module recovery graph while **requiring** the 13th module
+  precisely when the finance import is present. The guarded fallback remains
+  finance-free. Review package provenance uses the exact commit SHA instead
+  of falsely claiming the original RB01 branch.
 - The hosted shell embeds the pure contract, UI runtime and style
   through the **existing** build process; no replacement application,
   external frontend framework, CDN or external service is introduced.
