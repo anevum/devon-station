@@ -35,7 +35,7 @@ const numberParam=(value, fallback, min, max) => {
 export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(!user?.subject || !env?.MAIL_OWNER_SUB || user.subject !== env.MAIL_OWNER_SUB)
     return status('mail_owner_not_authorized',403);
-  if(url.pathname.startsWith('/api/mail/outbox'))return handleMailOutboxApi({request,url,user,env,readBody,registry:registry(env.MAIL_SENDER_VERIFIED==='true')});
+  if(url.pathname.startsWith('/api/mail/outbox'))return handleMailOutboxApi({request,url,user,env,readBody,registry:registry(env.MAIL_SENDER_VERIFIED==='true'),connect});
   const ready=isEnabled(env) && typeof connect==='function';
   if(url.pathname==='/api/mail/status' && request.method==='GET')
     return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:false,draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
