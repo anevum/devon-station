@@ -71,7 +71,7 @@ test('owner-triggered IMAP TLS read-only sync persists in isolated D1 and return
  const inbox=await station.fetch(req('/api/mail/inbox?limit=10'),env(binding));
  assert.equal(inbox.status,200);const response=await inbox.json();
  assert.equal(response.messages.length,1);
- assert.equal(response.messages[0].text,'An inert message.');
+ assert.equal(response.messages[0].text,'An inert message.\n');
  assert.equal(response.messages[0].subject,'An actual test');
  assert.equal(response.messages[0].timestamp,'2026-11-02T17:00:00.000Z');
  assert.equal(Object.hasOwn(response.messages[0],'html'),false);
