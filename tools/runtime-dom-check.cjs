@@ -64,6 +64,31 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
   dom.window.close();await server.close();server=await start(path);dom=await make();doc=dom.window.document;await until(()=>doc.querySelectorAll('.ws-action').length===2,'restart state');
   server.env.WORKSPACE_GRANTS=[];click('[data-ws-reload]');await until(()=>doc.querySelector('#station-workspace').textContent.includes('No workspace authorized'),'revocation');if(doc.querySelectorAll('.ws-action').length)throw Error('revocation leak');
   dom.window.close();dom=await make('other-subject');doc=dom.window.document;await until(()=>doc.querySelector('#station-workspace').textContent.includes('No workspace authorized'),'other subject');
+
+  // Rebuild a separate isolated server with ONLY synthetic GET fixtures, so
+  // unfunded banking is distinguishable from an unconfigured data source.
+  dom.window.close();await server.close();server=await start(path,{financeFixture:true});
+  dom=await make();doc=dom.window.document;
+  await until(()=>doc.querySelector('#ws-summary'),'synthetic finance owner signed session');
+  click('#nav [data-go=finance]');
+  await until(()=>doc.querySelector('#finance-message')?.textContent.includes('Read-only provider snapshot loaded'),'synthetic finance provider integration');
+  const populated=doc.querySelector('#finance-results')?.textContent??'';
+  if(!populated.includes('Synthetic Checking')||!populated.includes('Synthetic Savings')||
+     !populated.includes('$0.00')||!populated.includes('$10,000.00')||
+     !populated.includes('PAPER / SIMULATED')||!populated.includes('Not available'))
+    throw Error('Synthetic zero banking and Alpaca paper integration did not render distinctly');
+  const realScoped=await fetch(server.url+'/api/finance/summary',{headers:{'Cf-Access-Jwt-Assertion':token('test-owner')}});
+  if(realScoped.status!==200)throw Error('Synthetic provider route denied signed owner');
+  const verified=await realScoped.json();
+  if(verified.sources?.mercury?.accounts?.length!==2||
+     verified.sources.mercury.accounts.some(x=>x.currentCents!=='0')||
+     verified.sources?.alpaca?.equityCents!=='1000000'||
+     verified.sources?.alpaca?.tpd?.valuePct!==null||
+     verified.combinedNetWorthCents!==null)throw Error('Finance provider contract or equity provenance mismatch');
+  const deniedFinance=await fetch(server.url+'/api/finance/summary',{headers:{'Cf-Access-Jwt-Assertion':token('other-subject')}});
+  if(deniedFinance.status!==403)throw Error('Synthetic provider leaked to non-owner subject');
+  if(server.financeFixtureRequests()!==6)throw Error('Unexpected number of synthetic GET-only provider calls');
+  if(server.externalCalls())throw Error('Finance fixture attempted an unknown outbound request');
   if(errors.length)throw Error('DOM errors '+JSON.stringify(errors));if(server.externalCalls())throw Error('external operation');
   const result={actualRecoveredHTML:true,sourceLinkedProjects:true,approveReject:true,auditReceipts:4,originalCapture:true,restart:true,revocation:true,nonownerIsolation:true,domAccessibilityViolations:audit.violations.length,domErrors:errors.length,externalCalls:0,limitations:'jsdom does not verify browser layout, color contrast, real device or rendered accessibility'};
   writeFileSync(join(__dirname,'dom-results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));
