@@ -38,7 +38,7 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(url.pathname.startsWith('/api/mail/outbox'))return handleMailOutboxApi({request,url,user,env,readBody,registry:registry(env.MAIL_SENDER_VERIFIED==='true'),connect});
   const ready=isEnabled(env) && typeof connect==='function';
   if(url.pathname==='/api/mail/status' && request.method==='GET')
-    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect),draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
+    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect),outboxEnabled:env.MAIL_OUTBOX_ENABLED==='true'&&typeof env.MAIL_DB?.prepare==='function',draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
   if(url.pathname.startsWith('/api/mail/drafts'))return handleMailDraftApi({request,url,user,env,readBody});
   if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync'].includes(url.pathname))
     return status('not_found',404);

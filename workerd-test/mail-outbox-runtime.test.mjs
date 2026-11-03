@@ -72,6 +72,11 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
    const deliveryId='123e4567-e89b-42d3-a456-426614174013';
    const saved=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draft,approvedByOwner:true}),env);
    assert.equal(saved.status,200);assert.equal((await saved.json()).sendingEnabled,false);
+   const mailStatus=await station.fetch(request('/api/mail/status'),env);
+   assert.equal(mailStatus.status,200);
+   const readiness=await mailStatus.json();
+   assert.equal(readiness.outgoingEnabled,false,'SMTP stays disabled without MAIL_SEND_ENABLED');
+   assert.equal(readiness.outboxEnabled,true,'owner may inspect history while sending is disabled');
    const listed=await station.fetch(request('/api/mail/outbox'),env);assert.equal(listed.status,200);
    assert(!JSON.stringify(await listed.json()).includes(draft.body));
    assert.equal((await station.fetch(request('/api/mail/outbox/submit','POST',{deliveryId}),env)).status,503);
