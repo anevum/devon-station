@@ -125,7 +125,7 @@ export function buildReleaseArtifacts({candidate, legacyServer, accessModule, no
     status: 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED',
     license: 'AGPL-3.0-only',
     sourceCommit,
-    sourceBranch: 'feature/ds011-rb01-integrated-review',
+    sourceBranch: null, // Exact sourceCommit is authoritative; CI checkout may be detached.
     provenance: {
       source: 'GitHub tracked checkout only; no private archives or provider exports',
       candidateBuilder: 'npm run build',
