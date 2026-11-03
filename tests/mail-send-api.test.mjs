@@ -5,7 +5,7 @@ import {mailSendingEnabled,handleMailOutboxApi} from '../worker/mail-outbox-api.
 const from='hello@devonakins.com';
 const env=Object.freeze({
  MAIL_OUTBOX_ENABLED:'true',MAIL_SEND_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
- MAIL_OWNER_SUB:'synthetic-owner',MAIL_SMTP_ADDRESS:from,
+ MAIL_OWNER_SUB:'synthetic-owner',MAIL_DRAFTS_ENABLED:'true',MAIL_SMTP_ADDRESS:from,
  MAIL_SMTP_PASSWORD:'synthetic-password',MAIL_DB:{prepare(){}}
 });
 const connect=()=>assert.fail('No test may open an SMTP socket');
@@ -13,7 +13,7 @@ const connect=()=>assert.fail('No test may open an SMTP socket');
 test('independent opt-in and verified owner/provider configuration required to enable sending',()=>{
  assert.equal(mailSendingEnabled(env,connect),true);
  for(const change of [
-  {MAIL_SEND_ENABLED:undefined},{MAIL_OUTBOX_ENABLED:undefined},
+  {MAIL_SEND_ENABLED:undefined},{MAIL_OUTBOX_ENABLED:undefined},{MAIL_DRAFTS_ENABLED:undefined},
   {MAIL_SENDER_VERIFIED:undefined},{MAIL_SMTP_ADDRESS:'other@example.test'},
   {MAIL_SMTP_PASSWORD:undefined},{MAIL_SMTP_PASSWORD:'bad password'},
   {MAIL_SMTP_PASSWORD:''},{MAIL_SMTP_PASSWORD:'x'.repeat(257)},

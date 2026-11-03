@@ -10,7 +10,7 @@ const operationId='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const deliveryId='123e4567-e89b-42d3-a456-426614174016';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
 const copy=d=>({...d,to:d.to.slice()});
-function setup({outgoing=true,submitFails=false}={}){
+function setup({outgoing=true,submitFails=false,duplicateDraft=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{
   url:'https://station.example/#mail',runScripts:'outside-only'
  });
@@ -41,11 +41,14 @@ function setup({outgoing=true,submitFails=false}={}){
   if(path==='/api/mail/outbox/prepare'){
    assert(outgoing,'UI may never prepare when outgoing is disabled');
    assert.equal(body.approvedByOwner,true);
-   assert.deepEqual(Object.keys(body).sort(),['approvedByOwner','deliveryId','draft']);
+   assert.deepEqual(Object.keys(body).sort(),['approvedByOwner','deliveryId','draftId','draftRevision']);
    assert.equal(body.deliveryId,deliveryId);
-   assert.equal(body.draft.from,undefined);
-   outbox.push({deliveryId:body.deliveryId,state:'queued'});
-   return reply({receipt:{deliveryId:body.deliveryId,state:'queued'},sendingEnabled:true});
+   assert.equal(body.draftId,savedId);
+   assert.equal(body.draftRevision,2);
+   assert.equal(body.draft,undefined,'browser may never submit message text to prepare');
+   if(duplicateDraft)return reply({error:'outbox_draft_already_prepared'},409);
+   outbox.push({deliveryId:body.deliveryId,draftId:body.draftId,draftRevision:body.draftRevision,state:'queued'});
+   return reply({receipt:{deliveryId:body.deliveryId,draftId:body.draftId,draftRevision:2,state:'queued'},sendingEnabled:true});
   }
   if(path==='/api/mail/outbox/submit'){
    assert.equal(body.confirmedByOwner,true);
@@ -171,5 +174,17 @@ test('malformed stored receipt fails closed and never becomes executable DOM',as
  assert(!history.textContent.includes(deliveryId),'unverified read must clear stale status');
  assert.equal(history.querySelectorAll('script,img,iframe,a[href]').length,0);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.dom.window.close();
+});
+
+test('preparing an already-linked saved revision never opens SMTP or creates another delivery',async()=>{
+ const x=await savedDraft(setup({duplicateDraft:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ x.doc.querySelector('[data-mail-draft-action="send-prepare"]').click();await wait();
+ assert.equal(count(x,'/api/mail/outbox/prepare'),1);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert.equal(x.outbox.length,0);
+ assert(x.doc.querySelector('#mail-drafts').textContent.includes('already has a durable delivery'));
+ assert.equal(x.doc.querySelector('[data-mail-draft-action="send-submit"]'),null);
  x.dom.window.close();
 });
