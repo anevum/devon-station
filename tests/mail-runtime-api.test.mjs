@@ -79,16 +79,30 @@ test('owner-triggered IMAP TLS read-only sync persists in isolated D1 and return
  assert.equal(mock.closed(),true);
  db.close();
 });
-test('unsupported HTML MIME fails without writing a D1 transaction',async()=>{
+test('HTML-only email syncs as inert plain text and cannot add remote tracking assets',async()=>{
  const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
- const html=new TextEncoder().encode('From: Author <author@example.org>\r\nSubject: Unsafe\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<img src="https://tracking.example/pixel">');
+ const html=new TextEncoder().encode('From: Author <author@example.org>\r\nSubject: HTML message\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><body><p>Actual message</p><script>steal()</script><img src="https://tracking.example/pixel"></body></html>');
  const mock=socketMock(html),station=createStation({},auth,fetch,mock.connect);
  const sync=await station.fetch(req('/api/mail/sync','POST'),env(binding));
- assert.equal(sync.status,502);
- assert.deepEqual(await sync.json(),{error:'mail_operation_failed'});
- assert.equal(binding.batches,0);
+ assert.equal(sync.status,200);assert.equal((await sync.json()).imported,1);
+ assert.equal(binding.batches,1);
  const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
  assert.equal(inbox.status,200);
+ const rows=(await inbox.json()).messages;
+ assert.equal(rows.length,1);
+ assert.match(rows[0].text,/Actual message/);
+ assert.doesNotMatch(rows[0].text,/steal\(\)|tracking\.example|<img/);
+ assert.equal(Object.hasOwn(rows[0],'html'),false);
+ db.close();
+});
+test('oversize indexed text fails before any D1 transaction, retaining cursor for retry',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ const large=new TextEncoder().encode('From: author@example.org\r\nSubject: Oversize\r\nContent-Type: text/plain\r\n\r\n'+'A'.repeat(4200));
+ const mock=socketMock(large),station=createStation({},auth,fetch,mock.connect);
+ const sync=await station.fetch(req('/api/mail/sync','POST'),env(binding));
+ assert.equal(sync.status,502);assert.deepEqual(await sync.json(),{error:'mail_operation_failed'});
+ assert.equal(binding.batches,0);
+ const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
  assert.equal((await inbox.json()).messages.length,0);
  db.close();
 });
