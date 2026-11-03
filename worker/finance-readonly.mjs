@@ -2,6 +2,10 @@
 const MERCURY_URL='https://api.mercury.com/api/v1/accounts?limit=1000&order=asc';
 const ALPACA_PAPER='https://paper-api.alpaca.markets';
 const MAX_BYTES=1250000;
+const MERCURY_PAGE_LIMIT=100;
+const MERCURY_MAX_PAGES=10;
+const MERCURY_MAX_ACCOUNTS=1000;
+const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const knownStatus=new Set(['active','pending','deleted','archived']);
 const problem=(code,status=502)=>{const error=new Error(code);error.publicCode=code;error.status=status;throw error;};
 const safeLabel=(value,max=100)=>{
@@ -52,16 +56,21 @@ async function providerGET(url,headers,transport,expectArray=false){
  return boundedJSON(response,expectArray);
 }
 
-export function mercuryProjection(data){
- if(!Array.isArray(data?.accounts)||data.accounts.length>=1000||
-    data.hasMore===true||data.has_more===true||data.hasNext===true||data.nextCursor||data.next_cursor||
-    data.next||data.next_page||(Number.isInteger(data.total)&&data.total>data.accounts.length))
-    problem('finance_incomplete_accounts');
+function readMercuryPage(data){
+ if(!data||!Array.isArray(data.accounts)||data.accounts.length>MERCURY_PAGE_LIMIT||
+    !data.page||typeof data.page!=='object'||Array.isArray(data.page))
+  problem('finance_incomplete_accounts');
+ const nextPage=data.page.nextPage??null;
+ if(nextPage!==null&&(!UUID.test(nextPage)||data.accounts.length===0))
+  problem('finance_incomplete_accounts');
  const seen=new Set(),accounts=[];
  for(const raw of data.accounts){
-  if(!raw||typeof raw!=='object'||Array.isArray(raw)||typeof raw.id!=='string'||!raw.id.trim()||seen.has(raw.id))
+  if(!raw||typeof raw!=='object'||Array.isArray(raw)||!UUID.test(raw.id)||seen.has(raw.id))
    problem('finance_invalid_provider_payload');
   seen.add(raw.id);
+  const type=safeLabel(raw.type,30).toLowerCase();
+  if(!['mercury','external','recipient'].includes(type))problem('finance_invalid_provider_payload');
+  if(type!=='mercury')continue;
   const status=safeLabel(raw.status,30).toLowerCase();
   if(!knownStatus.has(status))problem('finance_invalid_provider_payload');
   accounts.push({
@@ -69,10 +78,38 @@ export function mercuryProjection(data){
    availableCents:cents(raw.availableBalance),currentCents:cents(raw.currentBalance),
   });
  }
- // No account number, routing number, legal name, recipient information, or raw account ID leaves this projection.
- return {status:'available',readOnly:true,accounts};
+ return {accounts,nextPage,rawIds:[...seen]};
 }
 
+/** Single-page projection refuses to represent a partial provider result as complete. */
+export function mercuryProjection(data){
+ const page=readMercuryPage(data);
+ if(page.nextPage!==null)problem('finance_incomplete_accounts');
+ return {status:'available',readOnly:true,accounts:page.accounts};
+}
+
+/** Follow documented cursor pagination and fail closed on any missing page. */
+async function fetchAllMercuryAccounts(token,transport){
+ const accounts=[],seenIds=new Set(),seenCursors=new Set();
+ let cursor=null;
+ for(let i=0;i<MERCURY_MAX_PAGES;i++){
+  const url=MERCURY_URL.replace('limit=1000','limit='+MERCURY_PAGE_LIMIT)+
+    (cursor?'&start_after='+encodeURIComponent(cursor):'');
+  const raw=await providerGET(url,{Authorization:'Bearer '+token},transport);
+  const page=readMercuryPage(raw);
+  for(const id of page.rawIds){
+   if(seenIds.has(id))problem('finance_incomplete_accounts');
+   seenIds.add(id);
+  }
+  accounts.push(...page.accounts);
+  if(seenIds.size>MERCURY_MAX_ACCOUNTS)problem('finance_incomplete_accounts');
+  if(page.nextPage===null)return {status:'available',readOnly:true,accounts};
+  if(seenCursors.has(page.nextPage))problem('finance_incomplete_accounts');
+  seenCursors.add(page.nextPage);
+  cursor=page.nextPage;
+ }
+ problem('finance_incomplete_accounts');
+}
 export function alpacaPaperProjection(account,positions){
  if(!account||typeof account!=='object'||Array.isArray(account)||!Array.isArray(positions)||positions.length>500)
   problem('finance_invalid_provider_payload');
@@ -99,8 +136,7 @@ export async function financialSummary(env,user,transport=fetch){
  const mercuryToken=env.MERCURY_FINANCE_READ_TOKEN;
  const alpacaKey=env.ALPACA_FINANCE_PAPER_KEY,alpacaSecret=env.ALPACA_FINANCE_PAPER_SECRET;
  const mercury=typeof mercuryToken==='string'&&mercuryToken.trim()
-  ?providerGET(MERCURY_URL,{Authorization:'Bearer '+mercuryToken},transport)
-    .then(mercuryProjection).catch(()=>sourceStatus('unavailable'))
+  ?fetchAllMercuryAccounts(mercuryToken,transport).catch(()=>sourceStatus('unavailable'))
   :Promise.resolve(sourceStatus('not_configured'));
  const alpaca=env.ALPACA_FINANCE_MODE==='live'
   ?Promise.resolve(sourceStatus('live_access_not_authorized'))
