@@ -74,9 +74,62 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
    assert.equal(saved.status,200);assert.equal((await saved.json()).sendingEnabled,false);
    const listed=await station.fetch(request('/api/mail/outbox'),env);assert.equal(listed.status,200);
    assert(!JSON.stringify(await listed.json()).includes(draft.body));
-   assert.equal((await station.fetch(request('/api/mail/outbox/submit','POST',{deliveryId}),env)).status,404);
+   assert.equal((await station.fetch(request('/api/mail/outbox/submit','POST',{deliveryId}),env)).status,503);
    assert.equal((await station.fetch(request('/api/mail/outbox'),{...env,MAIL_OWNER_SUB:'other'})).status,403);
    assert.equal((await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId:'123e4567-e89b-42d3-a456-426614174014',draft,approvedByOwner:true}),{...env,MAIL_SENDER_VERIFIED:'false'})).status,400);
   });
+
+   await t.test('owner-confirmed SMTP HTTP route requires independent flags, immutable preparation and never retries',async()=>{
+    const origin='https://station.example';
+    let sockets=0,dataWrites=0,controller;
+    const reply=text=>controller.enqueue(new TextEncoder().encode(text));
+    const smtpConnect=(address,options)=>{
+     sockets++;assert.equal(address.hostname,'smtp.purelymail.com');assert.equal(address.port,465);
+     assert.equal(options.secureTransport,'on');
+     return {opened:Promise.resolve(),
+      readable:new ReadableStream({start(c){controller=c;reply('220 ready\r\n');}}),
+      writable:new WritableStream({write(bytes){
+       const line=new TextDecoder().decode(bytes);
+       if(line.startsWith('From:')){dataWrites++;reply('250 accepted\r\n');}
+       else if(line.startsWith('EHLO'))reply('250-AUTH PLAIN\r\n250 ready\r\n');
+       else if(line.startsWith('AUTH'))reply('235 authenticated\r\n');
+       else if(line.startsWith('DATA'))reply('354 continue\r\n');
+       else if(!line.startsWith('QUIT'))reply('250 ok\r\n');
+      }}),async close(){try{controller.close();}catch{}}};
+    };
+    const station=createStation({},async()=>({email:'owner@example.test',subject:scope.ownerSub}),fetch,smtpConnect);
+    const env={APP_ORIGIN:origin,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,
+     MAIL_OUTBOX_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
+     MAIL_SMTP_ADDRESS:from,MAIL_SMTP_PASSWORD:'synthetic-app-password',MAIL_DB:db};
+    const request=(path,method='GET',body)=>new Request(origin+path,{method,
+     ...(body?{headers:{Origin:origin,'Content-Type':'application/json'},body:JSON.stringify(body)}:{})});
+    const deliveryId='123e4567-e89b-42d3-a456-426614174015',confirmation={deliveryId,confirmedByOwner:true};
+    const submit=body=>request('/api/mail/outbox/submit','POST',body);
+    assert.equal((await station.fetch(submit(confirmation),env)).status,503);
+    assert.equal((await station.fetch(submit(confirmation),{...env,MAIL_SEND_ENABLED:'true',MAIL_SMTP_ADDRESS:'other@example.test'})).status,503);
+    assert.equal(sockets,0);
+    const enabled={...env,MAIL_SEND_ENABLED:'true'};
+    assert.equal((await station.fetch(submit({deliveryId}),enabled)).status,400);
+    assert.equal((await station.fetch(submit({...confirmation,from:'other@example.test'}),enabled)).status,400);
+    assert.equal((await station.fetch(submit(confirmation),enabled)).status,409);
+    assert.equal(sockets,0);
+    const prepared=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draft,approvedByOwner:true}),enabled);
+    assert.equal(prepared.status,200);assert.equal((await prepared.json()).receipt.state,'queued');
+    assert.equal(sockets,0);
+    const accepted=await station.fetch(submit(confirmation),enabled);
+    assert.equal(accepted.status,200);
+    const result=await accepted.json();
+    assert.equal(result.receipt.state,'accepted');assert.equal(result.deliveryConfirmed,false);
+    assert.equal(result.automaticRetry,false);
+    assert(!JSON.stringify(result).includes(draft.body));
+    assert(!JSON.stringify(result).includes('synthetic-app-password'));
+    assert.equal(sockets,1);assert.equal(dataWrites,1);
+    assert.equal((await station.fetch(submit(confirmation),enabled)).status,409);
+    const listed=await station.fetch(request('/api/mail/outbox'),enabled);
+    assert.equal(listed.status,200);
+    const listing=await listed.json();assert.equal(listing.sendingEnabled,true);
+    assert.equal(listing.outbox.find(item=>item.deliveryId===deliveryId).state,'accepted');
+    assert.equal(sockets,1);
+   });
  }finally{await mf.dispose();}
 });
