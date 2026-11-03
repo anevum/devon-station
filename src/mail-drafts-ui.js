@@ -1,4 +1,4 @@
-// COMMS-17: owner-only saved drafts with a separately gated, twice-confirmed outbound review.
+// COMMS-19: owner-only saved drafts, persisted delivery lineage and twice-confirmed SMTP.
 // No automatic sending, retries, HTML execution, browser credentials or agent actions.
 // DOM is composed exclusively with createElement/textContent/value, not innerHTML.
 (function(){
@@ -93,6 +93,7 @@ function render(){
     const item=element('li','mail-outbox-item');item.dataset.outboxState=entry.state;
     item.append(element('strong','',outboxStateLabel(entry.state)));
     item.append(element('span','mail-draft-notice','Delivery '+entry.deliveryId));
+    if(entry.draftId)item.append(element('span','mail-draft-notice','Saved draft revision '+entry.draftRevision));
     item.append(element('time','mail-draft-notice','Updated '+new Date(entry.updatedAt).toLocaleString()));
     item.append(element('p','mail-draft-notice',outboxStateAdvice(entry.state)));
     list.append(item);
@@ -108,6 +109,12 @@ function render(){
    const button=action((entry.subject||'(Untitled draft)')+' · '+new Date(entry.updatedAt).toLocaleString(),'select');
    button.className='mail-draft-entry';button.dataset.mailDraftId=entry.id;
    button.setAttribute('aria-pressed',String(entry.id===state.selected));
+   const receipt=latestDeliveryForDraft(entry.id);
+   if(receipt){
+    const label=element('span','mail-draft-delivery-status',
+     'Recorded delivery · revision '+receipt.draftRevision+' · '+outboxStateLabel(receipt.state));
+    label.dataset.outboxState=receipt.state;button.append(label);
+   }
    button.disabled=state.busy||!!state.pendingSend;listing.append(button);
   }
   root.append(listing);
@@ -135,7 +142,9 @@ function render(){
  actions.append(save,remove);
  if(state.outgoingEnabled&&!state.pendingSend){
   const review=action('Review Saved Draft for Sending','send-prepare');
-  review.disabled=state.busy||state.dirty||!state.working.to.length||!state.items.some(d=>sameSavedDraft(d,state.working));
+  review.disabled=state.busy||state.dirty||!state.working.to.length||
+   !state.items.some(d=>sameSavedDraft(d,state.working))||
+   (state.outboxLoaded&&state.outboxItems.some(row=>row.draftId===state.working.id));
   actions.append(review);
  }
  form.append(actions);root.append(form);
@@ -251,10 +260,30 @@ async function prepareSend(){
  if(state.busy||!state.outgoingEnabled||state.pendingSend||state.dirty||!state.working)return;
  const draft=state.items.find(d=>sameSavedDraft(d,state.working));
  if(!draft||!draft.to.length)return;
- const deliveryId=uuid();
- if(!deliveryIdValid(deliveryId)){state.error='Unable to generate a secure delivery ID. Nothing was sent.';render();return;}
  const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body};
  state.busy=true;state.error=null;state.notice=null;render();
+ // Re-read the signed owner's durable outbox before allocating a new delivery ID.
+ // Avoid a second preparation after a reload, even if the draft revision changed.
+ let deliveryId;
+ try{
+  if(!state.outboxEnabled)throw Error('outbox_unavailable');
+  const entries=await fetchValidatedOutbox();
+  state.outboxItems=entries;state.outboxLoaded=true;state.outboxError=null;
+  if(entries.some(row=>row.draftId===draft.id)){
+   state.error='A delivery already exists for this saved draft, possibly from a different revision. Inspect its outbox status. Compose a separate new draft for a new message.';
+   return;
+  }
+  deliveryId=uuid();
+  if(!deliveryIdValid(deliveryId)){
+   state.error='Secure delivery ID unavailable. Nothing was prepared.';return;
+  }
+ }catch(e){
+  state.outboxItems=[];state.outboxLoaded=false;
+  state.error=e.message==='mail_sign_in_required'?'Owner session expired. No email was prepared.':
+   'Could not verify prior delivery attempts. No email was prepared; inspect outbox history before trying again.';
+  return;
+ }finally{state.busy=false;render();}
+ state.busy=true;render();
  try{
   const result=await api('/api/mail/outbox/prepare',{deliveryId,draftId:draft.id,draftRevision:draft.revision,approvedByOwner:true});
   if(result?.receipt?.deliveryId!==deliveryId||result.receipt.state!=='queued')
@@ -333,24 +362,36 @@ function outboxStateAdvice(status){
  if(status==='claimed'||status==='uncertain')return 'May have been submitted. Do not retry; reconcile manually.';
  return 'Terminal receipt. This delivery cannot be automatically retried.';
 }
+function latestDeliveryForDraft(draftId){
+ if(!state.outboxLoaded)return null;
+ return state.outboxItems.find(row=>row.draftId===draftId)??null;
+}
+// Validate the whole response before displaying any record or permitting preparation.
+async function fetchValidatedOutbox(){
+ const result=await api('/api/mail/outbox');
+ if(!result||!Array.isArray(result.outbox)||result.outbox.length>100)throw Error('bad_outbox_history');
+ const seen=new Set();
+ const list=result.outbox.map(row=>{
+  if(!row||typeof row.deliveryId!=='string'||!deliveryIdValid(row.deliveryId)||
+   !OUTBOX_STATES.includes(row.state)||seen.has(row.deliveryId)||
+   typeof row.createdAt!=='string'||!Number.isFinite(Date.parse(row.createdAt))||
+   typeof row.updatedAt!=='string'||!Number.isFinite(Date.parse(row.updatedAt)))
+    throw Error('bad_outbox_history');
+  const hasDraft=Object.hasOwn(row,'draftId'),hasRevision=Object.hasOwn(row,'draftRevision');
+  if(hasDraft!==hasRevision||
+   (hasDraft&&(!deliveryIdValid(row.draftId)||!Number.isSafeInteger(row.draftRevision)||
+    row.draftRevision<1||row.draftRevision>1_000_000_000)))throw Error('bad_outbox_history');
+  seen.add(row.deliveryId);
+  return {deliveryId:row.deliveryId,state:row.state,createdAt:row.createdAt,updatedAt:row.updatedAt,
+   ...(hasDraft?{draftId:row.draftId,draftRevision:row.draftRevision}:{})};
+ });
+ return list.reverse();
+}
 async function loadOutboxHistory(){
  if(state.busy||!state.outboxEnabled)return;
  state.busy=true;state.outboxError=null;render();
  try{
-  const result=await api('/api/mail/outbox');
-  if(!result||!Array.isArray(result.outbox)||result.outbox.length>100)throw Error('bad_outbox_history');
-  const seen=new Set();
-  const list=result.outbox.map(row=>{
-   if(!row||typeof row.deliveryId!=='string'||
-      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(row.deliveryId)||
-      !OUTBOX_STATES.includes(row.state)||seen.has(row.deliveryId)||
-      typeof row.createdAt!=='string'||!Number.isFinite(Date.parse(row.createdAt))||
-      typeof row.updatedAt!=='string'||!Number.isFinite(Date.parse(row.updatedAt)))
-     throw Error('bad_outbox_history');
-   seen.add(row.deliveryId);
-   return {deliveryId:row.deliveryId,state:row.state,createdAt:row.createdAt,updatedAt:row.updatedAt};
-  });
-  state.outboxItems=list.reverse();state.outboxLoaded=true;
+  state.outboxItems=await fetchValidatedOutbox();state.outboxLoaded=true;
  }catch(e){
   // Never display previously cached delivery states after a failed owner read.
   state.outboxItems=[];state.outboxLoaded=false;
