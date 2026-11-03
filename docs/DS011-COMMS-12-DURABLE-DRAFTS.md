@@ -86,3 +86,17 @@ Passed locally: 292 Node tests, 35 foundation tests, full runtime DOM suites inc
 Capacity clarification: the generic service/Node SQLite contract allows up to 5,000 records, but the actual D1 adapter intentionally remains capped at **500 records and 256 KiB serialized snapshot payload**. Earlier 601-message drain evidence used Node SQLite, not D1. This pagination change does not raise either D1 cap or alter retention. No production data, DNS/forwarding, Access, secrets, mailbox contents, deployment or SMTP action changed.
 
 Next bounded release task: isolated backup/restore rehearsal for inbox and unsent drafts, using synthetic data only. Existing exact-head CI, browser/provider, MIME archive-integrity, full-fidelity storage, retention/encryption and production approval gates remain open.
+
+## Isolated mail cold-recovery rehearsal — November 3, 2026
+
+Added `workerd-test/mail-recovery-runtime.test.mjs` to the normal pinned-runtime test command. It uses only synthetic records and temporary file-backed Miniflare D1, closes the runtime before copying all persistence files (including SQLite sidecars), records/reloads a SHA-256 manifest, and restores only into a fresh persistence directory. There is no production restore endpoint or new application capability exposed to users.
+
+The rehearsal preserves every row of the inbox, mailbox cursor/revision/retry state, owner-scoped drafts and an unrelated sentinel table. It verifies two installations and two draft-owner subjects, retained UIDVALIDITY cohorts, an empty-space scan watermark, exact successful save replay, altered-replay/stale-write denial, a new post-recovery save and a second process/runtime restart. Source data deliberately diverges after backup to prove the restored point is independent. Corrupt backups fail before target creation; interrupted copy removes only the fresh target; existing targets are refused without changes.
+
+Integrity checks run on a disposable clone: even read-only SQLite access can update shared-memory sidecars. The original backup's complete file fingerprints remain unchanged throughout. All copied SQLite databases pass `integrity_check` and `foreign_key_check`; exactly one contains the application mail tables. The manifest detects accidental corruption; it is not a signature or encrypted backup format. All temporary state is removed in cleanup, with dependent phases failing fast.
+
+Passed locally: 292 Node tests, 44 actual local workerd/D1 checks on each pinned July 30/October 28 compatibility run, integrated 38-module/7-asset build and privacy/diff checks. The ten new counted checks are the recovery suite plus its nine phases. No application source or production settings changed.
+
+This is **local, quiesced, version-pinned Miniflare persistence recovery**, not Cloudflare-hosted D1 export/Time Travel, online backup, live owner recovery, approved encryption/retention, or a production disaster-recovery procedure. Exact-head CI, provider/browser acceptance and the existing release approvals remain open. No production database, mailbox, DNS/forwarding, Access, secrets, service deployment or SMTP action was touched.
+
+Next priority: diagnose the persistent GitHub Actions queue so independent exact-head CI can execute before further release integration.
