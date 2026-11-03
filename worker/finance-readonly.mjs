@@ -6,6 +6,11 @@ const MERCURY_PAGE_LIMIT=100;
 const MERCURY_MAX_PAGES=10;
 const MERCURY_MAX_ACCOUNTS=1000;
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ALPACA_ACCOUNT_STATUSES=new Set([
+ 'ACTIVE','INACTIVE','PAPER_ONLY','ONBOARDING','SUBMITTED','SUBMISSION_FAILED',
+ 'ACCOUNT_UPDATED','APPROVAL_PENDING','APPROVED','REJECTED','ACTION_REQUIRED',
+ 'ACCOUNT_CLOSED','ACCOUNT_CLOSED_PENDING','LIMITED','CLOSED',
+]);
 const knownStatus=new Set(['active','pending','deleted','archived']);
 const problem=(code,status=502)=>{const error=new Error(code);error.publicCode=code;error.status=status;throw error;};
 const safeLabel=(value,max=100)=>{
@@ -113,7 +118,7 @@ async function fetchAllMercuryAccounts(token,transport){
 export function alpacaPaperProjection(account,positions){
  if(!account||typeof account!=='object'||Array.isArray(account)||!Array.isArray(positions)||positions.length>500)
   problem('finance_invalid_provider_payload');
- if(!['ACTIVE','INACTIVE','SUBMITTED','ACTION_REQUIRED','APPROVAL_PENDING','REJECTED','CLOSED'].includes(String(account.status||'').toUpperCase()))
+ if(!ALPACA_ACCOUNT_STATUSES.has(String(account.status||'').toUpperCase()))
   problem('finance_invalid_provider_payload');
  for(const position of positions){
   if(!position||typeof position!=='object'||Array.isArray(position)||typeof position.symbol!=='string'||
