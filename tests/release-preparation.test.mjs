@@ -18,7 +18,8 @@ const modules = [
   'worker/mail-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
-    'mail-d1-store.mjs','mail-sqlite-store.mjs'].map(name=>'src/communications/'+name)
+    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs'].map(name=>'src/communications/'+name),
+  ...['address-parser.js','base64-decoder.js','base64-encoder.js','chunk-writer.js','decode-strings.js','errors.js','html-entities.js','mime-node.js','otp-token.js','pass-through-decoder.js','postal-mime.js','qp-decoder.js','text-format.js','types.js'].map(name=>'vendor/postal-mime/'+name)
 ];
 function syntheticCandidate() {
   const assets = Object.fromEntries([
@@ -42,7 +43,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
-  assert.equal(first.manifest.candidate.moduleCount, 21);
+  assert.equal(first.manifest.candidate.moduleCount, 36);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
   assert.equal(first.manifest.intendedIsolatedRuntime.verifiedOnLiveOctoberRuntime, false);
