@@ -7,7 +7,7 @@ import {verifyAccessJWT} from '../worker/access.mjs';
 const keys=generateKeyPairSync('rsa',{modulusLength:2048}),jwk=keys.publicKey.export({format:'jwk'});Object.assign(jwk,{kid:'offline-browser',alg:'RS256'});
 const config={issuer:'https://offline.cloudflareaccess.com',audience:'offline-browser',jwksUrl:'https://offline.cloudflareaccess.com/cdn-cgi/access/certs'};
 export function token(subject='test-owner',overrides={}){const encode=x=>Buffer.from(JSON.stringify(x)).toString('base64url');const data=encode({alg:'RS256',kid:jwk.kid})+'.'+encode({iss:config.issuer,aud:[config.audience],sub:subject,email:'owner@example.test',exp:Date.now()/1000+300,...overrides});return data+'.'+sign('RSA-SHA256',Buffer.from(data),keys.privateKey).toString('base64url');}
-export async function start(path){
+export async function start(path,{financeFixture=false}={}){
  const sqlite=new DatabaseSync(path);sqlite.exec(readFileSync(new URL('../worker/schema.sql',import.meta.url),'utf8'));sqlite.exec(readFileSync(new URL('../worker/migrations/0003-scoped-workspace.sql',import.meta.url),'utf8'));
  const rows=[{id:'project-a',name:'Recovery acceptance',area:'Devon Works',record:'https://www.notion.so/synthetic-project-a'},{id:'project-b',name:'Portable workspace',area:'Devon Works',record:'https://www.notion.so/synthetic-project-b'}];
  sqlite.prepare('INSERT OR IGNORE INTO station_portfolio_cache(owner_sub,source_id,fetch_time,payload) VALUES(?,?,?,?)').run('test-owner','synthetic-source',1793448000000,JSON.stringify(rows));
@@ -15,13 +15,46 @@ export async function start(path){
  const modules=JSON.parse(readFileSync(new URL('../deployment/modules.json',import.meta.url),'utf8'));
  const match=modules['index.mjs'].match(/const assets=(.*);\nexport default/s);const assets=JSON.parse(match[1]);
  const grants=[{subject:'test-owner',principalId:'owner-a',scopeKind:'personal',scopeId:'personal-a',role:'owner'}];
- let externalCalls=0;
- const app=createStation(assets,request=>verifyAccessJWT(request.headers.get('Cf-Access-Jwt-Assertion'),config,async()=>({keys:[jwk]})),async()=>{externalCalls++;throw Error('forbidden external operation');});
+ let externalCalls=0,financeFixtureRequests=0;
+ // Only enabled explicitly by a synthetic acceptance test. The real provider
+ // clients remain fully disconnected; unexpected calls always fail closed.
+ const syntheticTransport=async(url,options)=>{
+  if(financeFixture){
+   if(options?.method!=='GET'||options.redirect!=='manual')throw Error('synthetic finance must be GET-only');
+   const respond=data=>new Response(JSON.stringify(data),{status:200,headers:{'Content-Type':'application/json'}});
+   if(url.startsWith('https://api.mercury.com/api/v1/accounts?')){
+    financeFixtureRequests++;
+    return respond({accounts:[
+     {id:'11111111-2222-4333-8444-555555555555',type:'mercury',name:'Synthetic Checking',kind:'checking',status:'active',currentBalance:0,availableBalance:0},
+     {id:'66666666-7777-4888-8999-aaaaaaaaaaaa',type:'mercury',name:'Synthetic Savings',kind:'savings',status:'active',currentBalance:0,availableBalance:0},
+    ],page:{nextPage:null}});
+   }
+   if(url==='https://paper-api.alpaca.markets/v2/account'){
+    financeFixtureRequests++;
+    return respond({status:'ACTIVE',equity:'10000.00',cash:'5000.00',buying_power:'5000.00'});
+   }
+   if(url==='https://paper-api.alpaca.markets/v2/positions'){
+    financeFixtureRequests++;
+    return respond([{symbol:'AAPL',qty:'1'}]);
+   }
+  }
+  externalCalls++;throw Error('forbidden external operation');
+ };
+ const app=createStation(assets,request=>verifyAccessJWT(request.headers.get('Cf-Access-Jwt-Assertion'),config,async()=>({keys:[jwk]})),syntheticTransport);
  let env;
  const server=createServer(async(req,res)=>{
   try{const chunks=[];for await(const chunk of req)chunks.push(chunk);const body=Buffer.concat(chunks);const r=new Request(env.APP_ORIGIN+req.url,{method:req.method,headers:req.headers,...(body.length?{body}:{})});const response=await app.fetch(r,env,{});res.writeHead(response.status,Object.fromEntries(response.headers));res.end(Buffer.from(await response.arrayBuffer()));}catch{res.writeHead(500);res.end();}
  });
  await new Promise(resolve=>server.listen(0,'127.0.0.1',resolve));
  env={APP_ORIGIN:'http://127.0.0.1:'+server.address().port,OWNER_EMAIL:'owner@example.test',DB,WORKSPACE_GRANTS:grants,WORKSPACE_PROJECT_GRANTS:rows.map(p=>({principalId:'owner-a',scopeKind:'personal',scopeId:'personal-a',projectId:p.id,area:p.area}))};
- return {url:env.APP_ORIGIN,env,externalCalls:()=>externalCalls,close:async()=>{await new Promise(resolve=>server.close(resolve));sqlite.close();}};
+ if(financeFixture)Object.assign(env,{
+  FINANCE_READ_MODE:'read_only',FINANCE_OWNER_SUBJECT:'test-owner',
+  MERCURY_FINANCE_READ_TOKEN:'synthetic-fixture-token',
+  ALPACA_FINANCE_MODE:'paper',
+  ALPACA_FINANCE_PAPER_KEY:'synthetic-fixture-key',
+  ALPACA_FINANCE_PAPER_SECRET:'synthetic-fixture-secret',
+ });
+ return {url:env.APP_ORIGIN,env,externalCalls:()=>externalCalls,
+  financeFixtureRequests:()=>financeFixtureRequests,
+  close:async()=>{await new Promise(resolve=>server.close(resolve));sqlite.close();}};
 }
