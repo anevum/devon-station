@@ -37,3 +37,12 @@ The constraint is intentionally per saved draft ID. If the owner wants to send a
 ## Operational boundary
 
 No Cloudflare Mail bindings, DNS/MX/Email Routing changes, GitHub merge, production deployment, secret update, production D1 migration, SMTP send, or provider access were performed. Preserve current Anevum forwarding and prior DevonStation release checkpoints.
+
+
+## Continued safety increment: pending delivery deletion guard
+
+The saved-draft HTTP delete API now detects whether its dedicated D1 database actually contains `comms_outbox`, rather than trusting `MAIL_OUTBOX_ENABLED` or `MAIL_SEND_ENABLED` feature flags. When that table exists, a single atomic `DELETE ... AND NOT EXISTS (... state IN ('queued','claimed','uncertain'))` statement protects unresolved deliveries belonging to the same signed owner/mailbox/draft. Revisions must still match. A blocked deletion returns the sanitized, actionable `409 mail_draft_pending_delivery`; the browser retains the draft and explains that deleting it would not cancel an email. Turning off outgoing SMTP or the outbox feature flag does not bypass this check. Another owner's draft remains independent.
+
+Legacy draft-only installations without an outbox table may still explicitly delete drafts; outbox schema introspection failures or unexpected schema mismatches fail closed instead of guessing. An `accepted`, `rejected`, or `failed` terminal receipt does not prevent an explicit draft deletion, and the immutable outbox audit record survives. This safeguard does not itself implement provider Sent reconciliation, encryption, retention, or actual email delivery.
+
+**Executed verification:** `python3 /tmp/verify_comms19_pending_delete.py` on independent in-memory SQLite 3.46.1 passed atomic suppression for queued/claimed/uncertain, owner isolation, revision mismatch, terminal acceptance and retained outbox audit, and detection of legacy absent `comms_outbox` table. This is isolated SQLite evidence, not a passing Node, Workerd/Miniflare, jsdom, real Cloudflare D1 or production test. Added unit/API/runtime/DOM regression sources on the PR branch. All affected JavaScript sources parsed in a V8 syntax-only check; their exact-head test outcomes still depend on GitHub Actions. No production binding, migration, SMTP, secret or deployment change was made.
