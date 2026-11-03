@@ -58,7 +58,7 @@ test('signed owner subject, Origin and HTTP method enforced before mail access',
  const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
  assert.equal((await station.fetch(req('/api/mail/inbox'),{...env(binding),MAIL_OWNER_SUB:'other'})).status,403);
  assert.equal((await station.fetch(req('/api/mail/sync','POST',{headers:{Origin:'https://evil.example','Content-Type':'application/json'}}),env(binding))).status,403);
- assert.equal((await station.fetch(req('/api/mail/sync','DELETE'),env(binding))).status,405);
+ assert.equal((await station.fetch(req('/api/mail/sync','DELETE',{headers:{Origin:base,'Content-Type':'application/json'}}),env(binding))).status,405);
  assert.equal(mock.calls().length,0);db.close();
 });
 test('owner-triggered IMAP TLS read-only sync persists in isolated D1 and returns text-only inbox',async()=>{
