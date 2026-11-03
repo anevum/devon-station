@@ -15,7 +15,7 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("synthetic outbox")}}',compatibilityDate,d1Databases:['MAIL']});
  try{
   const db=await mf.getD1Database('MAIL');
-  for(const name of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql']){
+  for(const name of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql','0008-comms-one-delivery-per-draft.sql']){
    const sql=await readFile(new URL('../worker/migrations/'+name,import.meta.url),'utf8');
    for(const statement of sql.split('\n').filter(x=>!/^\s*--/.test(x)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
     await db.prepare(statement).run();
@@ -94,9 +94,10 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
    await draftStore.save(scope,{id:draftId,revision:2,
     operationId:'123e4567-e89b-42d3-a456-426614174085',to:draft.to,subject:'Updated',body:draft.body});
    await assert.rejects(prepare('123e4567-e89b-42d3-a456-426614174086'),e=>e?.code==='outbox_draft_stale');
-   const next=await dispatcher.enqueueSavedDraft({deliveryId:'123e4567-e89b-42d3-a456-426614174087',
-    draftId,draftRevision:3,approvedByOwner:true});
-   assert.equal(next.draftRevision,3);
+   await assert.rejects(dispatcher.enqueueSavedDraft({
+    deliveryId:'123e4567-e89b-42d3-a456-426614174087',
+    draftId,draftRevision:3,approvedByOwner:true}),e=>e?.code==='outbox_draft_already_prepared');
+   assert.equal((await store.list()).filter(x=>x.draftId===draftId).length,1);
    const listing=JSON.stringify(await store.list());assert(!listing.includes(draft.body));assert(!listing.includes('recipient@'));
   });
   await t.test('owner Worker API prepares and lists durable outbox without exposing SMTP',async()=>{
