@@ -62,6 +62,25 @@ test('changed authentication, legacy source, missing modules and embedded privat
   assert.throws(() => prepare(privateCandidate), /private-data marker/);
 });
 
+
+test('review-only package accepts imported finance module, but refuses missing or extra finance code', () => {
+  const candidate = syntheticCandidate();
+  candidate['worker/index.mjs'] = "import {financialSummary} from './finance-readonly.mjs';\n";
+  candidate['worker/finance-readonly.mjs'] = 'export const financialSummary = () => ({readOnly:true});\n';
+  const result = prepare(candidate);
+  assert.equal(result.manifest.candidate.moduleCount, 13);
+  assert(Object.hasOwn(JSON.parse(result.files['candidate.modules.json']), 'worker/finance-readonly.mjs'));
+  assert.equal(result.manifest.guardedFallback.moduleCount, 4, 'fallback must not gain finance access');
+
+  const missing = {...candidate};
+  delete missing['worker/finance-readonly.mjs'];
+  assert.throws(() => prepare(missing), /module graph/, 'do not accept an unresolved Worker import');
+
+  const unused = syntheticCandidate();
+  unused['worker/finance-readonly.mjs'] = candidate['worker/finance-readonly.mjs'];
+  assert.throws(() => prepare(unused), /module graph/, 'do not allow an unreferenced financial provider module');
+});
+
 function fixture(t,complete=false) {
   const dir=mkdtempSync(join(tmpdir(),'ds-release-provenance-'));
   t.after(()=>rmSync(dir,{recursive:true,force:true}));
