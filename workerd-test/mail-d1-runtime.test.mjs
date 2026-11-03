@@ -116,8 +116,15 @@ test(`workerd ${compatibilityDate}: COMMS-07 real local D1 snapshot transaction 
       assert.deepEqual(await store.commitSnapshot({ scope, expectedRevision: before.revision, next: updated }),
         { ok: true, revision: before.revision + 1 });
       assert.deepEqual((await store.readSnapshot(scope)).records.map(x => x.uidValidity), [7, 8]);
-      assert.deepEqual((await db.prepare('PRAGMA foreign_key_check').all()).results, []);
-      assert.equal((await db.prepare('PRAGMA integrity_check').first()).integrity_check, 'ok');
+      // D1 disallows administrative PRAGMA queries in its Workers binding.
+      // Verify FK relationships through a portable read-only join instead.
+      const orphaned = await db.prepare(`SELECT count(*) AS n FROM comms_ro_messages AS msg
+        LEFT JOIN comms_ro_mailboxes AS box
+        ON msg.installation_id = box.installation_id AND msg.mailbox_id = box.mailbox_id
+        WHERE box.mailbox_id IS NULL`).first();
+      assert.equal(orphaned.n, 0);
+      assert.equal((await db.prepare('SELECT count(*) AS n FROM comms_ro_messages WHERE installation_id = ? AND mailbox_id = ?')
+        .bind(scope.installationId, scope.mailboxId).first()).n, 2);
     });
   } finally {
     await mf.dispose();
