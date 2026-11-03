@@ -65,3 +65,14 @@ textarea.mail-draft-field{resize:vertical;min-height:180px}
 .mail-outbox-review [data-mail-draft-action="send-submit"]{border-color:var(--accent);color:var(--ink);font-weight:680;background:var(--accent-dim)}
 .mail-outbox-review[data-outbox-state="uncertain"],.mail-outbox-review[data-outbox-state="claimed"],.mail-outbox-review[data-outbox-state="submit-unconfirmed"]{border-color:var(--warn)}
 @media(max-width:600px){.mail-outbox-review{padding:14px}.mail-outbox-text{max-height:38vh;font-size:12px}}
+
+/* COMMS-17: durable read-only delivery receipts, including after a page reload. */
+.mail-outbox-history{display:grid;gap:10px;min-width:0;padding:15px;border:1px solid var(--line);border-radius:11px;background:var(--panel2)}
+.mail-outbox-history h3{margin:0}
+.mail-outbox-list{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,235px),1fr));gap:10px;list-style:none;margin:0;padding:0}
+.mail-outbox-item{display:grid;gap:5px;min-width:0;padding:12px;border:1px solid var(--line);border-radius:9px;background:var(--panel)}
+.mail-outbox-item strong{font-size:12px}
+.mail-outbox-item span,.mail-outbox-item time{overflow-wrap:anywhere;font-variant-numeric:tabular-nums}
+.mail-outbox-item[data-outbox-state="uncertain"],.mail-outbox-item[data-outbox-state="claimed"]{border-color:var(--warn)}
+.mail-outbox-item[data-outbox-state="accepted"]{border-color:var(--accent)}
+@media(max-width:600px){.mail-outbox-history{padding:12px}.mail-outbox-list{grid-template-columns:1fr}}
