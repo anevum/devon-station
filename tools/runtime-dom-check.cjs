@@ -16,7 +16,18 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
  try{
   dom=await make();let doc=dom.window.document;
   try{await until(()=>doc.querySelector('#ws-summary'),'workspace loaded');}catch(e){console.error('BOOT ERRORS',errors);console.error('VIEW',doc.querySelector('#view')?.textContent.slice(0,1500));console.error('BODY',doc.body.textContent.slice(-400));throw e;}
-  const source=doc.querySelector('.ws-project-header a');if(!source.href.includes('synthetic-project-a'))throw Error('source missing');
+  // Select the known fixture explicitly rather than assuming default sort order.
+  // Keep the original project source-link assertion and wait for its redraw.
+  const projectA=doc.querySelector('[data-ws-project="project-a"]');
+  if(!projectA){
+    const projectIds=[...doc.querySelectorAll('[data-ws-project]')].map(n=>n.getAttribute('data-ws-project'));
+    const observedLink=doc.querySelector('.ws-project-header a')?.getAttribute('href')??'absent';
+    // This test server has only synthetic project data, never live records.
+    console.error('Synthetic fixture project diagnostic',JSON.stringify({projectIds,observedLink,workspaceStatus:doc.querySelector('#ws-status')?.textContent||'',workspaceHtml:doc.querySelector('#station-workspace')?.innerHTML.slice(0,1800),rawScriptTail:doc.querySelector('script')?.textContent.slice(-200)}));
+    throw Error('synthetic project A missing from authorized scope');
+  }
+  projectA.click();
+  await until(()=>doc.querySelector('.ws-project-header a')?.href.includes('synthetic-project-a'),'selected project source link preserved');
   // Async redraw must preserve a keyboard user's place after reload/scope change.
   const reload=doc.querySelector('#ws-reload');reload.focus();reload.click();
   await until(()=>doc.querySelector('#ws-reload')!==reload&&!doc.querySelector('#ws-reload').disabled,'workspace keyboard reload');
@@ -31,10 +42,64 @@ async function until(fn,label){for(let i=0;i<150;i++){if(fn())return;await delay
   click('[data-ws-project=project-b]');if(doc.querySelectorAll('.ws-action').length)throw Error('project isolation');click('[data-ws-project=project-a]');if(doc.querySelectorAll('.ws-action').length!==2)throw Error('project restoration');
   // Original app route + capture without replacing its shell or scripts.
   click('#capture-open');doc.querySelector('#capture-text').value='Preserved original capture';doc.querySelector('#capture-form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true}));if(!doc.querySelector('#view').textContent.includes('Preserved original capture'))throw Error('capture regression');click('#nav [data-go=workspace]');await until(()=>doc.querySelector('#ws-summary'),'workspace return');
+  // FIN02: exercise the actual built shell through a signed, isolated Worker
+  // request. All provider credentials remain absent; there are no external calls.
+  server.env.FINANCE_READ_MODE='read_only';
+  server.env.FINANCE_OWNER_SUBJECT='test-owner';
+  const worksNav=doc.querySelector('#nav [data-go=works]');
+  const financeNav=doc.querySelector('#nav [data-go=finance]');
+  const settingsNav=doc.querySelector('#nav [data-go=settings]');
+  if(!financeNav||financeNav.title!=='Finance')throw Error('Finance navigation must not advertise a duplicate Alt key');
+  if(worksNav?.title!=='Devon Works · Alt 5'||worksNav.getAttribute('aria-keyshortcuts')!=='Alt+5')throw Error('original Alt 5 hint changed');
+  if(settingsNav?.title!=='Settings · Alt 0'||settingsNav.getAttribute('aria-keyshortcuts')!=='Alt+0')throw Error('original Alt 0 hint changed');
+  click('#nav [data-go=finance]');
+  await until(()=>doc.querySelector('#finance-message')?.textContent.includes('Read-only provider snapshot loaded'),'finance signed read-only route');
+  const financeText=doc.querySelector('#finance-results')?.textContent??'';
+  if(!financeText.includes('Mercury banking')||!financeText.includes('Alpaca research')||
+     !financeText.includes('Not connected')||!financeText.includes('Not available'))
+    throw Error('Finance source isolation or unconfigured state failed');
+  if(financeText.includes('$0.00')||financeText.includes('$1,000.00'))throw Error('unconfigured finances fabricated balances');
+  const authed=await fetch(server.url+'/api/finance/summary',{headers:{'Cf-Access-Jwt-Assertion':token('test-owner')}});
+  if(authed.status!==200)throw Error('signed finance owner GET '+authed.status);
+  const report=await authed.json();
+  if(report.sources?.mercury?.status!=='not_configured'||report.sources?.alpaca?.status!=='not_configured'||
+     report.capabilities?.moneyMovement!==false)throw Error('Finance signed read-only contract mismatch');
+  const nonowner=await fetch(server.url+'/api/finance/summary',{headers:{'Cf-Access-Jwt-Assertion':token('other-subject')}});
+  if(nonowner.status!==403)throw Error('Finance nonowner JWT scope not denied');
+  if(server.externalCalls())throw Error('Finance request contacted forbidden external services');
+  doc.dispatchEvent(new dom.window.KeyboardEvent('keydown',{key:'5',altKey:true,bubbles:true,cancelable:true}));
+  if(!doc.querySelector('#view')?.classList.contains('page-works'))throw Error('Alt 5 no longer opens original Works');
+  click('#nav [data-go=workspace]');
+  await until(()=>doc.querySelector('#ws-summary'),'workspace returned after Finance');
   const axe=require('axe-core');dom.window.eval(axe.source);const audit=await dom.window.axe.run(doc.querySelector('#station-workspace'),{runOnly:{type:'tag',values:['wcag2a','wcag2aa','wcag21aa']},rules:{'color-contrast':{enabled:false}}});if(audit.violations.length)throw Error('DOM accessibility '+JSON.stringify(audit.violations.map(x=>({id:x.id,nodes:x.nodes.map(n=>n.target)}))));
   dom.window.close();await server.close();server=await start(path);dom=await make();doc=dom.window.document;await until(()=>doc.querySelectorAll('.ws-action').length===2,'restart state');
   server.env.WORKSPACE_GRANTS=[];click('[data-ws-reload]');await until(()=>doc.querySelector('#station-workspace').textContent.includes('No workspace authorized'),'revocation');if(doc.querySelectorAll('.ws-action').length)throw Error('revocation leak');
   dom.window.close();dom=await make('other-subject');doc=dom.window.document;await until(()=>doc.querySelector('#station-workspace').textContent.includes('No workspace authorized'),'other subject');
+
+  // Rebuild a separate isolated server with ONLY synthetic GET fixtures, so
+  // unfunded banking is distinguishable from an unconfigured data source.
+  dom.window.close();await server.close();server=await start(path,{financeFixture:true});
+  dom=await make();doc=dom.window.document;
+  await until(()=>doc.querySelector('#ws-summary'),'synthetic finance owner signed session');
+  click('#nav [data-go=finance]');
+  await until(()=>doc.querySelector('#finance-message')?.textContent.includes('Read-only provider snapshot loaded'),'synthetic finance provider integration');
+  const populated=doc.querySelector('#finance-results')?.textContent??'';
+  if(!populated.includes('Synthetic Checking')||!populated.includes('Synthetic Savings')||
+     !populated.includes('$0.00')||!populated.includes('$10,000.00')||
+     !populated.includes('PAPER / SIMULATED')||!populated.includes('Not available'))
+    throw Error('Synthetic zero banking and Alpaca paper integration did not render distinctly');
+  const realScoped=await fetch(server.url+'/api/finance/summary',{headers:{'Cf-Access-Jwt-Assertion':token('test-owner')}});
+  if(realScoped.status!==200)throw Error('Synthetic provider route denied signed owner');
+  const verified=await realScoped.json();
+  if(verified.sources?.mercury?.accounts?.length!==2||
+     verified.sources.mercury.accounts.some(x=>x.currentCents!=='0')||
+     verified.sources?.alpaca?.equityCents!=='1000000'||
+     verified.sources?.alpaca?.tpd?.valuePct!==null||
+     verified.combinedNetWorthCents!==null)throw Error('Finance provider contract or equity provenance mismatch');
+  const deniedFinance=await fetch(server.url+'/api/finance/summary',{headers:{'Cf-Access-Jwt-Assertion':token('other-subject')}});
+  if(deniedFinance.status!==403)throw Error('Synthetic provider leaked to non-owner subject');
+  if(server.financeFixtureRequests()!==6)throw Error('Unexpected number of synthetic GET-only provider calls');
+  if(server.externalCalls())throw Error('Finance fixture attempted an unknown outbound request');
   if(errors.length)throw Error('DOM errors '+JSON.stringify(errors));if(server.externalCalls())throw Error('external operation');
   const result={actualRecoveredHTML:true,sourceLinkedProjects:true,approveReject:true,auditReceipts:4,originalCapture:true,restart:true,revocation:true,nonownerIsolation:true,domAccessibilityViolations:audit.violations.length,domErrors:errors.length,externalCalls:0,limitations:'jsdom does not verify browser layout, color contrast, real device or rendered accessibility'};
   writeFileSync(join(__dirname,'dom-results.json'),JSON.stringify(result,null,2));console.log(JSON.stringify(result));

@@ -4,6 +4,7 @@ const {tmpdir}=require('node:os');
 const {join}=require('node:path');
 (async()=>{
  const {start,token}=await import('./runtime-harness.mjs');const temp=mkdtempSync(join(tmpdir(),'ds-browser-')),path=join(temp,'synthetic.sqlite');let server=await start(path);
+ server.env.FINANCE_READ_MODE='read_only';server.env.FINANCE_OWNER_SUBJECT='test-owner';
  let browser;
  try{browser=await chromium.launch({executablePath:process.env.DS_CHROME,args:['--no-sandbox','--disable-dev-shm-usage'],headless:true});const results=[];
 
@@ -23,6 +24,27 @@ const {join}=require('node:path');
    // The app's original navigation and capture workflow still coexist.
    await page.getByRole('button',{name:'Quick capture',exact:true}).click();await page.getByLabel('Thought or next action').fill('Retain original capture '+width);await page.locator('#capture-form button[type=submit]').click();await page.getByText('Retain original capture '+width,{exact:true}).waitFor();
    await page.locator('#nav [data-go=workspace]').click();await page.locator('#ws-summary').waitFor();
+   // Finance must work inside the complete recovered hosted shell, without
+   // credentials or funding, at desktop, iPhone and narrow-phone viewports.
+   await page.locator('#nav [data-go=finance]').click();
+   await page.getByText('Read-only provider snapshot loaded. No financial operation was executed.').waitFor();
+   const financePanels=await page.locator('#finance-results .finance-panel').count();
+   if(financePanels!==2)throw Error('Finance did not render two independent source panels '+width);
+   const financeText=await page.locator('#station-finance').innerText();
+   if(!financeText.includes('Mercury banking')||!financeText.includes('Alpaca research')||
+      !financeText.includes('Not connected')||!financeText.includes('Not available'))
+      throw Error('Finance unconfigured source state failed '+width);
+   if(financeText.includes('$0.00'))throw Error('Finance fabricated a balance without provider evidence '+width);
+   const financeOverflow=await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth);
+   if(financeOverflow>1)throw Error('Finance horizontal overflow '+width+': '+financeOverflow);
+   const financeShortTargets=await page.locator('.finance-toolbar button:visible').evaluateAll(els=>
+     els.map(e=>({name:e.textContent.trim(),height:e.getBoundingClientRect().height})).filter(x=>x.height<43));
+   if(financeShortTargets.length)throw Error('Finance touch targets '+JSON.stringify(financeShortTargets));
+   if(await page.locator('#nav [data-go=works]').getAttribute('aria-keyshortcuts')!=='Alt+5')
+      throw Error('Finance navigation rewrote original keyboard shortcut');
+   await page.screenshot({path:join(__dirname,'finance-'+width+'.png'),fullPage:true});
+   await page.locator('#nav [data-go=workspace]').click();
+   await page.locator('#ws-summary').waitFor();
    if(errors.length)throw Error('page errors '+JSON.stringify(errors));results.push({width,overflow,touchTargets:true,decision:width===320?'rejected':'approved',pageErrors:errors.length});await context.close();
   }
   const oldURL=server.url;await server.close();server=await start(path);const ctx=await browser.newContext({extraHTTPHeaders:{'Cf-Access-Jwt-Assertion':token()}});const page=await ctx.newPage();await page.goto(server.url+'/#workspace');await page.getByText('Workspace loaded. Saved decisions are up to date.').waitFor();if(await page.locator('.ws-action').count()!==3)throw Error('restart recovery failed');
