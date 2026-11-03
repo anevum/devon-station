@@ -2,9 +2,9 @@
 // Called only from an authenticated Worker handler with server-owned credentials and socket factory.
 import {PURELYMAIL} from './mail-onboarding.mjs';
 const enc = new TextEncoder();
-const LIMIT = 65536;
+const LIMIT = 256 * 1024;
 const MAX_LINE = 8192;
-const MAX_REPLY = 50 * (LIMIT + MAX_LINE) + 32768;
+const MAX_REPLY = 10 * (LIMIT + MAX_LINE) + 32768;
 const UID = n => Number.isSafeInteger(n) && n > 0;
 const reject = code => {throw Object.assign(new Error(code), {code});};
 const ascii = (value, max) => typeof value === 'string' && value.length > 0 && value.length <= max &&
@@ -24,7 +24,7 @@ function parseInternalDate(line) {
   return new Date(local.valueOf() - offset * 60000).toISOString();
 }
 
-function parseFetch(line, bytes, decodeMime) {
+async function parseFetch(line, bytes, decodeMime) {
   if (!/^\* [0-9]+ FETCH \(/i.test(line) || !/\bBODY(?:\.PEEK)?\[\] \{[0-9]+\}$/i.test(line)) reject('imap_invalid_fetch');
   const matches = [...line.matchAll(/\bUID ([0-9]+)\b/gi)];
   if (matches.length !== 1 || !UID(Number(matches[0][1]))) reject('imap_invalid_fetch');
@@ -34,7 +34,7 @@ function parseFetch(line, bytes, decodeMime) {
   for (const [wire, name] of [['\\Seen','seen'], ['\\Answered','answered'], ['\\Flagged','flagged'], ['\\Draft','draft']]) {
     if (flagsField[1].split(' ').some(x => x.toLowerCase() === wire.toLowerCase())) flags.push(name);
   }
-  const decoded = decodeMime(bytes);
+  const decoded = await decodeMime(bytes);
   if (!decoded || typeof decoded !== 'object' || !ascii(decoded.from, 254) ||
       typeof decoded.subject !== 'string' || typeof decoded.text !== 'string') reject('imap_invalid_mime');
   return {uid:Number(matches[0][1]),from:decoded.from,subject:decoded.subject,text:decoded.text,
@@ -114,7 +114,7 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
           if (++tag>9999) reject('imap_command_limit');
           const id='A'+String(tag).padStart(4,'0');
           await writer.write(enc.encode(id+' '+command+'\r\n'));
-          const lines=[], messages=[], maxMessages=50;
+          const lines=[], messages=[], maxMessages=10;
           let received=0;
           while (true) {
             const response=await line();
@@ -139,7 +139,7 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
               const size=Number(length[1]);
               if (!Number.isSafeInteger(size) || size>LIMIT) reject('imap_literal_limit');
               const raw=await literal(size);received+=size;
-              messages.push(parseFetch(response,raw,decodeMime));
+              messages.push(await parseFetch(response,raw,decodeMime));
             } else if (kind==='fetch') {
               if (response!==')' && !/^\* [0-9]+ EXISTS$/i.test(response)) reject('imap_invalid_fetch');
             } else {

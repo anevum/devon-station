@@ -15,7 +15,11 @@ const EXPECTED_MODULES = [
   'worker/mail-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
-    'mail-d1-store.mjs','mail-sqlite-store.mjs'].map(name => 'src/communications/' + name)
+    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs'].map(name => 'src/communications/' + name),
+  ...['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs',
+    'decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs',
+    'pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs']
+    .map(name=>'vendor/postal-mime/'+name)
 ];
 const LEGACY_SHA256 = 'b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c8c94';
 const ACCESS_SHA256 = '1f3127c82f2079f82685f8f4ee56a82c390cf36dd7ef36273b4623e9ab3c9654';
