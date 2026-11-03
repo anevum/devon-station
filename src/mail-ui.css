@@ -31,7 +31,7 @@
 @media(max-width:450px){#station-mail{padding-bottom:env(safe-area-inset-bottom)}.mail-header{padding:14px}.mail-reader-subject{font-size:19px}.mail-message{min-height:88px}}
 @media(prefers-reduced-motion:reduce){.mail-message,.mail-action{transition:none!important}}
 
-/* COMMS-12: private drafts; no Send button and no remote HTML preview. */
+/* COMMS-12/17: private drafts; guarded send controls only with owner-confirmed server opt-in. */
 .mail-drafts-host{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:16px;display:grid;gap:14px;min-width:0}
 .mail-draft-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
 .mail-draft-heading{font-size:13px}
@@ -55,3 +55,13 @@ textarea.mail-draft-field{resize:vertical;min-height:180px}
 
 .mail-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--line)}
 .mail-pagination button{min-height:44px;min-width:68px}.mail-page-range{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}
+
+/* COMMS-17: inert outgoing review. Focus and mobile-safe detail layout. */
+.mail-outbox-review{display:grid;gap:12px;min-width:0;padding:18px;border:1px solid color-mix(in srgb,var(--accent),var(--line) 65%);border-radius:12px;background:linear-gradient(145deg,var(--accent-dim),var(--panel2) 65%)}
+.mail-outbox-review .mail-details{margin:0;padding-bottom:12px}
+.mail-outbox-review .mail-draft-heading{margin:0;font-size:15px;line-height:1.35}
+.mail-outbox-review .mail-draft-notice{overflow-wrap:anywhere}
+.mail-outbox-text{margin:0;min-width:0;max-height:300px;overflow:auto;padding:14px 16px;border:1px solid var(--line);border-radius:9px;background:var(--panel);color:var(--ink);white-space:pre-wrap;overflow-wrap:anywhere;word-break:break-word;font:12px/1.65 ui-monospace,SFMono-Regular,Consolas,monospace}
+.mail-outbox-review [data-mail-draft-action="send-submit"]{border-color:var(--accent);color:var(--ink);font-weight:680;background:var(--accent-dim)}
+.mail-outbox-review[data-outbox-state="uncertain"],.mail-outbox-review[data-outbox-state="claimed"],.mail-outbox-review[data-outbox-state="submit-unconfirmed"]{border-color:var(--warn)}
+@media(max-width:600px){.mail-outbox-review{padding:14px}.mail-outbox-text{max-height:38vh;font-size:12px}}
