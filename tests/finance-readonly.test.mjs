@@ -85,6 +85,18 @@ test('monetary parsing preserves cents and rejects fractions, NaN and exponent',
  for(const bad of ['1.001','NaN','1e5','10000000000000000',NaN,Infinity,null,{}])assert.throws(()=>cents(bad));
 });
 
+test('unsafe large JSON numeric amounts refuse silently rounded cents',()=>{
+ // IEEE-754 parsing changes the final cent in this amount.
+ const amount='90071992547409.93';
+ assert.notEqual(String(Number(amount)),amount);
+ assert.equal(cents(amount),'9007199254740993','decimal strings are parsed exactly');
+ assert.throws(()=>cents(Number(amount)),/finance_invalid_amount/);
+ assert.equal(cents(0.07),'7','normal cent values remain supported');
+ assert.throws(()=>mercuryProjection({...mercury,accounts:[
+  {...mercury.accounts[0],currentBalance:Number(amount)},
+ ]}),/finance_invalid_amount/);
+});
+
 test('Alpaca documented account lifecycle states remain observable in paper-only mode',()=>{
  for(const status of [
   'PAPER_ONLY','ONBOARDING','SUBMISSION_FAILED','ACCOUNT_UPDATED','APPROVED',
