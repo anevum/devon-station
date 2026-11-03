@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
 import {createD1Outbox,createOutboxDispatcher} from '../src/communications/mail-outbox.mjs';
+import {handleMailDraftApi} from '../worker/mail-drafts-api.mjs';
 
 const owner={installationId:'personal',mailboxId:'hello',ownerSub:'synthetic-owner'};
 const peer={...owner,ownerSub:'synthetic-peer'};
@@ -159,4 +160,22 @@ test('resolved SMTP acceptance permits explicit draft deletion but preserves imm
  const row=await outbox.read(UUID.first);
  assert.equal(row.state,'accepted');
  assert.equal(row.draftId,UUID.draft,'deleting resolved draft must retain audit linkage');
+});
+
+
+test('owner draft HTTP deletion remains blocked with SMTP/outbox feature flags disabled',async t=>{
+ const {d1,drafts,dispatcher}=fixture(t);
+ await seed(drafts);
+ await prepare(dispatcher,UUID.first);
+ const user={subject:owner.ownerSub};
+ const env={MAIL_DRAFTS_ENABLED:'true',MAIL_OUTBOX_ENABLED:'false',
+  MAIL_SEND_ENABLED:'false',MAIL_OWNER_SUB:owner.ownerSub,MAIL_DB:d1};
+ const url=new URL('https://station.example/api/mail/drafts/delete');
+ const request=new Request(url,{method:'POST'});
+ const readBody=async()=>({id:UUID.draft,revision:2});
+ const locked=await handleMailDraftApi({request,url,user,env,readBody});
+ assert.deepEqual(locked,{status:409,body:{error:'mail_draft_pending_delivery'}});
+ assert.equal((await drafts.read(owner,UUID.draft)).revision,2);
+ const forbidden=await handleMailDraftApi({request,url,user:{subject:peer.ownerSub},env,readBody});
+ assert.deepEqual(forbidden,{status:403,body:{error:'mail_owner_not_authorized'}});
 });
