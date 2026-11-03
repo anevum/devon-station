@@ -1,10 +1,12 @@
-// COMMS-12: manually saved, owner-only D1 drafts. No send transport, HTML preview or AI action.
+// COMMS-17: owner-only saved drafts with a separately gated, twice-confirmed outbound review.
+// No automatic sending, retries, HTML execution, browser credentials or agent actions.
 // DOM is composed exclusively with createElement/textContent/value, not innerHTML.
 (function(){
 'use strict';
 const path='/api/mail/drafts';
 const state={enabled:false,loaded:false,busy:false,items:[],selected:null,working:null,
- dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null};
+ dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null,
+ outgoingEnabled:false,pendingSend:null};
 const element=(tag,kind,text)=>{
  const el=document.createElement(tag);
  if(kind)el.className=kind;
@@ -16,6 +18,7 @@ const action=(text,name)=>{
  el.type='button';el.dataset.mailDraftAction=name;return el;
 };
 const uuid=()=>globalThis.crypto?.randomUUID?.();
+const deliveryIdValid=value=>typeof value==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(value);
 function isDraft(item){
  return item&&typeof item.id==='string'&&/^[0-9a-f-]{36}$/i.test(item.id)&&
  Number.isSafeInteger(item.revision)&&item.revision>=1&&Array.isArray(item.to)&&
@@ -57,10 +60,10 @@ function render(){
  const controls=element('div','mail-draft-buttons');
  const refresh=action('Reload','reload');
  const create=action('New Draft','create');
- refresh.disabled=create.disabled=state.busy;
+ refresh.disabled=create.disabled=state.busy||!!state.pendingSend;
  controls.append(refresh,create);bar.append(controls);root.append(bar);
  const info=element('p','mail-draft-live',state.busy?'Saving drafts…':
-  state.error||state.notice||'Drafts are private and never sent until sending is separately enabled.');
+  state.error||state.notice||(state.outgoingEnabled?'Outgoing mail requires a saved draft, separate preparation, and a second explicit confirmation.':'Drafts are private and never sent until sending is separately enabled.'));
  info.setAttribute('role','status');info.setAttribute('aria-live','polite');
  root.append(info);
  if(!state.loaded){root.append(element('p','mail-draft-empty','Loading protected drafts…'));return;}
@@ -70,13 +73,13 @@ function render(){
    const button=action((entry.subject||'(Untitled draft)')+' · '+new Date(entry.updatedAt).toLocaleString(),'select');
    button.className='mail-draft-entry';button.dataset.mailDraftId=entry.id;
    button.setAttribute('aria-pressed',String(entry.id===state.selected));
-   button.disabled=state.busy;listing.append(button);
+   button.disabled=state.busy||!!state.pendingSend;listing.append(button);
   }
   root.append(listing);
  }else if(!state.working)root.append(element('p','mail-draft-empty','No saved drafts. Create one to compose without sending.'));
  if(!state.working)return;
  const form=element('section','mail-draft-editor');form.setAttribute('aria-label','Unsent draft editor');
- form.append(element('p','mail-draft-notice','UNSENT DRAFT · From hello@devonakins.com · No send function'));
+ form.append(element('p','mail-draft-notice',state.outgoingEnabled?'UNSENT DRAFT · From hello@devonakins.com · Save before preparing to send':'UNSENT DRAFT · From hello@devonakins.com · No send function'));
  const fields=[
   {name:'to',label:'To (comma-separated addresses)',value:state.working.to.join(', '),tag:'input',max:5000},
   {name:'subject',label:'Subject',value:state.working.subject,tag:'input',max:512},
@@ -88,17 +91,44 @@ function render(){
   input.dataset.mailDraftField=field.name;
   input.value=field.value;input.maxLength=field.max;
   if(field.tag==='input')input.type='text';else input.rows=12;
-  input.disabled=state.busy;
+  input.disabled=state.busy||!!state.pendingSend;
   label.append(input);form.append(label);
  }
  const actions=element('div','mail-draft-buttons');
- const save=action(state.busy?'Saving…':'Save Draft','save');save.disabled=state.busy;
- const remove=action('Delete Draft','delete');remove.disabled=state.busy;
- actions.append(save,remove);form.append(actions);
- root.append(form);
+ const save=action(state.busy?'Saving…':'Save Draft','save');save.disabled=state.busy||!!state.pendingSend;
+ const remove=action('Delete Draft','delete');remove.disabled=state.busy||!!state.pendingSend;
+ actions.append(save,remove);
+ if(state.outgoingEnabled&&!state.pendingSend){
+  const review=action('Review Saved Draft for Sending','send-prepare');
+  review.disabled=state.busy||state.dirty||!state.working.to.length||!state.items.some(d=>sameSavedDraft(d,state.working));
+  actions.append(review);
+ }
+ form.append(actions);root.append(form);
+ if(state.pendingSend){
+  const outgoing=state.pendingSend;
+  const review=element('section','mail-outbox-review');review.setAttribute('aria-label','Review outgoing email before submission');
+  review.append(element('h3','mail-draft-heading','Outgoing email review'));
+  review.append(element('p','mail-draft-notice','Preparation never sends email. SMTP acceptance is not recipient delivery. Uncertain results must never be resent automatically.'));
+  const metadata=element('dl','mail-details');
+  for(const [title,value] of [['From','hello@devonakins.com'],['To',outgoing.draft.to.join(', ')],['Subject',outgoing.draft.subject||'(No subject)']]){
+   metadata.append(element('dt','',title),element('dd','',value));
+  }
+  review.append(metadata);
+  const body=element('pre','mail-outbox-text',outgoing.draft.body);body.style.whiteSpace='pre-wrap';body.style.overflowWrap='anywhere';
+  body.setAttribute('aria-label','Outgoing message plain text');review.append(body);
+  const phase=element('p','mail-draft-notice','Outbox state: '+outgoing.phase+(outgoing.attempted?' · A submission was attempted; do not retry.':''));
+  review.append(phase);
+  const controls=element('div','mail-draft-buttons');
+  if(state.outgoingEnabled&&outgoing.phase==='queued'&&!outgoing.attempted){
+   const send=action('Confirm and Submit Email','send-submit');send.disabled=state.busy;controls.append(send);
+  }
+  const status=action('Check Outbox Status','send-status');status.disabled=state.busy;controls.append(status);
+  const close=action('Return to Draft','send-close');close.disabled=state.busy;controls.append(close);
+  review.append(controls);root.append(review);
+ }
 }
 async function reload(){
- if(state.busy)return;
+ if(state.busy||state.pendingSend)return;
  state.busy=true;state.error=null;state.notice=null;render();
  try{
   const response=await api(path);
@@ -114,7 +144,7 @@ async function reload(){
  finally{state.busy=false;render();}
 }
 async function create(){
- if(state.busy)return;
+ if(state.busy||state.pendingSend)return;
  state.busy=true;state.error=null;state.notice=null;render();
  try{
   if(!state.pendingCreate)state.pendingCreate=uuid();
@@ -130,7 +160,7 @@ async function create(){
  finally{state.busy=false;render();}
 }
 async function save(){
- if(state.busy||!state.working)return;
+ if(state.busy||state.pendingSend||!state.working)return;
  capture();
  state.busy=true;state.error=null;state.notice=null;
  const d=state.working;
@@ -155,7 +185,7 @@ async function save(){
  }finally{state.busy=false;render();}
 }
 async function remove(){
- if(state.busy||!state.working)return;
+ if(state.busy||state.pendingSend||!state.working)return;
  if(!globalThis.confirm?.('Permanently delete this unsent draft?'))return;
  const d=state.working;
  state.busy=true;state.error=null;state.notice=null;render();
@@ -168,10 +198,98 @@ async function remove(){
   'Draft changed before deletion; reload it first.':'Could not confirm deletion. Draft may still exist.';}
  finally{state.busy=false;render();}
 }
+// The preview must exactly match a confirmed, saved D1 draft revision.
+function sameSavedDraft(stored,working){
+ return stored.id===working.id&&stored.revision===working.revision&&
+  stored.subject===working.subject&&stored.body===working.body&&
+  JSON.stringify(stored.to)===JSON.stringify(working.to);
+}
+function showSendStatus(s){
+ if(s.phase==='accepted')return 'SMTP accepted this message; recipient delivery is not verified. Original draft remains saved.';
+ if(s.phase==='claimed'||s.phase==='uncertain')return 'Delivery status is uncertain. Do not submit or prepare another copy without reconciliation.';
+ if(s.phase==='rejected'||s.phase==='failed')return 'SMTP attempt did not complete successfully. The original delivery cannot be retried.';
+ if(s.phase==='queued'&&s.attempted)return 'A previous submission received no reliable confirmation. No further submission is allowed from this review.';
+ if(s.phase==='queued')return 'Prepared for sending. No SMTP submission has occurred.';
+ return 'Outbox receipt unavailable. Do not retry. Check the outbox and resolve manually.';
+}
+async function prepareSend(){
+ if(state.busy||!state.outgoingEnabled||state.pendingSend||state.dirty||!state.working)return;
+ const draft=state.items.find(d=>sameSavedDraft(d,state.working));
+ if(!draft||!draft.to.length)return;
+ const deliveryId=uuid();
+ if(!deliveryIdValid(deliveryId)){state.error='Unable to generate a secure delivery ID. Nothing was sent.';render();return;}
+ const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body};
+ state.busy=true;state.error=null;state.notice=null;render();
+ try{
+  const result=await api('/api/mail/outbox/prepare',{deliveryId,draft:snapshot,approvedByOwner:true});
+  if(result?.receipt?.deliveryId!==deliveryId||result.receipt.state!=='queued')
+   throw Error('mail_outbox_invalid_receipt');
+  state.pendingSend={deliveryId,draft:snapshot,draftId:draft.id,revision:draft.revision,phase:'queued',attempted:false};
+  state.notice='Email prepared for review. Nothing has been submitted to SMTP.';
+ }catch(e){
+  // The server may have stored this exact snapshot even if its reply was lost.
+  // Preserve the ID; never silently create a replacement or send on preparation.
+  state.pendingSend={deliveryId,draft:snapshot,draftId:draft.id,revision:draft.revision,phase:'preparation-unconfirmed',attempted:false};
+  state.error=e.message==='mail_sign_in_required'?'Owner session expired; do not send.':
+   'Preparation receipt unavailable. No SMTP send was requested. Check this delivery in the outbox before proceeding.';
+ }finally{state.busy=false;render();}
+}
+async function submitSend(){
+ const delivery=state.pendingSend;
+ if(state.busy||!state.outgoingEnabled||!delivery||delivery.phase!=='queued'||delivery.attempted)return;
+ const summary='Submit this saved plain-text email from hello@devonakins.com to '+
+  delivery.draft.to.join(', ')+'? This is a real SMTP action if enabled. No automatic retry is possible.';
+ if(globalThis.confirm?.(summary)!==true)return;
+ delivery.attempted=true;delivery.phase='submitting';
+ state.busy=true;state.error=null;state.notice=null;render();
+ try{
+  const result=await api('/api/mail/outbox/submit',{deliveryId:delivery.deliveryId,confirmedByOwner:true});
+  if(result?.receipt?.deliveryId!==delivery.deliveryId||
+   !['accepted','rejected','failed','uncertain'].includes(result.receipt.state))
+   throw Error('mail_outbox_invalid_receipt');
+  delivery.phase=result.receipt.state;
+  state.notice=showSendStatus(delivery);
+ }catch(e){
+  delivery.phase='submit-unconfirmed';
+  state.error=e.message==='mail_sign_in_required'?'Owner session expired during submission. Check delivery status before any further action.':
+   'Submission result unavailable. The message may have been accepted. Never retry it; check outbox status.';
+ }finally{state.busy=false;render();}
+}
+async function checkSendStatus(){
+ const delivery=state.pendingSend;if(state.busy||!delivery)return;
+ state.busy=true;state.error=null;state.notice=null;render();
+ try{
+  const result=await api('/api/mail/outbox');
+  if(!Array.isArray(result?.outbox)||result.outbox.length>100)
+   throw Error('mail_outbox_invalid_response');
+  const matching=result.outbox.find(row=>row?.deliveryId===delivery.deliveryId);
+  if(!matching||!['queued','claimed','accepted','rejected','failed','uncertain'].includes(matching.state))
+   throw Error('mail_outbox_missing_receipt');
+  delivery.phase=matching.state;
+  state.notice=showSendStatus(delivery);
+ }catch(e){
+  state.error=e.message==='mail_sign_in_required'?'Owner session expired. Do not resend.':
+   'Cannot confirm this delivery in the outbox. Keep the delivery ID; do not create a new attempt.';
+ }finally{state.busy=false;render();}
+}
+function closeSendReview(){
+ const delivery=state.pendingSend;if(state.busy||!delivery)return;
+ if(['queued','claimed','uncertain','submit-unconfirmed','preparation-unconfirmed'].includes(delivery.phase)&&
+  globalThis.confirm?.('Leave this review? Its prepared or attempted delivery remains in the outbox and is not canceled. You must not resend without checking its status.')!==true)return;
+ state.pendingSend=null;
+ state.error=null;
+ state.notice='Review closed. The original saved draft and its separate outbox record have not been deleted or reconciled.';
+ render();
+}
 document.addEventListener('click',e=>{
  const clicked=e.target.closest?.('[data-mail-draft-action]');
  if(!clicked||!host()?.contains(clicked))return;
  const a=clicked.dataset.mailDraftAction;
+ if(a==='send-prepare'){void prepareSend();return;}
+ if(a==='send-submit'){void submitSend();return;}
+ if(a==='send-status'){void checkSendStatus();return;}
+ if(a==='send-close'){closeSendReview();return;}
+ if(state.pendingSend)return;
  if(a==='save'){void save();return;}
  if(a==='delete'){void remove();return;}
  if(a==='create'||a==='reload'||a==='select'){
@@ -187,18 +305,19 @@ document.addEventListener('click',e=>{
  }
 });
 document.addEventListener('input',e=>{
- if(!host()?.contains(e.target)||!e.target?.dataset?.mailDraftField)return;
+ if(!host()?.contains(e.target)||!e.target?.dataset?.mailDraftField||state.pendingSend)return;
  capture();state.dirty=true;state.pendingSave=null;
 });
 globalThis.StationDrafts=Object.freeze({
- mount(container,enabled){
+ mount(container,enabled,outgoingEnabled=false){
   if(!container)return;
   state.enabled=enabled===true;
+  state.outgoingEnabled=state.enabled&&outgoingEnabled===true;
   if(!state.enabled)return;
   if(!state.loaded&&!state.busy)void reload();
   else render();
  }
 });
 const initial=host();
-if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true');
+if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true',initial.dataset.outgoingEnabled==='true');
 })();
