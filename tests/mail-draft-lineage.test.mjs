@@ -116,7 +116,7 @@ test('scope boundary, unique-index scope and legacy outbox inserts remain intact
  assert.equal((await outbox.list()).length,2);
  assert.equal(sqlite.prepare('SELECT draft_id FROM comms_outbox WHERE delivery_id=?').get(legacyId).draft_id,null);
  const ownerRecord=sqlite.prepare('SELECT draft_id,draft_revision FROM comms_outbox WHERE delivery_id=?').get(UUID.first);
- assert.deepEqual(ownerRecord,{draft_id:UUID.draft,draft_revision:2});
+ assert.equal(ownerRecord.draft_id,UUID.draft);assert.equal(ownerRecord.draft_revision,2);
  const row=await outbox.read(UUID.first);assert.equal(row.draftId,UUID.draft);
  assert(!JSON.stringify(await outbox.list()).includes(sample.body),'listing never includes saved body or recipients');
 });
