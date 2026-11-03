@@ -34,6 +34,9 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
    if(input?.confirmedByOwner!==true ||
     Object.keys(input).some(key=>!['deliveryId','confirmedByOwner'].includes(key)))
     return response('mail_send_confirmation_required',400);
+   if(typeof input.deliveryId!=='string'||
+    !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deliveryId))
+    return response('outbox_invalid_id',400);
    // A separately prepared immutable delivery is required; submit never enqueues.
    // Any outcome after the claim is terminal or non-retryable, including uncertainty.
    submitAttempted=true;
@@ -53,6 +56,8 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
   if(error?.status===413)return response('mail_outbox_payload_too_large',413);
   if(error?.status===400)return response('invalid_mail_outbox_request',400);
   // Never expose SMTP replies, credential values, SQL, or message plaintext.
-  return response(submitAttempted?'mail_send_operation_failed':'mail_outbox_operation_failed',submitAttempted?502:400);
+  if(submitAttempted)return {status:502,body:{error:'mail_send_operation_failed',
+   deliveryUncertain:true,automaticRetry:false,checkOutboxStatus:true}};
+  return response('mail_outbox_operation_failed',400);
  }
 }
