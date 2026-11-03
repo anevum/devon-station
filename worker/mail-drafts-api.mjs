@@ -6,7 +6,7 @@ const KNOWN_ERRORS=new Set([
  'invalid_mail_draft_id','invalid_mail_draft_revision','invalid_mail_draft_payload',
  'invalid_mail_draft_recipient','invalid_mail_draft_scope','mail_draft_not_found',
  'mail_draft_conflict','mail_draft_limit','mail_drafts_storage_unavailable',
- 'mail_draft_pending_delivery'
+ 'mail_draft_pending_delivery','mail_draft_delivery_locked'
 ]);
 export const mailDraftsEnabled=env=>env?.MAIL_DRAFTS_ENABLED==='true' &&
  !!env.MAIL_DB && typeof env.MAIL_DB.prepare==='function' &&
@@ -23,22 +23,24 @@ export async function handleMailDraftApi({request,url,user,env,readBody}){
    const body=await readBody(request,4096);
    return {status:200,body:{draft:await store.create(scope,body.id)}};
   }
-  if(url.pathname==='/api/mail/drafts/save' && request.method==='POST'){
-   const body=await readBody(request,148000);
-   return {status:200,body:{draft:await store.save(scope,body)}};
-  }
-  if(url.pathname==='/api/mail/drafts/delete' && request.method==='POST'){
-   const body=await readBody(request,4096);
-   // Inspect the actual D1 schema, not a mutable feature flag: turning SMTP
-   // off must not permit deleting a draft whose delivery is already pending.
-   // Legacy draft-only installations retain deletion without an outbox table.
+  // Do not trust mutable feature flags when deciding whether a draft already
+  // has a durable delivery. With any outbox table, saves and deletes must
+  // consult the actual owner-scoped lineage atomically in SQLite.
+  async function protectedStore(){
    let hasOutbox;
    try{
     const row=await env.MAIL_DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='comms_outbox'").first();
     hasOutbox=row?.name==='comms_outbox';
-   }catch{return status('mail_draft_storage_failed',502);}
-   const guarded=createD1DraftStore(env.MAIL_DB,{protectPendingOutbox:hasOutbox});
-   return {status:200,body:await guarded.remove(scope,body)};
+   }catch{throw Object.assign(new Error('mail_draft_storage_failed'),{code:'mail_draft_storage_failed',status:502});}
+   return createD1DraftStore(env.MAIL_DB,{protectPendingOutbox:hasOutbox,protectLinkedOutbox:hasOutbox});
+  }
+  if(url.pathname==='/api/mail/drafts/save' && request.method==='POST'){
+   const body=await readBody(request,148000);
+   return {status:200,body:{draft:await (await protectedStore()).save(scope,body)}};
+  }
+  if(url.pathname==='/api/mail/drafts/delete' && request.method==='POST'){
+   const body=await readBody(request,4096);
+   return {status:200,body:await (await protectedStore()).remove(scope,body)};
   }
   return status('method_not_allowed',405);
  }catch(e){
