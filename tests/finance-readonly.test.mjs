@@ -167,4 +167,5 @@ test('missing pagination metadata or malformed cursor returns unavailable',async
  const result=await financialSummary(env,user,get);
  assert.equal(result.sources.mercury.status,'unavailable');
  assert.throws(()=>mercuryProjection({accounts:mercury.accounts}));
+ assert.throws(()=>mercuryProjection({accounts:mercury.accounts,page:{previousPage:null}}));
 });
