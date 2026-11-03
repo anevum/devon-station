@@ -11,7 +11,11 @@ const EXPECTED_MODULES = [
   'worker/notifications.mjs', 'worker/state.mjs', 'worker/portfolio.mjs',
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
-  'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
+  'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs',
+  'worker/mail-api.mjs',
+  ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
+    'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
+    'mail-d1-store.mjs','mail-sqlite-store.mjs'].map(name => 'src/communications/' + name)
 ];
 const LEGACY_SHA256 = 'b2974dde4ca177420caecd810b8f008d582c93131317c6a822b5bb821c3c8c94';
 const ACCESS_SHA256 = '1f3127c82f2079f82685f8f4ee56a82c390cf36dd7ef36273b4623e9ab3c9654';
@@ -54,7 +58,9 @@ function sortedDigestMap(entries) {
     .map(([name, bytes]) => [name, sha256(bytes)]));
 }
 function unpackAssets(entry, requireHostedMarker = true) {
-  const match = entry.match(/^import \{createStation\} from '\.\/worker\/index\.mjs';\nconst assets=(\{[^\n]*\});\nexport default createStation\(assets\);\n$/);
+  const candidatePattern = /^import \{connect\} from 'cloudflare:sockets';\nimport \{createStation\} from '\.\/worker\/index\.mjs';\nconst assets=(\{[^\n]*\});\nexport default createStation\(assets,undefined,undefined,connect\);\n$/;
+  const fallbackPattern = /^import \{createStation\} from '\.\/worker\/index\.mjs';\nconst assets=(\{[^\n]*\});\nexport default createStation\(assets\);\n$/;
+  const match = entry.match(requireHostedMarker ? candidatePattern : fallbackPattern);
   insist(match, 'unexpected protected Worker entry template');
   const assets = JSON.parse(match[1]);
   insist(Object.keys(assets).length === 7 && Object.keys(assets).every(p => ALLOWED_ASSETS.includes(p)), 'unreviewed protected asset names');

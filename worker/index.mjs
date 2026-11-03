@@ -3,6 +3,7 @@ import {authorizedIdentity} from './access.mjs';
 import {validEndpoint,deviceId,endpointHash,sendGenericPush,PushDispatchError,safePushServiceFailure} from './notifications.mjs';
 import {getOwnerState,saveOwnerState} from './state.mjs';
 import {getCachedPortfolio,refreshPortfolio} from './portfolio.mjs';
+import {handleMailApi} from './mail-api.mjs';
 const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 const csp="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const pushReady=env=>Boolean(env.DB&&env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT);
@@ -30,13 +31,14 @@ async function readBody(request,limit=8192){
  const bytes=new Uint8Array(used);let pos=0;for(const item of chunks){bytes.set(item,pos);pos+=item.byteLength}
  try{const text=new TextDecoder('utf-8',{fatal:true}).decode(bytes);const value=JSON.parse(text);if(!value||typeof value!=='object'||Array.isArray(value))throw Error();return value}catch{throw {status:400}}
 }
-export function createStation(assets,auth=authorizedIdentity,transport=fetch){return {async fetch(request,env,ctx){try{
+export function createStation(assets,auth=authorizedIdentity,transport=fetch,imapSocket=null){return {async fetch(request,env,ctx){try{
  const url=new URL(request.url);if(url.origin!==env.APP_ORIGIN)return json({error:'wrong_origin'},403);
  const publicScript=publicServiceWorker(request,env,url,assets);if(publicScript)return publicScript;
  let user;try{user=await auth(request,env,ctx)}catch{return json({error:'owner_sign_in_required'},401)}
  if(user?.email!==env.OWNER_EMAIL||!user.subject)return json({error:'owner_only'},403);
  if(!['GET','HEAD','POST','DELETE'].includes(request.method))return json({error:'method_not_allowed'},405);
  const writes=['POST','DELETE'].includes(request.method);if(writes&&(request.headers.get('Origin')!==url.origin||request.headers.get('Content-Type')?.split(';')[0]!=='application/json'))return json({error:'same_origin_json_required'},403);
+ if(url.pathname.startsWith('/api/mail/')){const result=await handleMailApi({request,url,user,env,connect:imapSocket});return json(result.body,result.status);}
  if(url.pathname==='/api/session'&&request.method==='GET')return json({authenticated:true,mode:'owner',version:'0.4.8',snapshot:true,persistentStorage:!!env.DB});
  if(url.pathname==='/api/workspaces'&&request.method==='GET')return json(await workspaceScopes(user,env));
  if(['/api/workspace','/api/workspace/propose','/api/workspace/decide','/api/workspace/review','/api/workspace/reconcile','/api/workspace/backup','/api/workspace/restore-review','/api/workspace/restore'].includes(url.pathname)){

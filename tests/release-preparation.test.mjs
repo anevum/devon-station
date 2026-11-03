@@ -14,7 +14,11 @@ const modules = [
   'worker/notifications.mjs', 'worker/state.mjs', 'worker/portfolio.mjs',
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
-  'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs'
+  'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs',
+  'worker/mail-api.mjs',
+  ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
+    'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
+    'mail-d1-store.mjs','mail-sqlite-store.mjs'].map(name=>'src/communications/'+name)
 ];
 function syntheticCandidate() {
   const assets = Object.fromEntries([
@@ -24,7 +28,7 @@ function syntheticCandidate() {
     path === '/LICENSE.txt' ? 'GNU AFFERO GENERAL PUBLIC LICENSE' :
     path === '/index.html' ? 'const SNAPSHOT={"privateDataLoaded":false}' : 'synthetic'}]));
   const candidate = Object.fromEntries(modules.map(path => [path, '// synthetic fixture ' + path]));
-  candidate['index.mjs'] = "import {createStation} from './worker/index.mjs';\nconst assets=" + JSON.stringify(assets) + ";\nexport default createStation(assets);\n";
+  candidate['index.mjs'] = "import {connect} from 'cloudflare:sockets';\nimport {createStation} from './worker/index.mjs';\nconst assets=" + JSON.stringify(assets) + ";\nexport default createStation(assets,undefined,undefined,connect);\n";
   candidate['worker/access.mjs'] = read('worker/access.mjs');
   candidate['worker/notifications.mjs'] = read('worker/notifications.mjs');
   return candidate;
@@ -38,7 +42,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
-  assert.equal(first.manifest.candidate.moduleCount, 12);
+  assert.equal(first.manifest.candidate.moduleCount, 21);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
   assert.equal(first.manifest.intendedIsolatedRuntime.verifiedOnLiveOctoberRuntime, false);
