@@ -2,6 +2,9 @@
 // SQL parameters are bound, and the owner subject is supplied only by signed Access.
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAIL=/^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
+// One canonical recipient grammar for D1 drafts, MIME preparation and SMTP envelope.
+export const isValidMailAddress=value=>typeof value==='string'&&value.length>=3&&value.length<=254&&
+ MAIL.test(value)&&!value.includes('..');
 const ID=/^[a-z][a-z0-9-]{0,62}$/;
 const MAX_DRAFTS=20;
 const error=(code,status)=>Object.assign(new Error(code),{code,status});
@@ -29,8 +32,7 @@ export function validateDraftPayload(value){
   throw error('invalid_mail_draft_payload',400);
  const seen=new Set();
  const to=value.to.map(address=>{
-   if(typeof address!=='string'||address.length<3||address.length>254||!MAIL.test(address)||
-      address.includes('..')||seen.has(address.toLowerCase()))
+   if(!isValidMailAddress(address)||seen.has(address.toLowerCase()))
      throw error('invalid_mail_draft_recipient',400);
    seen.add(address.toLowerCase());return address;
  });
