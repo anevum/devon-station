@@ -24,21 +24,38 @@ function parseInternalDate(line) {
   return new Date(local.valueOf() - offset * 60000).toISOString();
 }
 
+// FETCH attributes may occur on either side of the one bounded message literal.
+// Parse the complete frame, rather than searching for field names inside quoted values.
 async function parseFetch(line, bytes, decodeMime) {
-  if (!/^\* [0-9]+ FETCH \(/i.test(line) || !/\bBODY(?:\.PEEK)?\[\] \{[0-9]+\}$/i.test(line)) reject('imap_invalid_fetch');
-  const matches = [...line.matchAll(/\bUID ([0-9]+)\b/gi)];
-  if (matches.length !== 1 || !UID(Number(matches[0][1]))) reject('imap_invalid_fetch');
-  const flagsField = /\bFLAGS \(([^()]*)\)/i.exec(line);
-  if (!flagsField) reject('imap_invalid_fetch');
+  const frame = /^\* [1-9][0-9]* FETCH \((.*)\)$/i.exec(line);
+  if (!frame || line.length > MAX_LINE) reject('imap_invalid_fetch');
+  let rest = frame[1];
+  const fields = new Map();
+  while (rest) {
+    const field = /^(UID [0-9]+|FLAGS \([^(){}"\[\]\x00-\x20]*(?: [^(){}"\[\]\x00-\x20]+)*\)|INTERNALDATE "[^"\r\n]+"|BODY(?:\.PEEK)?\[\] \{[0-9]+\})/i.exec(rest);
+    if (!field) reject('imap_invalid_fetch');
+    const key = /^[a-z]+/i.exec(field[1])[0].toUpperCase();
+    if (fields.has(key)) reject('imap_invalid_fetch');
+    fields.set(key,field[1]);
+    rest = rest.slice(field[1].length);
+    if (rest && !rest.startsWith(' ')) reject('imap_invalid_fetch');
+    if (rest) {rest = rest.slice(1); if (!rest) reject('imap_invalid_fetch');}
+  }
+  if (fields.size !== 4 || !['UID','FLAGS','INTERNALDATE','BODY'].every(key=>fields.has(key)))
+    reject('imap_invalid_fetch');
+  const uid = Number(fields.get('UID').slice(4));
+  if (!UID(uid) || Number(/\{([0-9]+)\}$/.exec(fields.get('BODY'))[1]) !== bytes.byteLength)
+    reject('imap_invalid_fetch');
+  const flagValues = fields.get('FLAGS').slice(7,-1).split(' ');
   const flags = [];
   for (const [wire, name] of [['\\Seen','seen'], ['\\Answered','answered'], ['\\Flagged','flagged'], ['\\Draft','draft']]) {
-    if (flagsField[1].split(' ').some(x => x.toLowerCase() === wire.toLowerCase())) flags.push(name);
+    if (flagValues.some(x => x.toLowerCase() === wire.toLowerCase())) flags.push(name);
   }
+  const timestamp = parseInternalDate(fields.get('INTERNALDATE'));
   const decoded = await decodeMime(bytes);
   if (!decoded || typeof decoded !== 'object' || !ascii(decoded.from, 254) ||
       typeof decoded.subject !== 'string' || typeof decoded.text !== 'string') reject('imap_invalid_mime');
-  return {uid:Number(matches[0][1]),from:decoded.from,subject:decoded.subject,text:decoded.text,
-    timestamp:parseInternalDate(line),flags};
+  return {uid,from:decoded.from,subject:decoded.subject,text:decoded.text,timestamp,flags};
 }
 
 function validateCommand(command) {
@@ -139,9 +156,11 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
               const size=Number(length[1]);
               if (!Number.isSafeInteger(size) || size>LIMIT) reject('imap_literal_limit');
               const raw=await literal(size);received+=size;
-              messages.push(await parseFetch(response,raw,decodeMime));
+              const suffix=await line();received+=suffix.length+2;
+              if (received>MAX_REPLY) reject('imap_response_limit');
+              messages.push(await parseFetch(response+suffix,raw,decodeMime));
             } else if (kind==='fetch') {
-              if (response!==')' && !/^\* [0-9]+ EXISTS$/i.test(response)) reject('imap_invalid_fetch');
+              if (!/^\* [0-9]+ EXISTS$/i.test(response)) reject('imap_invalid_fetch');
             } else {
               lines.push(response);
             }
@@ -152,7 +171,12 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
           async exchange(command, {signal:stepSignal}={}) {
             if (stepSignal?.aborted || signal?.aborted || closed) fail('imap_session_cancelled');
             const kind=validateCommand(command);
-            return exchangeRaw(command,kind);
+            try {return await exchangeRaw(command,kind);}
+            catch (error) {
+              signal?.removeEventListener('abort',abort);
+              await cleanup();
+              throw error;
+            }
           },
           async close(){signal?.removeEventListener('abort',abort);await cleanup();}
         });

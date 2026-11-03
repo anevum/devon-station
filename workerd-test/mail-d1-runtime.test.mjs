@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare } from 'miniflare';
+import { createStation } from '../worker/index.mjs';
 import { createD1MailStore } from '../src/communications/mail-d1-store.mjs';
 
 // This runs the actual pinned local Miniflare/workerd D1 binding, not a Node SQLite double.
@@ -129,4 +130,58 @@ test(`workerd ${compatibilityDate}: COMMS-07 real local D1 snapshot transaction 
   } finally {
     await mf.dispose();
   }
+});
+
+// Complete HTTP -> socket framing -> MIME -> real disposable D1 acceptance.
+test(`workerd ${compatibilityDate}: reordered FETCH commits only a complete frame through owner API`,async()=>{
+ const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("isolated pipeline")}}',
+  compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['MAIL_PIPELINE']});
+ try{
+  const db=await mf.getD1Database('MAIL_PIPELINE');
+  const migration=await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql',import.meta.url),'utf8');
+  for(const sql of migration.split('\n').filter(line=>!/^\s*--/.test(line)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
+   await db.prepare(sql).run();
+  const store=createD1MailStore(db),before=await store.readSnapshot(scope);
+  const base='https://station.example';
+  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
+   MAIL_IMAP_ADDRESS:'hello@devonakins.com',MAIL_IMAP_PASSWORD:'synthetic-only',MAIL_DB:db};
+  const payload=new TextEncoder().encode('From: author@example.org\r\nSubject: Synthetic pipeline\r\nContent-Type: text/plain\r\n\r\nInert body');
+  for(const complete of [false,true]){
+   let controller,closed=false;const commands=[];
+   const respond=value=>{
+    const data=typeof value==='string'?new TextEncoder().encode(value):value;
+    for(let i=0;i<data.length;i+=3)controller.enqueue(data.slice(i,i+3));
+   };
+   const connect=(target,options)=>{
+    assert.deepEqual(target,{hostname:'imap.purelymail.com',port:993});
+    assert.deepEqual(options,{secureTransport:'on'});
+    return {opened:Promise.resolve(),readable:new ReadableStream({start(c){controller=c;respond('* OK ready\r\n');}}),
+     writable:new WritableStream({write(chunk){
+      const command=new TextDecoder().decode(chunk),tag=command.slice(0,5);commands.push(command);
+      if(command.includes(' LOGIN '))respond(tag+' OK authenticated\r\n');
+      else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] valid\r\n'+tag+' OK selected\r\n');
+      else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK found\r\n');
+      else if(command.includes('UID FETCH')){
+       respond('* 1 FETCH (BODY[] {'+payload.length+'}\r\n');respond(payload);
+       if(complete)respond(' UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500")\r\n');
+       respond(tag+' OK fetched\r\n');
+      }else assert.fail('unexpected command');
+     }}),async close(){if(!closed){closed=true;controller.close();}}};
+   };
+   const station=createStation({},async()=>({email:'owner@example.org',subject:'synthetic-owner'}),fetch,connect);
+   const result=await station.fetch(new Request(base+'/api/mail/sync',{method:'POST',
+    headers:{Origin:base,'Content-Type':'application/json'},body:'{}'}),env);
+   assert.equal(closed,true);
+   assert(commands.every(x=>!/\b(SELECT|STORE|APPEND|EXPUNGE)\b/.test(x)));
+   if(!complete){
+    assert.equal(result.status,502);assert.deepEqual(await result.json(),{error:'mail_operation_failed'});
+    assert.deepEqual(await store.readSnapshot(scope),before);
+   }else{
+    assert.equal(result.status,200);assert.equal((await result.json()).imported,1);
+    const saved=await store.readSnapshot(scope);
+    assert.deepEqual(saved.cursor,{uidValidity:7,highestUid:1});assert.equal(saved.revision,1);
+    assert.equal(saved.records[0].text,'Inert body\n');assert.deepEqual(saved.records[0].flags,['seen']);
+   }
+  }
+ }finally{await mf.dispose();}
 });

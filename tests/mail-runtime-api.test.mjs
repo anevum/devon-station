@@ -16,7 +16,7 @@ function d1Double(db) {
    catch(e){db.exec('ROLLBACK');throw e;}
  }};
 }
-function socketMock(payload=mime) {
+function socketMock(payload=mime,{trailingMetadata=false,complete=true}={}) {
  let controller,closed=false,calls=[];
  const respond = bytes => {const raw=typeof bytes==='string'?new TextEncoder().encode(bytes):bytes;
   for(let pos=0;pos<raw.length;pos+=11)controller.enqueue(raw.slice(pos,pos+11));};
@@ -30,8 +30,10 @@ function socketMock(payload=mime) {
     else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] selected\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID FETCH')) {
-      respond('* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {'+payload.byteLength+'}\r\n');
-      respond(payload);respond(')\r\n'+tag+' OK done\r\n');
+      respond((trailingMetadata?'* 1 FETCH (BODY[] {':'* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {')+payload.byteLength+'}\r\n');
+      respond(payload);
+      if(complete)respond((trailingMetadata?' UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500"': '')+')\r\n');
+      respond(tag+' OK done\r\n');
     } else throw new Error('unexpected command');
    }}),
    async close(){if(!closed){closed=true;controller.close();}}
@@ -105,4 +107,23 @@ test('oversize indexed text fails before any D1 transaction, retaining cursor fo
  const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
  assert.equal((await inbox.json()).messages.length,0);
  db.close();
+});
+
+test('reordered FETCH persists through owner API, while premature tagged OK cannot advance D1',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ try{
+  const broken=socketMock(mime,{trailingMetadata:true,complete:false});
+  const rejected=await createStation({},auth,fetch,broken.connect).fetch(req('/api/mail/sync','POST'),env(binding));
+  assert.equal(rejected.status,502);assert.deepEqual(await rejected.json(),{error:'mail_operation_failed'});
+  assert.equal(binding.batches,0);assert.equal(broken.closed(),true);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM comms_ro_mailboxes').get().n,0);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM comms_ro_messages').get().n,0);
+  const valid=socketMock(mime,{trailingMetadata:true});
+  const station=createStation({},auth,fetch,valid.connect);
+  const accepted=await station.fetch(req('/api/mail/sync','POST'),env(binding));
+  assert.equal(accepted.status,200);assert.equal((await accepted.json()).imported,1);
+  assert.equal(binding.batches,1);assert.equal(valid.closed(),true);
+  const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
+  assert.equal((await inbox.json()).messages[0].text,'An inert message.\n');
+ }finally{db.close();}
 });

@@ -6,7 +6,7 @@ const settings = {host:'imap.purelymail.com',port:993,servername:'imap.purelymai
 const bytes = new TextEncoder();
 const message = bytes.encode('From: author@example.org\r\nSubject: Test\r\n\r\nMessage content');
 const decodeMime = value => {assert.deepEqual(value,message);return {from:'author@example.org',subject:'Test',text:'Message content'};};
-function server({badUid=false, oversized=false, malformed=false, noLogin=false, onCommand} = {}) {
+function server({badUid=false, oversized=false, malformed=false, noLogin=false, fetchPrefix, fetchSuffix, onCommand} = {}) {
   let controller, closed=false, calls=[], opts;
   const respond = source => {const data=typeof source==='string'?bytes.encode(source):source;
     for(let i=0;i<data.length;i+=7)controller.enqueue(data.slice(i,i+7));};
@@ -21,9 +21,10 @@ function server({badUid=false, oversized=false, malformed=false, noLogin=false, 
       if(cmd.includes('UID SEARCH')){respond('* SEARCH 1\r\n'+tag+' OK done\r\n');return;}
       if(cmd.includes('UID FETCH')) {
         const size=oversized?262145:message.length;
-        respond('* 1 FETCH (UID '+(badUid?'garbage':'1')+' FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 10:20:00 -0500" BODY[] {'+size+'}\r\n');
+        respond((fetchPrefix??('* 1 FETCH (UID '+(badUid?'garbage':'1')+' FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 10:20:00 -0500" BODY[] {'+size+'}'))+'\r\n');
         if(!oversized)respond(message);
-        respond((malformed?'oops':')')+'\r\n'+tag+' OK fetched\r\n');return;
+        if(fetchSuffix!==false)respond((fetchSuffix??(malformed?'oops':')'))+'\r\n');
+        respond(tag+' OK fetched\r\n');return;
       }
       throw new Error('unauthorized command '+cmd);
     }});
@@ -74,4 +75,49 @@ test('login denial closes the socket without exposing credentials',async()=>{
 test('abort prevents subsequent commands and closes socket',async()=>{
  const s=server(),controller=new AbortController(), conn=await open(s,{signal:controller.signal});controller.abort();
  await assert.rejects(conn.exchange('EXAMINE "INBOX"'),/imap_session_cancelled/);assert.equal(s.closed(),true);
+});
+
+test('FETCH accepts metadata following a fragmented literal in arbitrary requested-field order',async()=>{
+ for(const fields of [
+  {fetchPrefix:'* 1 FETCH (BODY[] {'+message.length+'}',fetchSuffix:' UID 1 INTERNALDATE "02-Nov-2026 10:20:00 -0500" FLAGS (\\Seen))'},
+  {fetchPrefix:'* 1 FETCH (FLAGS (\\Seen) BODY[] {'+message.length+'}',fetchSuffix:' INTERNALDATE "02-Nov-2026 10:20:00 -0500" UID 1)'}
+ ]){
+  const s=server(fields),conn=await open(s);
+  try{
+   const result=await conn.exchange('UID FETCH 1 (UID FLAGS INTERNALDATE BODY.PEEK[])');
+   assert.equal(result.messages[0].uid,1);
+   assert.deepEqual(result.messages[0].flags,['seen']);
+   assert.equal(result.messages[0].timestamp,'2026-11-02T15:20:00.000Z');
+  }finally{await conn.close();}
+ }
+});
+test('FETCH rejects missing, duplicate, unknown or injected attributes and incomplete closures',async()=>{
+ const prefix='* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 10:20:00 -0500" BODY[] {'+message.length+'}';
+ for(const fetchSuffix of [false, '', ' UID 2)', ' FLAGS ())', ' RFC822.SIZE 42)', ') extra', '))',
+  ' BODY[] {1}', ' UID 1)']){
+  const s=server({fetchPrefix:prefix,fetchSuffix}),conn=await open(s);
+  try{
+   await assert.rejects(conn.exchange('UID FETCH 1 (UID FLAGS INTERNALDATE BODY.PEEK[])'),/imap_invalid_fetch/);
+   assert.equal(s.closed(),true);
+   await assert.rejects(conn.exchange('EXAMINE "INBOX"'),/imap_session_cancelled/);
+  }
+  finally{await conn.close();}
+ }
+});
+
+test('all 24 requested FETCH attribute orders preserve message identity and empty flags',async()=>{
+ const attributes=['UID 1','FLAGS ()','INTERNALDATE "02-Nov-2026 10:20:00 -0500"','BODY[] {'+message.length+'}'];
+ const permutations=values=>values.length?values.flatMap((value,i)=>permutations(values.filter((_,j)=>i!==j)).map(tail=>[value,...tail])):[[]];
+ for(const order of permutations(attributes)){
+  const bodyIndex=order.indexOf(attributes[3]);
+  const fetchPrefix='* 1 FETCH ('+order.slice(0,bodyIndex+1).join(' ');
+  const tail=order.slice(bodyIndex+1);
+  const fetchSuffix=(tail.length?' '+tail.join(' '):'')+')';
+  const s=server({fetchPrefix,fetchSuffix}),conn=await open(s);
+  try{
+   const result=await conn.exchange('UID FETCH 1 (UID FLAGS INTERNALDATE BODY.PEEK[])');
+   assert.equal(result.messages[0].uid,1);assert.deepEqual(result.messages[0].flags,[]);
+   assert.equal(result.messages[0].text,'Message content');
+  }finally{await conn.close();}
+ }
 });

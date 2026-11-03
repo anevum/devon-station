@@ -73,8 +73,6 @@ test('server revision conflict keeps unsaved text available instead of claiming 
  x.dom.window.close();
 });
 test('draft support missing from status never calls draft endpoint or shows a composer',async()=>{
- const x=setup(); // This fixture explicitly enables drafts; test direct mail-only rendering separately.
- x.dom.window.close();
  const dom=new JSDOM('<section id="station-mail"></section>',{url:'https://station.example/#mail',runScripts:'outside-only'});
  const calls=[];
  dom.window.fetch=async(path)=>{
