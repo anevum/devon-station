@@ -52,7 +52,7 @@
     const header=node('div','mail-header');
     const who=node('div','mail-identity');
     who.append(node('strong','', 'hello@devonakins.com'));
-    const sub=node('span','mail-small',state.status?.configured?'Purelymail · Owner-only · Read-only':'Purelymail · Setup incomplete');
+    const sub=node('span','mail-small',state.status?.outgoingEnabled===true?'Purelymail · Owner-only · Outgoing configured':state.status?.configured?'Purelymail · Owner-only · Read-only':'Purelymail · Setup incomplete');
     who.append(sub);
     const controls=node('div','mail-controls');
     const refresh=button(state.phase==='syncing'?'Synchronizing…':state.hasMore===true?'Sync Next Batch':'Synchronize Inbox','sync');
@@ -69,7 +69,7 @@
     header.append(who,controls);
     root.append(header);
     if(state.status?.draftsEnabled){const draftHost=node('section','mail-drafts-host');draftHost.id='mail-drafts';draftHost.dataset.draftsEnabled='true';draftHost.setAttribute('aria-label','Stored unsent drafts');root.append(draftHost);}
-    const notice=node('p','mail-banner',state.status?.draftsEnabled?'Sending, HTML and attachments are not enabled in this release. Drafts are stored privately but never sent.':'Receiving is read-only. Sending, drafts, HTML and attachments are not enabled in this release.');
+    const notice=node('p','mail-banner',state.status?.draftsEnabled && state.status?.outgoingEnabled===true?'Outgoing mail requires a separately saved draft, two explicit owner actions, and a confirmed SMTP outbox. Recipient delivery is not guaranteed. HTML and attachments remain unavailable.':state.status?.draftsEnabled?'Sending, HTML and attachments are not enabled in this release. Drafts are stored privately but never sent.':'Receiving is read-only. Sending, drafts, HTML and attachments are not enabled in this release.');
     root.append(notice);
     const live=node('p','mail-live');
     live.setAttribute('role','status');
@@ -138,7 +138,7 @@
     }
     body.append(listing,reader);
     root.append(body);
-    if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true);
+    if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true);
   }
   async function start(){
     if(state.busy)return;
