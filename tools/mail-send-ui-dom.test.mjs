@@ -157,13 +157,18 @@ test('fresh browser instance inspects durable receipts with sending disabled, wi
 
 test('malformed stored receipt fails closed and never becomes executable DOM',async()=>{
  const x=setup({outgoing:false});
- x.outbox.push({deliveryId:'<script>injected()</script>',state:'accepted',
+ x.outbox.push({deliveryId,state:'accepted',
   createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
  await wait();
+ x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ assert(x.doc.querySelector('[aria-label="Durable outbox status history"]').textContent.includes(deliveryId));
+ x.outbox.splice(0,1,{deliveryId:'<script>injected()</script>',state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
  x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
  const history=x.doc.querySelector('[aria-label="Durable outbox status history"]');
  assert(history.textContent.includes('could not be verified'));
  assert(!history.textContent.includes('injected()'));
+ assert(!history.textContent.includes(deliveryId),'unverified read must clear stale status');
  assert.equal(history.querySelectorAll('script,img,iframe,a[href]').length,0);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
