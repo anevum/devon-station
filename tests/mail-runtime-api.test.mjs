@@ -42,7 +42,7 @@ function socketMock(payload=mime,{trailingMetadata=false,complete=true}={}) {
  return {connect,calls:()=>calls,closed:()=>closed};
 }
 function env(db){return {OWNER_EMAIL:'owner@example.org',APP_ORIGIN:'https://station.example',
-  MAIL_OWNER_SUB:'trusted-owner-sub',MAIL_ENABLED:'true',MAIL_IMAP_ADDRESS:'hello@devonakins.com',
+  MAIL_OWNER_SUB:'trusted-owner-sub',MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_ENABLED:'true',MAIL_IMAP_ADDRESS:'hello@devonakins.com',
   MAIL_IMAP_PASSWORD:'synthetic-password',MAIL_DB:db};}
 const auth=async()=>({email:'owner@example.org',subject:'trusted-owner-sub'});
 const base='https://station.example';
@@ -70,6 +70,10 @@ test('owner-triggered IMAP TLS read-only sync persists in isolated D1 and return
  assert.equal(sync.status,200);const receipt=await sync.json();assert.equal(receipt.imported,1);
  assert.equal(receipt.cursor.uidValidity,7);
  assert.equal(binding.batches,1);
+ const stored=db.prepare('SELECT from_address,subject,body_text FROM comms_ro_messages').get();
+ assert.equal(stored.from_address,'');assert.equal(stored.subject,'');
+ assert.equal(JSON.parse(stored.body_text).alg,'A256GCM');
+ assert.doesNotMatch(stored.body_text,/author@example.org|An actual test|An inert message/);
  const inbox=await station.fetch(req('/api/mail/inbox?limit=10'),env(binding));
  assert.equal(inbox.status,200);const response=await inbox.json();
  assert.equal(response.messages.length,1);

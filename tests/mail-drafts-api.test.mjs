@@ -9,13 +9,13 @@ const id='78d4478a-4ac1-47f2-b41f-be6506c1c34a';
 const op='f1c9b833-603a-4c34-b134-c56e7e0bfcb1';
 const build=()=>{
  const db=new DatabaseSync(':memory:');db.exec(schema);
- const binding={prepare(sql){return {bind(...params){return {
+ const binding={prepare(sql){return {async first(){return db.prepare(sql).get()??null;},bind(...params){return {
   async first(){return db.prepare(sql).get(...params)??null;},
   async all(){return {success:true,results:db.prepare(sql).all(...params)};},
   async run(){return {success:true,meta:{changes:db.prepare(sql).run(...params).changes}};}
  };}}}};
  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:origin,
-  MAIL_DRAFTS_ENABLED:'true',MAIL_OWNER_SUB:'trusted-owner-sub',MAIL_DB:binding};
+  MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_DRAFTS_ENABLED:'true',MAIL_OWNER_SUB:'trusted-owner-sub',MAIL_DB:binding};
  const station=createStation({},async()=>({email:'owner@example.org',subject:'trusted-owner-sub'}),fetch);
  const req=(path,method='GET',body={},headers)=>new Request(origin+path,{method,
   ...(method==='POST'?{headers:{Origin:origin,'Content-Type':'application/json',...headers},body:JSON.stringify(body)}:{})});

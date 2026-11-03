@@ -9,6 +9,8 @@ import {decodeSafeMime} from '../src/communications/mail-mime-safe.mjs';
 import {handleMailDraftApi,mailDraftsEnabled} from './mail-drafts-api.mjs';
 import {listReadOnlyInbox, pollReadOnlyMailbox, listReadOnlyMailboxes} from '../src/communications/mail-readonly-service.mjs';
 
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
+const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
 const MAILBOX = 'hello@devonakins.com';
 const scope = Object.freeze({installationId:'personal',principalId:'owner'});
 const status = (code,httpStatus=400)=>({status:httpStatus,body:{error:code}});
@@ -16,7 +18,7 @@ function isEnabled(env) {
   return env?.MAIL_ENABLED === 'true' && env.MAIL_IMAP_ADDRESS === MAILBOX &&
     typeof env.MAIL_OWNER_SUB === 'string' && env.MAIL_OWNER_SUB.length > 0 &&
     typeof env.MAIL_IMAP_PASSWORD === 'string' && env.MAIL_IMAP_PASSWORD.length > 0 &&
-    env.MAIL_DB && typeof env.MAIL_DB.prepare === 'function' && typeof env.MAIL_DB.batch === 'function';
+    !!payloadCipher(env) && env.MAIL_DB && typeof env.MAIL_DB.prepare === 'function' && typeof env.MAIL_DB.batch === 'function';
 }
 function registry(sendVerified=false) {
   return createMailRegistry({
@@ -44,7 +46,7 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
     return status('not_found',404);
   if(!ready)return status('mail_not_configured',503);
   try {
-    const mailRegistry=registry(),store=createD1MailStore(env.MAIL_DB);
+    const mailRegistry=registry(),store=createD1MailStore(env.MAIL_DB,{cipher:payloadCipher(env),ownerSub:user.subject});
     if(url.pathname==='/api/mail/mailboxes' && request.method==='GET') {
       return {status:200,body:{mailboxes:listReadOnlyMailboxes(mailRegistry,scope)}};
     }

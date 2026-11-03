@@ -76,7 +76,9 @@ function decodeRows(rows, scope) {
     revision:rev,cursor,records};
 }
 
-export function createD1MailStore(db) {
+export function createD1MailStore(db,{cipher,ownerSub}={}) {
+  if(cipher&&(typeof ownerSub!=='string'||!ownerSub))throw err('invalid_mail_scope',400);
+  const context=(scope,validity,uid)=>['inbox',...scopeParts(scope),ownerSub,`${validity}/${uid}`];
   if (!db || typeof db.prepare !== 'function' || typeof db.batch !== 'function')
     throw err('invalid_d1_binding', 503);
   // No methods of this adapter create tables, grant permissions or connect to providers.
@@ -87,7 +89,16 @@ export function createD1MailStore(db) {
       try {result = await db.prepare(READ_SQL).bind(installationId,mailboxId).all();}
       catch {throw err('mail_d1_read_failed');}
       if (!result || result.success === false) throw err('mail_d1_read_failed');
-      return decodeRows(result.results,scope);
+      let rows=result.results;
+      if(cipher){
+        try{rows=await Promise.all(rows.map(async row=>{
+          if(row.msg_uid===null)return row;
+          if(row.from_address!==''||row.subject!=='')throw err('mail_d1_invalid_snapshot');
+          const value=await cipher.open(row.body_text,context(scope,row.msg_uid_validity,row.msg_uid));
+          return {...row,from_address:value.from,subject:value.subject,body_text:value.text};
+        }));}catch{throw err('mail_d1_invalid_snapshot');}
+      }
+      return decodeRows(rows,scope);
     },
     async commitSnapshot({scope,expectedRevision,next} = {}) {
       const [installationId,mailboxId] = scopeParts(scope);
@@ -96,7 +107,12 @@ export function createD1MailStore(db) {
       try {validated=validateMailStoreSnapshot(scope,next);} catch {throw err('invalid_mail_snapshot',400);}
       if (validated.rows.length > MAX_RECORDS) throw err('mail_d1_snapshot_limit',413);
       // The D1 batch's third SQL statement decodes only these prevalidated fields.
-      const payload = JSON.stringify(validated.rows.map(r => r.slice(2)));
+      const storedRows=await Promise.all(validated.rows.map(async r=>{
+        if(!cipher)return r.slice(2);
+        const encrypted=await cipher.seal({from:r[4],subject:r[5],text:r[6]},context(scope,r[2],r[3]));
+        return [r[2],r[3],'','',encrypted,r[7],r[8]];
+      }));
+      const payload = JSON.stringify(storedRows);
       if (new TextEncoder().encode(payload).byteLength > MAX_JSON_BYTES)
         throw err('mail_d1_snapshot_limit',413);
       const cursor=validated.cursor;

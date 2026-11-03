@@ -14,28 +14,52 @@ const revision=value=>{
 const receipt=row=>({deliveryId:row.delivery_id,state:row.state,createdAt:row.created_at,updatedAt:row.updated_at,
  ...(typeof row.draft_id==='string'&&row.draft_revision!==null?
  {draftId:row.draft_id,draftRevision:row.draft_revision}:{})});
-export function createD1Outbox(db,scope,{now=()=>new Date().toISOString()}={}){
+export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher}={}){
  if(!db?.prepare||!ID.test(scope?.installationId)||!ID.test(scope?.mailboxId)||
   typeof scope?.ownerSub!=='string'||!scope.ownerSub||scope.ownerSub.length>256||/[\x00-\x1f\x7f]/.test(scope.ownerSub))fail('outbox_invalid_scope');
  const parts=[scope.installationId,scope.mailboxId,scope.ownerSub];
+ if(cipher&&(!cipher.seal||!cipher.open))fail('outbox_invalid_cipher');
+ const context=deliveryId=>['outbox',...parts,deliveryId];
+ const decode=async row=>{
+  if(row.payload_json==='null'){
+   if(!['accepted','rejected','failed'].includes(row.state))fail('outbox_payload_unavailable');
+   return null;
+  }
+  return cipher?cipher.open(row.payload_json,context(row.delivery_id)):JSON.parse(row.payload_json);
+ };
+ const encode=(deliveryId,payload)=>cipher?cipher.seal(payload,context(deliveryId)):JSON.stringify(payload);
+ const samePayload=async(row,payload)=>JSON.stringify(await decode(row))===JSON.stringify(payload);
  const clock=()=>{const at=now();if(typeof at!=='string'||!Number.isFinite(Date.parse(at)))fail('outbox_invalid_clock');return at;};
  const get=deliveryId=>db.prepare('SELECT * FROM comms_outbox WHERE '+columns).bind(...parts,id(deliveryId)).first();
  return Object.freeze({
   async offer(deliveryId,payload){
-   id(deliveryId);const text=JSON.stringify(payload),at=clock();
-   if(new TextEncoder().encode(text).length>160*1024)fail('outbox_payload_limit');
+   id(deliveryId);const plain=JSON.stringify(payload),at=clock();
+   if(new TextEncoder().encode(plain).length>160*1024)fail('outbox_payload_limit');
+   const text=await encode(deliveryId,payload);
+   if(new TextEncoder().encode(text).length>230000)fail('outbox_payload_limit');
    await db.prepare("INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at) SELECT ?,?,?,?,?, 'queued',NULL,?,? WHERE (SELECT count(*) FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=?)<100 ON CONFLICT DO NOTHING")
     .bind(...parts,deliveryId,text,at,at,...parts).run();
    const row=await get(deliveryId);if(!row)fail('outbox_limit');
-   if(row.payload_json!==text)fail('outbox_conflict');return receipt(row);
+   if(!await samePayload(row,payload))fail('outbox_conflict');return receipt(row);
   },
   async offerLinkedDraft(deliveryId,{draftId,draftRevision,payload}={}){
    id(deliveryId);id(draftId);revision(draftRevision);
    if(!payload||!payload.draft||!Array.isArray(payload.draft.to)||
     typeof payload.draft.subject!=='string'||typeof payload.draft.body!=='string')
     fail('outbox_invalid_draft_payload');
-   const encoded=JSON.stringify(payload),at=clock();
-   if(new TextEncoder().encode(encoded).length>160*1024)fail('outbox_payload_limit');
+   const plain=JSON.stringify(payload),at=clock();
+   if(new TextEncoder().encode(plain).length>160*1024)fail('outbox_payload_limit');
+   const encoded=await encode(deliveryId,payload);
+   // With encrypted drafts compare the decrypted snapshot first, then pin the
+   // exact stored ciphertext in INSERT SELECT to close edit/enqueue races.
+   let proof=[JSON.stringify(payload.draft.to),payload.draft.subject,payload.draft.body];
+   if(cipher){
+    const current=await db.prepare('SELECT revision,recipients_json,subject,body_text FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=?').bind(...parts,draftId).first();
+    if(!current||current.revision!==draftRevision)fail('outbox_draft_stale');
+    const saved=await cipher.open(current.recipients_json,['draft',...parts,draftId]);
+    if(current.subject!==''||current.body_text!==''||JSON.stringify(saved)!==JSON.stringify(payload.draft))fail('outbox_draft_stale');
+    proof=[current.recipients_json,current.subject,current.body_text];
+   }
    // One atomic INSERT SELECT checks the trusted owner-scoped draft revision
    // and inserts an immutable payload. A unique index serializes competing IDs.
    await db.prepare("INSERT OR IGNORE INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at,draft_id,draft_revision) "+
@@ -44,12 +68,11 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString()}={}){
     "AND recipients_json=? AND subject=? AND body_text=? "+
     "AND (SELECT COUNT(*) FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=?)<100")
     .bind(...parts,deliveryId,encoded,at,at,draftId,draftRevision,
-     ...parts,draftId,draftRevision,JSON.stringify(payload.draft.to),
-     payload.draft.subject,payload.draft.body,...parts).run();
+     ...parts,draftId,draftRevision,...proof,...parts).run();
    const own=await get(deliveryId);
    if(own){
     if(own.draft_id!==draftId||own.draft_revision!==draftRevision||
-     own.payload_json!==encoded)fail('outbox_conflict');
+     !await samePayload(own,payload))fail('outbox_conflict');
     return receipt(own);
    }
    // A unique index serializes competing IDs across *all* revisions of this draft.
@@ -59,17 +82,32 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString()}={}){
    const current=await db.prepare('SELECT revision,recipients_json,subject,body_text FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=?')
     .bind(...parts,draftId).first();
    if(!current||current.revision!==draftRevision||
-    current.recipients_json!==JSON.stringify(payload.draft.to)||
-    current.subject!==payload.draft.subject||current.body_text!==payload.draft.body)
+    current.recipients_json!==proof[0]||
+    current.subject!==proof[1]||current.body_text!==proof[2])
     fail('outbox_draft_stale');
    fail('outbox_limit');
   },
-  async read(deliveryId){const row=await get(deliveryId);return row?{...receipt(row),payload:JSON.parse(row.payload_json)}:null;},
+  async readReceipt(deliveryId){
+   const row=await db.prepare('SELECT delivery_id,state,created_at,updated_at,draft_id,draft_revision FROM comms_outbox WHERE '+columns).bind(...parts,id(deliveryId)).first();
+   return row?receipt(row):null;
+  },
+  async read(deliveryId){const row=await get(deliveryId);return row?{...receipt(row),payload:await decode(row)}:null;},
   async list(){const result=await db.prepare('SELECT delivery_id,state,created_at,updated_at,draft_id,draft_revision FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? ORDER BY created_at,delivery_id LIMIT 100').bind(...parts).all();return result.results.map(receipt);},
   async claim(deliveryId,claimId){
    const row=await db.prepare("UPDATE comms_outbox SET state='claimed',claim_id=?,updated_at=? WHERE "+columns+" AND state='queued' RETURNING *")
     .bind(id(claimId),clock(),...parts,id(deliveryId)).first();
-   return row?{...receipt(row),payload:JSON.parse(row.payload_json)}:null;
+   return row?{...receipt(row),payload:await decode(row)}:null;
+  },
+  // Explicit maintenance only; preserve permanent receipts/unique draft tombstones.
+  // Never remove unresolved payloads or grant retry authority after a restore.
+  async expireTerminalPayloads({before}={}){
+   const cutoff=Date.parse(before),current=Date.parse(clock());
+   if(typeof before!=='string'||!Number.isFinite(cutoff)||cutoff>current-30*86400000)
+    fail('outbox_invalid_retention_cutoff');
+   const result=await db.prepare("UPDATE comms_outbox SET payload_json='null' WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND state IN ('accepted','rejected','failed') AND julianday(updated_at)<julianday(?) AND payload_json!='null'")
+    .bind(...parts,before).run();
+   if(result?.success===false||!Number.isSafeInteger(result?.meta?.changes))fail('outbox_retention_failed');
+   return {expired:result.meta.changes};
   },
   async finish(deliveryId,claimId,state){
    if(!['accepted','rejected','failed','uncertain'].includes(state))fail('outbox_invalid_state');

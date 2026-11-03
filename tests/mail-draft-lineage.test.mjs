@@ -34,7 +34,7 @@ function fixture(t){
   sqlite.exec(sql);
  }
  const d1={prepare(sql){
-  return {bind(...args){
+  return {async first(){return sqlite.prepare(sql).get()??null;},bind(...args){
    const statement=sqlite.prepare(sql);
    return {
     async first(){return statement.get(...args)??null},
@@ -168,7 +168,7 @@ test('owner draft HTTP deletion remains blocked with SMTP/outbox feature flags d
  await seed(drafts);
  await prepare(dispatcher,UUID.first);
  const user={subject:owner.ownerSub};
- const env={MAIL_DRAFTS_ENABLED:'true',MAIL_OUTBOX_ENABLED:'false',
+ const env={MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_DRAFTS_ENABLED:'true',MAIL_OUTBOX_ENABLED:'false',
   MAIL_SEND_ENABLED:'false',MAIL_OWNER_SUB:owner.ownerSub,MAIL_DB:d1};
  const url=new URL('https://station.example/api/mail/drafts/delete');
  const request=new Request(url,{method:'POST'});

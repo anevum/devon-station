@@ -1,6 +1,8 @@
 // COMMS-12: draft CRUD only; never connects to a provider or sends an email.
 // Caller authenticates signed Cloudflare Access and validates Origin before this handler.
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
+const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
 const status=(error,httpStatus)=>({status:httpStatus,body:{error}});
 const KNOWN_ERRORS=new Set([
  'invalid_mail_draft_id','invalid_mail_draft_revision','invalid_mail_draft_payload',
@@ -10,11 +12,11 @@ const KNOWN_ERRORS=new Set([
 ]);
 export const mailDraftsEnabled=env=>env?.MAIL_DRAFTS_ENABLED==='true' &&
  !!env.MAIL_DB && typeof env.MAIL_DB.prepare==='function' &&
- typeof env.MAIL_OWNER_SUB==='string' && env.MAIL_OWNER_SUB.length>0;
+ typeof env.MAIL_OWNER_SUB==='string' && env.MAIL_OWNER_SUB.length>0 && !!payloadCipher(env);
 export async function handleMailDraftApi({request,url,user,env,readBody}){
  if(!user?.subject || user.subject!==env?.MAIL_OWNER_SUB)return status('mail_owner_not_authorized',403);
  if(!mailDraftsEnabled(env))return status('mail_drafts_not_configured',503);
- const store=createD1DraftStore(env.MAIL_DB);
+ const cipher=payloadCipher(env),store=createD1DraftStore(env.MAIL_DB,{cipher});
  const scope={installationId:'personal',mailboxId:'hello',ownerSub:user.subject};
  try{
   if(url.pathname==='/api/mail/drafts' && request.method==='GET')
@@ -32,7 +34,7 @@ export async function handleMailDraftApi({request,url,user,env,readBody}){
     const row=await env.MAIL_DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='comms_outbox'").first();
     hasOutbox=row?.name==='comms_outbox';
    }catch{throw Object.assign(new Error('mail_draft_storage_failed'),{code:'mail_draft_storage_failed',status:502});}
-   return createD1DraftStore(env.MAIL_DB,{protectPendingOutbox:hasOutbox,protectLinkedOutbox:hasOutbox});
+   return createD1DraftStore(env.MAIL_DB,{protectPendingOutbox:hasOutbox,protectLinkedOutbox:hasOutbox,cipher});
   }
   if(url.pathname==='/api/mail/drafts/save' && request.method==='POST'){
    const body=await readBody(request,148000);

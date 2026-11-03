@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
 import {handleMailDraftApi} from '../worker/mail-drafts-api.mjs';
 const S={installationId:'personal',mailboxId:'hello',ownerSub:'signed-owner'};
@@ -17,8 +18,8 @@ function setup(t,{outbox=true}={}){
   async first(){return sql.prepare(query).get()??null},
   async run(){const r=sql.prepare(query).run();return {success:true,meta:{changes:r.changes}}}
  }}};
- const store=createD1DraftStore(d1);
- const env={MAIL_DRAFTS_ENABLED:'true',MAIL_OUTBOX_ENABLED:'false',MAIL_SEND_ENABLED:'false',MAIL_OWNER_SUB:S.ownerSub,MAIL_DB:d1};
+ const env={MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_DRAFTS_ENABLED:'true',MAIL_OUTBOX_ENABLED:'false',MAIL_SEND_ENABLED:'false',MAIL_OWNER_SUB:S.ownerSub,MAIL_DB:d1};
+ const store=createD1DraftStore(d1,{cipher:mailPayloadCipherFromEnv(env)});
  async function del(user=S.ownerSub,revision=2){return handleMailDraftApi({request:{method:'POST'},url:new URL('https://station.test/api/mail/drafts/delete'),user:{subject:user},env,readBody:async()=>({id:D,revision})})}
  return {sql,d1,store,env,del};
 }

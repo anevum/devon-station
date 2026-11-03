@@ -4,12 +4,14 @@ import {createStation} from '../worker/index.mjs';
 import {Miniflare} from 'miniflare';
 import {readFile} from 'node:fs/promises';
 import {createD1Outbox,createOutboxDispatcher} from '../src/communications/mail-outbox.mjs';
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
 const compatibilityDate=process.env.DS_WORKERD_COMPAT_DATE??'2026-07-30';
 const scope={installationId:'personal',mailboxId:'hello',ownerSub:'synthetic-owner'};
 const id='123e4567-e89b-42d3-a456-426614174000',claim='123e4567-e89b-42d3-a456-426614174001';
 const context={installationId:'personal',principalId:'owner'},from='hello@devonakins.com';
 const registry={mailboxes:[{id:'hello',installationId:'personal',mode:'imap',sendVerified:true}],identities:[{address:from,mailboxId:'hello',installationId:'personal',sendVerified:true}],grants:[{installationId:'personal',principalId:'owner',mailboxId:'hello',capabilities:['send']}]};
+const storageCipher=mailPayloadCipherFromEnv({MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),});
 const draft={to:['recipient@example.test'],subject:'Synthetic',body:'Untrusted inert message'};
 test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-safe non-retry semantics',async t=>{
  const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("synthetic outbox")}}',compatibilityDate,d1Databases:['MAIL']});
@@ -20,8 +22,8 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
    for(const statement of sql.split('\n').filter(x=>!/^\s*--/.test(x)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
     await db.prepare(statement).run();
   }
-  const store=createD1Outbox(db,scope),peer=createD1Outbox(db,{...scope,ownerSub:'other'});
-  const draftStore=createD1DraftStore(db);
+  const store=createD1Outbox(db,scope,{cipher:storageCipher}),peer=createD1Outbox(db,{...scope,ownerSub:'other'},{cipher:storageCipher});
+  const draftStore=createD1DraftStore(db,{cipher:storageCipher});
   const dispatcher=createOutboxDispatcher({store,registry,context,mailboxId:'hello',from,
    connect:()=>assert.fail('unapproved network'),credentials:async()=>undefined});
   await t.test('explicit approval, deterministic enqueue replay and immutable payload',async()=>{
@@ -102,7 +104,7 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
   });
   await t.test('owner Worker API prepares and lists durable outbox without exposing SMTP',async()=>{
    const base='https://station.example',station=createStation({},async()=>({email:'owner@example.test',subject:scope.ownerSub}),fetch,()=>assert.fail('HTTP must not open SMTP'));
-   const env={APP_ORIGIN:base,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,MAIL_OUTBOX_ENABLED:'true',MAIL_DRAFTS_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',MAIL_DB:db};
+   const env={APP_ORIGIN:base,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_OUTBOX_ENABLED:'true',MAIL_DRAFTS_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',MAIL_DB:db};
    const draftId='123e4567-e89b-42d3-a456-426614174090';
    await draftStore.create(scope,draftId);
    await draftStore.save(scope,{id:draftId,revision:1,operationId:'123e4567-e89b-42d3-a456-426614174091',...draft});
@@ -160,7 +162,7 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
     };
     const station=createStation({},async()=>({email:'owner@example.test',subject:scope.ownerSub}),fetch,smtpConnect);
     const env={APP_ORIGIN:origin,OWNER_EMAIL:'owner@example.test',MAIL_OWNER_SUB:scope.ownerSub,
-     MAIL_OUTBOX_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
+     MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_OUTBOX_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
      MAIL_SMTP_ADDRESS:from,MAIL_SMTP_PASSWORD:'synthetic-app-password',MAIL_DRAFTS_ENABLED:'true',MAIL_DB:db};
     const draftId='123e4567-e89b-42d3-a456-426614174092';
     await draftStore.create(scope,draftId);

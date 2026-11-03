@@ -60,8 +60,16 @@ const REMOVE='DELETE FROM comms_mail_drafts WHERE installation_id=? AND mailbox_
 const REMOVE_SAFE=REMOVE+" AND NOT EXISTS (SELECT 1 FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND state IN ('queued','claimed','uncertain'))";
 const PENDING='SELECT 1 AS pending FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND state IN (\'queued\',\'claimed\',\'uncertain\') LIMIT 1';
 const changes=result=>result?.meta?.changes;
-export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectPendingOutbox=false,protectLinkedOutbox=false}={}){
+export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectPendingOutbox=false,protectLinkedOutbox=false,cipher}={}){
  if(!db||typeof db.prepare!=='function')throw error('mail_drafts_storage_unavailable',503);
+ const decode=async(s,row)=>{
+  if(!cipher)return mapRow(row);
+  if(row.subject!==''||row.body_text!=='')throw error('mail_draft_storage_invalid',502);
+  const payload=await cipher.open(row.recipients_json,['draft',...s,row.draft_id]);
+  const valid=validateDraftPayload(payload);
+  return mapRow({...row,recipients_json:JSON.stringify(valid.to),subject:valid.subject,body_text:valid.body});
+ };
+ const encode=(s,id,payload)=>cipher?cipher.seal(payload,['draft',...s,id]):JSON.stringify(payload.to);
  const get=async(s,id)=> {
    try{return await db.prepare(SELECT).bind(...s,id).first();}
    catch{throw error('mail_draft_storage_failed',502);}
@@ -69,7 +77,7 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
  return Object.freeze({
   async read(scope,draftId){
    const row=await get(validScope(scope),validId(draftId));
-   return row?mapRow(row):null;
+   return row?decode(validScope(scope),row):null;
   },
   async list(scope){
    const s=validScope(scope);
@@ -78,29 +86,31 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
    catch{throw error('mail_draft_storage_failed',502);}
    if(!response||response.success===false||!Array.isArray(response.results)||
       response.results.length>MAX_DRAFTS)throw error('mail_draft_storage_invalid',502);
-   return response.results.map(mapRow);
+   return Promise.all(response.results.map(row=>decode(s,row)));
   },
   async create(scope,draftId){
    const s=validScope(scope),id=validId(draftId),at=now();
    if(typeof at!=='string'||!Number.isFinite(Date.parse(at)))throw error('mail_draft_clock_invalid',502);
-   try{await db.prepare(INSERT).bind(...s,id,at,at,id,...s).run();}
+   const encoded=await encode(s,id,{to:[],subject:'',body:''});
+   try{await db.prepare(cipher?INSERT.replace("'[]'",'?'):INSERT).bind(...s,id,...(cipher?[encoded]:[]),at,at,id,...s).run();}
    catch{throw error('mail_draft_storage_failed',502);}
    const row=await get(s,id);
    if(!row)throw error('mail_draft_limit',409);
-   return mapRow(row);
+   return decode(s,row);
   },
   async save(scope,{id,revision,operationId,to,subject,body}={}){
    const s=validScope(scope),key=validId(id),rev=validRevision(revision),operation=validId(operationId);
    const payload=validateDraftPayload({to,subject,body}),at=now();
+   const encoded=await encode(s,key,payload);
    let result;
    try{result=await db.prepare(protectLinkedOutbox?UPDATE_SAFE:UPDATE)
-     .bind(JSON.stringify(payload.to),payload.subject,payload.body,
+     .bind(encoded,cipher?'':payload.subject,cipher?'':payload.body,
       at,operation,...s,key,rev,...(protectLinkedOutbox?[...s,key]:[])).run();}
    catch{throw error('mail_draft_storage_failed',502);}
    const row=await get(s,key);
    if(!row)throw error('mail_draft_not_found',404);
    if(row.last_operation===operation && row.revision===rev+1){
-     const stored=mapRow(row);
+     const stored=await decode(s,row);
      if(JSON.stringify(stored.to)!==JSON.stringify(payload.to)||
         stored.subject!==payload.subject||stored.body!==payload.body)
        throw error('mail_draft_conflict',409);

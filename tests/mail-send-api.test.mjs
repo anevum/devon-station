@@ -4,7 +4,7 @@ import {mailSendingEnabled,handleMailOutboxApi} from '../worker/mail-outbox-api.
 
 const from='hello@devonakins.com';
 const env=Object.freeze({
- MAIL_OUTBOX_ENABLED:'true',MAIL_SEND_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
+ MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_OUTBOX_ENABLED:'true',MAIL_SEND_ENABLED:'true',MAIL_SENDER_VERIFIED:'true',
  MAIL_OWNER_SUB:'synthetic-owner',MAIL_DRAFTS_ENABLED:'true',MAIL_SMTP_ADDRESS:from,
  MAIL_SMTP_PASSWORD:'synthetic-password',MAIL_DB:{prepare(){}}
 });
