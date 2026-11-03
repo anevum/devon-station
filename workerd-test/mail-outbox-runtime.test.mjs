@@ -158,6 +158,10 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
     assert.equal((await station.fetch(submit({...confirmation,from:'other@example.test'}),enabled)).status,400);
     assert.equal((await station.fetch(submit(confirmation),enabled)).status,409);
     assert.equal(sockets,0);
+    // A previously queued, unlinked legacy row must never be accepted for SMTP.
+    assert.equal((await station.fetch(submit({
+     deliveryId:'123e4567-e89b-42d3-a456-426614174010',confirmedByOwner:true}),enabled)).status,409);
+    assert.equal(sockets,0);
     const prepared=await station.fetch(request('/api/mail/outbox/prepare','POST',{deliveryId,draftId,draftRevision:2,approvedByOwner:true}),enabled);
     assert.equal(prepared.status,200);assert.equal((await prepared.json()).receipt.state,'queued');
     assert.equal(sockets,0);
