@@ -95,6 +95,10 @@
     const current=++generation;controller=new AbortController();
     const signal=controller.signal,button=root.querySelector('#finance-refresh');
     button.disabled=true;
+    // Do not display previously observed balances as current while a new
+    // authenticated observation is pending or may fail authorization.
+    root.querySelector('#finance-results').replaceChildren();
+    root.querySelector('#finance-updated').textContent='Not verified';
     root.querySelector('#finance-message').textContent='Retrieving private read-only sources...';
     try {
       const response=await fetch('/api/finance/summary',{
