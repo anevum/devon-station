@@ -28,7 +28,7 @@ const isCode=code=>error=>error?.code===code;
 function fixture(t){
  const sqlite=new DatabaseSync(':memory:');
  t.after(()=>sqlite.close());
- for(const file of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql']){
+ for(const file of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql','0008-comms-one-delivery-per-draft.sql']){
   const sql=readFileSync(new URL('../worker/migrations/'+file,import.meta.url),'utf8');
   sqlite.exec(sql);
  }
@@ -74,6 +74,10 @@ test('one scoped draft revision produces exactly one immutable delivery under co
  assert.equal(linked.payload.from,from);
  assert.equal(linked.payload.date,'2026-11-03T10:01:00.000Z');
  await assert.rejects(prepare(dispatcher,UUID.third),isCode('outbox_draft_already_prepared'));
+ await drafts.save(owner,{id:UUID.draft,revision:2,operationId:UUID.alternate,
+  ...sample,subject:'Edited after original delivery'});
+ await assert.rejects(prepare(dispatcher,UUID.third,3),isCode('outbox_draft_already_prepared'));
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM comms_outbox').get().n,1);
  await assert.rejects(dispatcher.enqueueSavedDraft({deliveryId:winner,draftId:UUID.alternate,
   draftRevision:2,approvedByOwner:true}),isCode('outbox_conflict'));
 });
