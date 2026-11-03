@@ -12,10 +12,10 @@ const EXPECTED_MODULES = [
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs',
-  'worker/mail-api.mjs',
+  'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
-    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs'].map(name => 'src/communications/' + name),
+    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs'].map(name => 'src/communications/' + name),
   ...['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs',
     'decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs',
     'pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs']

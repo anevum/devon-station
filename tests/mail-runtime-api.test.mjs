@@ -16,7 +16,7 @@ function d1Double(db) {
    catch(e){db.exec('ROLLBACK');throw e;}
  }};
 }
-function socketMock(payload=mime) {
+function socketMock(payload=mime,{trailingMetadata=false,complete=true}={}) {
  let controller,closed=false,calls=[];
  const respond = bytes => {const raw=typeof bytes==='string'?new TextEncoder().encode(bytes):bytes;
   for(let pos=0;pos<raw.length;pos+=11)controller.enqueue(raw.slice(pos,pos+11));};
@@ -27,11 +27,13 @@ function socketMock(payload=mime) {
    writable:new WritableStream({write(chunk){const command=new TextDecoder().decode(chunk);calls.push(command);
     const tag=command.slice(0,5);
     if(command.includes(' LOGIN '))respond(tag+' OK logged in\r\n');
-    else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] selected\r\n'+tag+' OK done\r\n');
+    else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] [UIDNEXT 2] selected\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID FETCH')) {
-      respond('* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {'+payload.byteLength+'}\r\n');
-      respond(payload);respond(')\r\n'+tag+' OK done\r\n');
+      respond((trailingMetadata?'* 1 FETCH (BODY[] {':'* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {')+payload.byteLength+'}\r\n');
+      respond(payload);
+      if(complete)respond((trailingMetadata?' UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500"': '')+')\r\n');
+      respond(tag+' OK done\r\n');
     } else throw new Error('unexpected command');
    }}),
    async close(){if(!closed){closed=true;controller.close();}}
@@ -105,4 +107,37 @@ test('oversize indexed text fails before any D1 transaction, retaining cursor fo
  const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
  assert.equal((await inbox.json()).messages.length,0);
  db.close();
+});
+
+test('reordered FETCH persists through owner API, while premature tagged OK cannot advance D1',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ try{
+  const broken=socketMock(mime,{trailingMetadata:true,complete:false});
+  const rejected=await createStation({},auth,fetch,broken.connect).fetch(req('/api/mail/sync','POST'),env(binding));
+  assert.equal(rejected.status,502);assert.deepEqual(await rejected.json(),{error:'mail_operation_failed'});
+  assert.equal(binding.batches,0);assert.equal(broken.closed(),true);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM comms_ro_mailboxes').get().n,0);
+  assert.equal(db.prepare('SELECT count(*) AS n FROM comms_ro_messages').get().n,0);
+  const valid=socketMock(mime,{trailingMetadata:true});
+  const station=createStation({},auth,fetch,valid.connect);
+  const accepted=await station.fetch(req('/api/mail/sync','POST'),env(binding));
+  assert.equal(accepted.status,200);assert.equal((await accepted.json()).imported,1);
+  assert.equal(binding.batches,1);assert.equal(valid.closed(),true);
+  const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
+  assert.equal((await inbox.json()).messages[0].text,'An inert message.\n');
+ }finally{db.close();}
+});
+
+test('inbox revision query is bounded and invalid tokens never reach provider sockets',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db),mock=socketMock();
+ const station=createStation({},auth,fetch,mock.connect);
+ try{
+  for(const query of ['-1','01','1.5','9007199254740992','nope','1&revision=2'])
+   assert.equal((await station.fetch(req('/api/mail/inbox?revision='+query),env(binding))).status,400);
+  const empty=await station.fetch(req('/api/mail/inbox?revision=0'),env(binding));
+  assert.equal(empty.status,200);assert.equal((await empty.json()).revision,0);
+  const conflict=await station.fetch(req('/api/mail/inbox?revision=1'),env(binding));
+  assert.equal(conflict.status,409);assert.deepEqual(await conflict.json(),{error:'mailbox_revision_conflict'});
+  assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
+ }finally{db.close();}
 });

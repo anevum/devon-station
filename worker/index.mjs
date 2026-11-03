@@ -38,7 +38,7 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch,ima
  if(user?.email!==env.OWNER_EMAIL||!user.subject)return json({error:'owner_only'},403);
  if(!['GET','HEAD','POST','DELETE'].includes(request.method))return json({error:'method_not_allowed'},405);
  const writes=['POST','DELETE'].includes(request.method);if(writes&&(request.headers.get('Origin')!==url.origin||request.headers.get('Content-Type')?.split(';')[0]!=='application/json'))return json({error:'same_origin_json_required'},403);
- if(url.pathname.startsWith('/api/mail/')){const result=await handleMailApi({request,url,user,env,connect:imapSocket});return json(result.body,result.status);}
+ if(url.pathname.startsWith('/api/mail/')){const result=await handleMailApi({request,url,user,env,connect:imapSocket,readBody});return json(result.body,result.status);}
  if(url.pathname==='/api/session'&&request.method==='GET')return json({authenticated:true,mode:'owner',version:'0.4.8',snapshot:true,persistentStorage:!!env.DB});
  if(url.pathname==='/api/workspaces'&&request.method==='GET')return json(await workspaceScopes(user,env));
  if(['/api/workspace','/api/workspace/propose','/api/workspace/decide','/api/workspace/review','/api/workspace/reconcile','/api/workspace/backup','/api/workspace/restore-review','/api/workspace/restore'].includes(url.pathname)){

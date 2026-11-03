@@ -197,6 +197,12 @@ export function reconcileImapBatch({registry, context, mailboxId, cursor = null,
     else updated++;
     records.set(record.key, record);
   }
+  // Trusted bounded provider scan watermark, persisted in the same CAS as the fetched rows.
+  if (Object.hasOwn(batch,'scannedThrough')) {
+    if (!Number.isSafeInteger(batch.scannedThrough) || batch.scannedThrough < greatest ||
+        batch.scannedThrough > 0xffffffff) throw new TypeError('Invalid IMAP scan watermark');
+    greatest = batch.scannedThrough;
+  }
   if (records.size > 5000) throw new TypeError('Mailbox sync index limit exceeded');
   return immutable({installationId: context.installationId, mailboxId, imported, updated,
     uidValidityReset: reset, cursor: immutable({uidValidity: validity, highestUid: greatest}),

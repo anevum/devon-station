@@ -5,6 +5,7 @@ import {createD1MailStore} from '../src/communications/mail-d1-store.mjs';
 import {createReadOnlyImapProvider} from '../src/communications/mail-imap-readonly.mjs';
 import {createPurelymailImapConnector} from '../src/communications/mail-imap-transport.mjs';
 import {decodeSafeMime} from '../src/communications/mail-mime-safe.mjs';
+import {handleMailDraftApi,mailDraftsEnabled} from './mail-drafts-api.mjs';
 import {listReadOnlyInbox, pollReadOnlyMailbox, listReadOnlyMailboxes} from '../src/communications/mail-readonly-service.mjs';
 
 const MAILBOX = 'hello@devonakins.com';
@@ -21,7 +22,7 @@ function registry() {
     installations:[{id:'personal',domain:'devonakins.com'}],
     mailboxes:[{id:'hello',installationId:'personal',address:MAILBOX,provider:'purelymail',mode:'imap',sendVerified:false}],
     identities:[{mailboxId:'hello',address:MAILBOX,kind:'primary',sendVerified:false}],
-    grants:[{installationId:'personal',principalId:'owner',mailboxId:'hello',capabilities:['read','sync']}]
+    grants:[{installationId:'personal',principalId:'owner',mailboxId:'hello',capabilities:['read','sync','draft']}]
   });
 }
 const numberParam=(value, fallback, min, max) => {
@@ -30,12 +31,13 @@ const numberParam=(value, fallback, min, max) => {
   const n=Number(value);return n>=min&&n<=max?n:null;
 };
 /** Signed owner check must already have run in createStation. This adds explicit subject binding. */
-export async function handleMailApi({request,url,user,env,connect}) {
+export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(!user?.subject || !env?.MAIL_OWNER_SUB || user.subject !== env.MAIL_OWNER_SUB)
     return status('mail_owner_not_authorized',403);
   const ready=isEnabled(env) && typeof connect==='function';
   if(url.pathname==='/api/mail/status' && request.method==='GET')
-    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:false,provider:'purelymail'}};
+    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:false,draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
+  if(url.pathname.startsWith('/api/mail/drafts'))return handleMailDraftApi({request,url,user,env,readBody});
   if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync'].includes(url.pathname))
     return status('not_found',404);
   if(!ready)return status('mail_not_configured',503);
@@ -47,8 +49,11 @@ export async function handleMailApi({request,url,user,env,connect}) {
     if(url.pathname==='/api/mail/inbox' && request.method==='GET') {
       const limit=numberParam(url.searchParams.get('limit'),25,1,50);
       const offset=numberParam(url.searchParams.get('offset'),0,0,5000);
-      if(limit===null||offset===null)return status('invalid_inbox_page',400);
-      return {status:200,body:await listReadOnlyInbox({registry:mailRegistry,context:scope,mailboxId:'hello',store,limit,offset})};
+      const revision=url.searchParams.get('revision');
+      const expectedRevision=revision===null?null:
+        /^(0|[1-9][0-9]{0,15})$/.test(revision)&&Number.isSafeInteger(Number(revision))?Number(revision):undefined;
+      if(limit===null||offset===null||expectedRevision===undefined||url.searchParams.getAll('revision').length>1)return status('invalid_inbox_page',400);
+      return {status:200,body:await listReadOnlyInbox({registry:mailRegistry,context:scope,mailboxId:'hello',store,limit,offset,expectedRevision})};
     }
     if(url.pathname==='/api/mail/sync' && request.method==='POST') {
       const connector=createPurelymailImapConnector({

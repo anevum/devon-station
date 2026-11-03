@@ -140,3 +140,13 @@ test('unsafe control characters stripped and body truncated; no HTML representat
   assert.equal(item.text.length,4096);
   assert.equal(Object.hasOwn(item,'html'),false);
 });
+
+test('trusted scan watermark advances atomically with messages and rejects rollback/overflow',()=>{
+ const initial=reconcileImapBatch(sync({batch:{uidValidity:101,messages:[],scannedThrough:4096}}));
+ assert.deepEqual(initial.cursor,{uidValidity:101,highestUid:4096});assert.deepEqual(initial.records,[]);
+ for(const scannedThrough of [4095,-1,4294967296,NaN,'5000'])
+  assert.throws(()=>reconcileImapBatch(sync({cursor:initial.cursor,batch:{uidValidity:101,messages:[],scannedThrough}})),/scan watermark/);
+ assert.throws(()=>reconcileImapBatch(sync({batch:{uidValidity:101,messages:[entry(5)],scannedThrough:4}})),/scan watermark/);
+ const reset=reconcileImapBatch(sync({cursor:initial.cursor,batch:{uidValidity:202,messages:[],scannedThrough:256}}));
+ assert.equal(reset.uidValidityReset,true);assert.equal(reset.cursor.highestUid,256);
+});

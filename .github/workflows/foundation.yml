@@ -2,9 +2,14 @@ name: Synthetic foundation
 on: [push, pull_request]
 permissions:
   contents: read
+# Keep independent workflows/events/branches separate; supersede only older runs in this group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   test:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,6 +20,7 @@ jobs:
       - run: npm --prefix foundation test
   browser:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -27,6 +33,7 @@ jobs:
         working-directory: foundation
       - run: npm ci --prefix workerd-test --ignore-scripts --no-audit --no-fund
       - run: node browser/workspace-component-check.cjs
+        timeout-minutes: 5
         working-directory: foundation
       - uses: actions/upload-artifact@v4
         if: always()
@@ -36,6 +43,7 @@ jobs:
           if-no-files-found: ignore
   access-interop:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - name: Checkout synthetic scope bridge
         uses: actions/checkout@v4
@@ -61,6 +69,7 @@ jobs:
 
   integrated-worker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -80,6 +89,7 @@ jobs:
   public-source-snapshot:
     if: github.event_name == 'push' && github.ref == 'refs/heads/feature/ds011-rb01-integrated-review'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: read
     steps:

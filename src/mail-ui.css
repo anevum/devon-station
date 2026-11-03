@@ -4,7 +4,7 @@
 .mail-identity{display:grid;gap:3px;min-width:0;overflow-wrap:anywhere}
 .mail-identity strong{font-size:14px;font-weight:610}
 .mail-small,.mail-list-title,.mail-time,.mail-eyebrow,.mail-footnote{font-size:11px;color:var(--muted)}
-.mail-controls{display:flex;gap:8px}
+.mail-controls{display:flex;gap:8px;flex-wrap:wrap}
 .mail-controls button{min-width:145px}
 .mail-banner{margin:0;padding:10px 14px;border:1px solid var(--line);border-radius:10px;background:var(--panel2);font-size:12px;color:var(--muted)}
 .mail-live{margin:0;min-height:18px;color:var(--muted);font-size:12px}
@@ -27,6 +27,31 @@
 .mail-body{white-space:pre-wrap;line-height:1.65;font-size:13px;overflow-wrap:anywhere;user-select:text}
 .mail-footnote{margin:25px 0 0}
 .mail-placeholder{display:grid;min-height:250px;place-items:center;text-align:center;color:var(--muted);font-size:12px}
-@media(max-width:790px){.mail-layout{grid-template-columns:1fr}.mail-list{max-height:36vh;border-right:0;border-bottom:1px solid var(--line)}.mail-reader{max-height:none;min-height:260px;padding:20px}.mail-header{align-items:flex-start;flex-wrap:wrap}.mail-controls{width:100%}.mail-controls button{width:100%}}
+@media(max-width:790px){.mail-layout{grid-template-columns:1fr}.mail-list{max-height:36vh;border-right:0;border-bottom:1px solid var(--line)}.mail-reader{max-height:none;min-height:260px;padding:20px}.mail-header{align-items:flex-start;flex-wrap:wrap}.mail-controls{width:100%}.mail-controls button{width:100%;min-width:0;white-space:normal}}
 @media(max-width:450px){#station-mail{padding-bottom:env(safe-area-inset-bottom)}.mail-header{padding:14px}.mail-reader-subject{font-size:19px}.mail-message{min-height:88px}}
 @media(prefers-reduced-motion:reduce){.mail-message,.mail-action{transition:none!important}}
+
+/* COMMS-12: private drafts; no Send button and no remote HTML preview. */
+.mail-drafts-host{border:1px solid var(--line);border-radius:var(--radius);background:var(--panel);padding:16px;display:grid;gap:14px;min-width:0}
+.mail-draft-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px}
+.mail-draft-heading{font-size:13px}
+.mail-draft-buttons{display:flex;flex-wrap:wrap;gap:8px}
+.mail-draft-action{padding:8px 13px;border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:9px;font:inherit;font-size:12px;cursor:pointer;min-height:38px}
+.mail-draft-action:hover,.mail-draft-action:focus-visible{border-color:var(--accent);outline-offset:3px}
+.mail-draft-action[disabled]{opacity:.55;cursor:not-allowed}
+.mail-draft-live,.mail-draft-empty,.mail-draft-notice{font-size:12px;color:var(--muted);margin:0}
+.mail-draft-live{min-height:18px}
+.mail-draft-list{display:flex;flex-wrap:wrap;gap:8px}
+.mail-draft-entry{border:1px solid var(--line);border-radius:9px;background:var(--panel2);color:var(--text);padding:10px 13px;min-height:40px;text-align:left;max-width:100%;overflow-wrap:anywhere;font:inherit;font-size:12px;cursor:pointer}
+.mail-draft-entry[aria-pressed=true]{border-color:var(--accent);box-shadow:inset 3px 0 var(--accent)}
+.mail-draft-editor{display:grid;gap:14px;border-top:1px solid var(--line);padding-top:16px}
+.mail-draft-notice{font-size:11px;letter-spacing:.02em}
+.mail-draft-label{display:grid;gap:6px;font-size:12px;color:var(--muted)}
+.mail-draft-field{display:block;width:100%;min-width:0;border:1px solid var(--line);border-radius:9px;padding:11px 12px;background:var(--panel2);color:var(--text);font:inherit;font-size:13px;line-height:1.5}
+.mail-draft-field:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+textarea.mail-draft-field{resize:vertical;min-height:180px}
+@media(max-width:600px){.mail-drafts-host{padding:14px}.mail-draft-toolbar{align-items:flex-start}.mail-draft-buttons{width:100%}.mail-draft-action{flex:1;min-width:100px}.mail-draft-field{font-size:16px}}
+@media(prefers-reduced-motion:reduce){.mail-draft-action,.mail-draft-entry{transition:none!important}}
+
+.mail-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--line)}
+.mail-pagination button{min-height:44px;min-width:68px}.mail-page-range{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}

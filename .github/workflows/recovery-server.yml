@@ -2,9 +2,14 @@ name: Recovered server verification
 on: [push, pull_request, workflow_dispatch]
 permissions:
   contents: read
+# Keep independent workflows/events/branches separate; supersede only older runs in this group.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
 jobs:
   verify:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -15,6 +20,7 @@ jobs:
       - run: npm test
   workerd:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
@@ -33,6 +39,7 @@ jobs:
           MINIFLARE_WORKERD_PATH="$RUNNER_TEMP/ds011-oct-workerd/node_modules/@cloudflare/workerd-linux-64/bin/workerd" DS_WORKERD_COMPAT_DATE=2026-10-28 npm test --prefix workerd-test
   unified-application:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
         with:
