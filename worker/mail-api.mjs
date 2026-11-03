@@ -49,8 +49,11 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
     if(url.pathname==='/api/mail/inbox' && request.method==='GET') {
       const limit=numberParam(url.searchParams.get('limit'),25,1,50);
       const offset=numberParam(url.searchParams.get('offset'),0,0,5000);
-      if(limit===null||offset===null)return status('invalid_inbox_page',400);
-      return {status:200,body:await listReadOnlyInbox({registry:mailRegistry,context:scope,mailboxId:'hello',store,limit,offset})};
+      const revision=url.searchParams.get('revision');
+      const expectedRevision=revision===null?null:
+        /^(0|[1-9][0-9]{0,15})$/.test(revision)&&Number.isSafeInteger(Number(revision))?Number(revision):undefined;
+      if(limit===null||offset===null||expectedRevision===undefined||url.searchParams.getAll('revision').length>1)return status('invalid_inbox_page',400);
+      return {status:200,body:await listReadOnlyInbox({registry:mailRegistry,context:scope,mailboxId:'hello',store,limit,offset,expectedRevision})};
     }
     if(url.pathname==='/api/mail/sync' && request.method==='POST') {
       const connector=createPurelymailImapConnector({

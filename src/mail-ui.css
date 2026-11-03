@@ -52,3 +52,6 @@
 textarea.mail-draft-field{resize:vertical;min-height:180px}
 @media(max-width:600px){.mail-drafts-host{padding:14px}.mail-draft-toolbar{align-items:flex-start}.mail-draft-buttons{width:100%}.mail-draft-action{flex:1;min-width:100px}.mail-draft-field{font-size:16px}}
 @media(prefers-reduced-motion:reduce){.mail-draft-action,.mail-draft-entry{transition:none!important}}
+
+.mail-pagination{display:flex;align-items:center;justify-content:space-between;gap:8px;flex-wrap:wrap;padding:10px;border-bottom:1px solid var(--line)}
+.mail-pagination button{min-height:44px;min-width:68px}.mail-page-range{font-size:12px;color:var(--muted);font-variant-numeric:tabular-nums}

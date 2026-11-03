@@ -151,10 +151,11 @@ export async function pollReadOnlyMailbox({registry, context, mailboxId, store, 
 }
 
 /** Explicit `read` privilege is separate from service-only `sync` privilege. */
-export async function listReadOnlyInbox({registry,context,mailboxId,store,limit = 25,offset = 0} = {}) {
+export async function listReadOnlyInbox({registry,context,mailboxId,store,limit = 25,offset = 0,expectedRevision = null} = {}) {
   requirePermission(registry, context, mailboxId, 'read');
   if (!Number.isSafeInteger(limit) || limit < 1 || limit > MAX_PAGE ||
-      !Number.isSafeInteger(offset) || offset < 0 || offset > MAX_RECORDS) {
+      !Number.isSafeInteger(offset) || offset < 0 || offset > MAX_RECORDS ||
+      (expectedRevision !== null && !isSafeInt(expectedRevision))) {
     throw new MailReadOnlyError('invalid_inbox_page',400);
   }
   if (!store || typeof store.readSnapshot !== 'function') {
@@ -162,6 +163,8 @@ export async function listReadOnlyInbox({registry,context,mailboxId,store,limit 
   }
   const scope=scopeOf(context,mailboxId);
   const snapshot=safeSnapshot(await store.readSnapshot(scope),scope);
+  if (expectedRevision !== null && snapshot.revision !== expectedRevision)
+    throw new MailReadOnlyError('mailbox_revision_conflict',409);
   // Project only known plain-text fields. Never return storage/provider object wholesale.
   const rows=snapshot.records.slice().sort((a,b)=>
     Date.parse(b.timestamp)-Date.parse(a.timestamp) || b.uidValidity-a.uidValidity || b.uid-a.uid)

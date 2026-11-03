@@ -17,7 +17,7 @@ function load(handler){
  return {dom,doc:dom.window.document,calls};
 }
 const reply=(body,status=200,type='application/json')=>({
- ok:status>=200&&status<300,status,headers:new Headers({'Content-Type':type}),json:async()=>body
+ ok:status>=200&&status<300,status,headers:new Headers({'Content-Type':type}),json:async()=>Array.isArray(body.messages)?{revision:1,offset:0,limit:50,...body}:body
 });
 const sample={key:'personal/hello/7/1',from:'author@example.org',subject:'<script>alert(1)</script>',
   text:'<img src="https://tracker.invalid/pixel"> is inert plaintext',
@@ -188,5 +188,92 @@ test('reloading cached inbox after an uncertain batch never issues another provi
   click(x,'sync');await wait();assert.equal(posts,1);
   click(x,'reload');await wait();assert.equal(posts,1);assert.equal(reads,2);
   assert.equal(x.doc.querySelectorAll('.mail-message').length,1);
+ }finally{x.dom.window.close();}
+});
+
+const indexed=Array.from({length:123},(_,i)=>({...sample,key:'personal/hello/7/'+(123-i),subject:'Message '+(123-i)}));
+const inboxPage=(offset,revision=7)=>reply({total:indexed.length,revision,offset,limit:50,messages:indexed.slice(offset,offset+50)});
+test('all 123 cached messages can be reached across older/newer pages with revision-pinned GETs only',async()=>{
+ const paths=[];
+ const x=await ready((path,options)=>{
+  assert.equal(options.method,'GET');paths.push(path);
+  const url=new URL(path,'https://station.example'),offset=Number(url.searchParams.get('offset'));
+  if(offset)assert.equal(url.searchParams.get('revision'),'7');
+  return inboxPage(offset);
+ });
+ try{
+  assert.equal(x.doc.querySelector('[data-mail-action="newer"]').disabled,true);
+  const seen=new Set([...x.doc.querySelectorAll('.mail-message')].map(e=>e.dataset.mailKey));
+  click(x,'older');await wait();
+  assert.equal(x.doc.querySelector('.mail-page-range').textContent,'51–100 of 123');
+  assert.equal(x.doc.querySelector('.mail-reader-subject').textContent,'Message 73');
+  x.doc.querySelectorAll('.mail-message').forEach(e=>seen.add(e.dataset.mailKey));
+  click(x,'older');await wait();
+  assert.equal(x.doc.querySelectorAll('.mail-message').length,23);
+  assert.equal(x.doc.querySelector('[data-mail-action="older"]').disabled,true);
+  x.doc.querySelectorAll('.mail-message').forEach(e=>seen.add(e.dataset.mailKey));
+  assert.equal(seen.size,123);
+  click(x,'newer');await wait();click(x,'newer');await wait();
+  assert.equal(x.doc.querySelector('.mail-page-range').textContent,'1–50 of 123');
+  assert(paths.slice(1).every(path=>path.includes('revision=7')));
+  assert.equal(x.doc.querySelectorAll('img,script,iframe').length,0);
+ }finally{x.dom.window.close();}
+});
+test('changed snapshot retains old page, requires cached reload and adopts its new revision',async()=>{
+ let revision=7;
+ const x=await ready(path=>{
+  const url=new URL(path,'https://station.example'),offset=Number(url.searchParams.get('offset'));
+  if(offset)return reply({error:'mailbox_revision_conflict'},409);
+  return inboxPage(0,revision);
+ });
+ try{
+  click(x,'older');await wait();
+  assert(x.doc.querySelector('[role="status"]').textContent.includes('The inbox changed'));
+  assert.equal(x.doc.querySelector('.mail-page-range').textContent,'1–50 of 123');
+  revision=8;click(x,'reload');await wait();
+  assert(!x.doc.querySelector('[role="status"]').textContent.includes('The inbox changed'));
+  click(x,'older');await wait();assert(x.calls.at(-1).path.includes('revision=8'));
+ }finally{x.dom.window.close();}
+});
+test('malformed or mismatched page metadata never replaces current private messages',async()=>{
+ for(const bad of [
+  {offset:0,revision:7,limit:50,total:123,messages:indexed.slice(50,100)},
+  {offset:50,revision:8,limit:50,total:123,messages:indexed.slice(50,100)},
+  {offset:50,revision:7,limit:50,total:123,messages:[sample]}
+ ]){
+  const x=await ready(path=>path.includes('offset=50')?reply(bad):inboxPage(0));
+  try{
+   click(x,'older');await wait();assert.equal(x.doc.querySelector('.mail-page-range').textContent,'1–50 of 123');
+   assert.equal(x.doc.querySelector('.mail-reader-subject').textContent,'Message 123');
+   assert(x.doc.querySelector('[role="status"]').textContent.includes('current page is retained'));
+  }finally{x.dom.window.close();}
+ }
+});
+test('page requests serialize with sync; owner expiry clears cached page and selection',async()=>{
+ let finish,posts=0;const pending=new Promise(resolve=>{finish=resolve;});
+ const x=await ready((path,options)=>{
+  if(options.method==='POST')posts++;
+  return path.includes('offset=50')?pending:inboxPage(0);
+ });
+ try{
+  click(x,'older');click(x,'older');click(x,'sync');
+  assert.equal(posts,0);assert.equal(x.calls.filter(c=>c.path.includes('offset=50')).length,1);
+  finish(reply({error:'owner_sign_in_required'},401));await wait();
+  assert.equal(x.doc.querySelectorAll('.mail-message').length,0);
+  assert.equal(x.doc.querySelector('.mail-reader-subject'),null);
+  assert(x.doc.querySelector('[role="status"]').textContent.includes('Owner session expired'));
+ }finally{x.dom.window.close();}
+});
+test('sync from an older page returns to the newest snapshot without a stale revision token',async()=>{
+ let posts=0;
+ const x=await ready((path,options)=>{
+  if(options.method==='POST'){posts++;return reply({imported:0,updated:0,hasMore:false});}
+  const offset=Number(new URL(path,'https://station.example').searchParams.get('offset'));
+  return inboxPage(offset,posts?8:7);
+ });
+ try{
+  click(x,'older');await wait();click(x,'sync');await wait();
+  assert.equal(posts,1);assert.equal(x.doc.querySelector('.mail-page-range').textContent,'1–50 of 123');
+  assert.equal(x.calls.at(-1).path,'/api/mail/inbox?limit=50&offset=0');
  }finally{x.dom.window.close();}
 });

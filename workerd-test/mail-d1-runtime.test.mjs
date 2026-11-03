@@ -277,3 +277,38 @@ test(`workerd ${compatibilityDate}: incremental polling preserves indexed mail a
   });
  }finally{await mf.dispose();}
 });
+
+test(`workerd ${compatibilityDate}: owner HTTP inbox pages are bound to one real D1 revision`,async()=>{
+ const mf=new Miniflare({modules:true,script:'export default {fetch(){return new Response("isolated inbox pages")}}',
+  compatibilityDate,compatibilityFlags:['nodejs_compat'],d1Databases:['MAIL_PAGES']});
+ try{
+  const db=await mf.getD1Database('MAIL_PAGES');
+  const migration=await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql',import.meta.url),'utf8');
+  for(const sql of migration.split('\n').filter(line=>!/^\s*--/.test(line)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
+   await db.prepare(sql).run();
+  const store=createD1MailStore(db),base='https://station.example';
+  const records=Array.from({length:123},(_,i)=>message(i+1));
+  assert.deepEqual(await store.commitSnapshot({scope,expectedRevision:0,
+   next:{cursor:{uidValidity:7,highestUid:123},records}}),{ok:true,revision:1});
+  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
+   MAIL_IMAP_ADDRESS:'hello@devonakins.com',MAIL_IMAP_PASSWORD:'synthetic-only',MAIL_DB:db};
+  const noSocket=()=>assert.fail('cached pagination must not open IMAP');
+  const station=createStation({},async()=>({email:'owner@example.org',subject:'synthetic-owner'}),fetch,noSocket);
+  const seen=[];
+  for(const offset of [0,50,100]){
+   const response=await station.fetch(new Request(base+'/api/mail/inbox?limit=50&offset='+offset+'&revision=1'),env);
+   assert.equal(response.status,200);const page=await response.json();
+   assert.equal(page.offset,offset);assert.equal(page.revision,1);assert.equal(page.total,123);
+   assert.equal(page.messages.length,Math.min(50,123-offset));seen.push(...page.messages.map(x=>x.key));
+  }
+  assert.deepEqual(seen,records.slice().reverse().map(x=>x.key));assert.equal(new Set(seen).size,123);
+  await store.commitSnapshot({scope,expectedRevision:1,next:{cursor:{uidValidity:7,highestUid:124},records:[...records,message(124)]}});
+  const stale=await station.fetch(new Request(base+'/api/mail/inbox?limit=50&offset=50&revision=1'),env);
+  assert.equal(stale.status,409);assert.deepEqual(await stale.json(),{error:'mailbox_revision_conflict'});
+  const refreshed=await station.fetch(new Request(base+'/api/mail/inbox?limit=50&offset=0'),env);
+  assert.equal((await refreshed.json()).revision,2);
+  const denied=await station.fetch(new Request(base+'/api/mail/inbox?revision=2'),{...env,MAIL_OWNER_SUB:'other'});
+  assert.equal(denied.status,403);
+  assert.equal((await store.readSnapshot(scope)).revision,2);
+ }finally{await mf.dispose();}
+});
