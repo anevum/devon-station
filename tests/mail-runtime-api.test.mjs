@@ -16,7 +16,7 @@ function d1Double(db) {
    catch(e){db.exec('ROLLBACK');throw e;}
  }};
 }
-function socketMock(payload=mime,{trailingMetadata=false,complete=true}={}) {
+function socketMock(payload=mime,{trailingMetadata=false,complete=true,loginRejected=false,badExamine=false}={}) {
  let controller,closed=false,calls=[];
  const respond = bytes => {const raw=typeof bytes==='string'?new TextEncoder().encode(bytes):bytes;
   for(let pos=0;pos<raw.length;pos+=11)controller.enqueue(raw.slice(pos,pos+11));};
@@ -26,8 +26,8 @@ function socketMock(payload=mime,{trailingMetadata=false,complete=true}={}) {
   return {opened:Promise.resolve(),readable:new ReadableStream({start(c){controller=c;respond('* OK ready\r\n');}}),
    writable:new WritableStream({write(chunk){const command=new TextDecoder().decode(chunk);calls.push(command);
     const tag=command.slice(0,5);
-    if(command.includes(' LOGIN '))respond(tag+' OK logged in\r\n');
-    else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7] [UIDNEXT 2] selected\r\n'+tag+' OK done\r\n');
+    if(command.includes(' LOGIN '))respond(tag+(loginRejected?' NO refused\r\n':' OK logged in\r\n'));
+    else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7]'+(badExamine?'':' [UIDNEXT 2]')+' selected\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID FETCH')) {
       respond((trailingMetadata?'* 1 FETCH (BODY[] {':'* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {')+payload.byteLength+'}\r\n');
@@ -187,4 +187,74 @@ test('cache diagnostic storage failure is sanitized without exposing SQL, messag
  assert.deepEqual(JSON.parse(raw),{error:'mail_operation_failed'});
  assert.doesNotMatch(raw,/private SQL|MUST_NOT_LEAK|encrypted-message|must_not_write/);
  assert.equal(mock.calls().length,0);
+});
+
+
+test('owner initiated IMAP preflight logs in over fixed TLS and EXAMINEs inbox without reading or mutating mail',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);
+ const binding=d1Double(db),mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
+ try{
+  const r=await station.fetch(req('/api/mail/diagnostics/imap-check','POST'),env(binding));
+  assert.equal(r.status,200);
+  assert.deepEqual(await r.json(),{imapAuthenticated:true,inboxReadOnly:true,messageContentRead:false,
+   remoteMailboxModified:false,cacheModified:false,smtpContacted:false});
+  const calls=mock.calls();assert.equal(calls.length,2);
+  assert.match(calls[0],/^A0001 LOGIN /);
+  assert.equal(calls[1],'A0002 EXAMINE "INBOX"\r\n');
+  assert.equal(mock.closed(),true);
+  assert.equal(binding.batches,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_messages').get().n,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_mailboxes').get().n,0);
+ }finally{db.close();}
+});
+test('IMAP preflight is owner-only, same-origin, POST-only, explicit-body and configuration gated',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);
+ const binding=d1Double(db),mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
+ const path='/api/mail/diagnostics/imap-check';
+ try{
+  const bad=[
+   [req(path),env(binding),405],
+   [req(path,'POST',{body:'{"host":"evil.example"}'}),env(binding),400],
+   [req(path,'POST',{body:'not JSON'}),env(binding),400],
+   [req(path,'POST',{body:'{"padding":"'+ 'x'.repeat(150) +'"}'}),env(binding),413],
+   [req(path+'?debug=1','POST'),env(binding),400],
+   [req(path,'POST',{headers:{Origin:'https://evil.example','Content-Type':'application/json'}}),env(binding),403],
+   [req(path,'POST'),{...env(binding),MAIL_OWNER_SUB:'other-owner'},403],
+   [req(path,'POST'),{...env(binding),MAIL_IMAP_PASSWORD:''},503]
+  ];
+  for(const [request,config,status] of bad){
+   const response=await station.fetch(request,config);assert.equal(response.status,status);
+  }
+  const notOwner=createStation({},async()=>({email:'non-owner@example.org',subject:'trusted-owner-sub'}),fetch,mock.connect);
+  assert.equal((await notOwner.fetch(req(path,'POST'),env(binding))).status,403);
+  assert.equal(mock.calls().length,0);
+  assert.equal(binding.batches,0);
+ }finally{db.close();}
+});
+test('IMAP preflight refuses provider rejection and invalid EXAMINE without message fetch or database side effects',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ try{
+  for(const options of [{loginRejected:true},{badExamine:true}]){
+   const mock=socketMock(mime,options),station=createStation({},auth,fetch,mock.connect);
+   const response=await station.fetch(req('/api/mail/diagnostics/imap-check','POST'),env(binding));
+   assert.equal(response.status,502);
+   assert.deepEqual(await response.json(),{error:'mail_imap_probe_failed'});
+   assert.equal(mock.closed(),true);
+   assert(mock.calls().every(command=>!/\b(SEARCH|FETCH|STORE|APPEND|EXPUNGE|SELECT)\b/i.test(command)));
+  }
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_messages').get().n,0);
+  assert.equal(binding.batches,0);
+ }finally{db.close();}
+});
+test('IMAP preflight sanitizes socket initialization failures and does not expose sensitive data',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ try{
+  const station=createStation({},auth,fetch,()=>{throw Error('synthetic-secret-value provider gave private response');});
+  const response=await station.fetch(req('/api/mail/diagnostics/imap-check','POST'),env(binding));
+  assert.equal(response.status,502);
+  const text=await response.text();
+  assert.deepEqual(JSON.parse(text),{error:'mail_imap_probe_failed'});
+  assert.doesNotMatch(text,/synthetic-secret-value|private response|password|LOGIN/i);
+  assert.equal(binding.batches,0);
+ }finally{db.close();}
 });
