@@ -17,6 +17,23 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    const page=await context.newPage(),errors=[];page.on('pageerror',e=>errors.push(e.message));
    let confirm=false;page.on('dialog',dialog=>confirm?dialog.accept():dialog.dismiss());
    await page.goto(server.url+'/#mail');
+   // Read-only, in-app acceptance must function in a real mobile-width browser,
+   // without DevTools, provider requests, messages or authorization bypasses.
+   assert.equal(provider.evidence.imapConnections,0);
+   const diagnosticsRequests=[];
+   page.on('request',request=>{
+    const path=new URL(request.url()).pathname;
+    if(path==='/api/session'||path.startsWith('/api/mail/'))diagnosticsRequests.push({path,method:request.method()});
+   });
+   await page.getByRole('button',{name:'Check connection',exact:true}).click();
+   await page.locator('.mail-diagnostic-status[data-check="checked"]').waitFor();
+   assert.match(await page.locator('.mail-diagnostic-results').textContent(),/Isolated D1 cache metadata: reachable/);
+   assert.match(await page.locator('.mail-diagnostic-status').textContent(),/Decryption, real IMAP, SMTP and recipient delivery remain unverified/);
+   assert.deepEqual(diagnosticsRequests.map(x=>x.path),['/api/session','/api/mail/status','/api/mail/diagnostics']);
+   assert(diagnosticsRequests.every(x=>x.method==='GET'));
+   assert.equal(provider.evidence.imapConnections,0);
+   assert.equal(provider.evidence.smtpConnections,0);
+   assert.equal(provider.evidence.dataWrites,0);
    await page.getByRole('button',{name:'Synchronize Inbox',exact:true}).click();
    await page.locator('.mail-message').waitFor();await page.locator('.mail-message').click();
    await page.getByRole('heading',{name:'Browser incoming fixture',exact:true}).waitFor();
@@ -46,7 +63,7 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    // A different signed subject cannot list mail even with the same named email.
    const denied=await context.request.get(server.url+'/api/mail/inbox',{headers:{'Cf-Access-Jwt-Assertion':token('not-owner')}});assert.equal(denied.status(),403);
    assert.equal(server.externalCalls(),0);
-   results.push({width,overflow,pageErrors:0,inboxRead:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
+   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,inboxRead:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
    await context.close();await server.close();server=null;
   }
   writeFileSync(join(__dirname,'mail-browser-results.json'),JSON.stringify({provider:'synthetic-only',results},null,2));console.log(JSON.stringify({provider:'synthetic-only',results}));

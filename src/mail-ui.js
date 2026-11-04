@@ -169,7 +169,11 @@
     // from a foreign origin, embedded frame, sign-in document, or restrictive page CSP.
     const meta=document.querySelector('meta[http-equiv="Content-Security-Policy"]');
     const connect=meta?.getAttribute('content')?.split(';').map(x=>x.trim()).find(x=>x.startsWith('connect-src '));
-    if(location.protocol!=='https:'||window.top!==window.self||
+    // Local loopback is a trustworthy browser testing context; all other
+    // non-TLS origins remain blocked, and the Worker still authenticates.
+    const securePage=location.protocol==='https:'||
+      (location.protocol==='http:'&&['127.0.0.1','localhost'].includes(location.hostname));
+    if(!securePage||window.top!==window.self||
        document.title!=='Devon Station'||!document.querySelector('.app main#view')||
        !document.getElementById('station-mail')){
       diagnostic('blocked','Open the signed-in DevonStation workspace, not the Cloudflare Access sign-in page.');return;

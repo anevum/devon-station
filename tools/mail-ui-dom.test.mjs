@@ -356,3 +356,14 @@ test('diagnostics handle browser blocked fetch without calling provider APIs',as
   assert.match(x.doc.querySelector('.mail-diagnostic').textContent,/browser blocked the request or the connection failed/);
  }finally{x.dom.window.close();}
 });
+
+test('in-app diagnostics refuse untrusted plain HTTP origins even if DOM and CSP otherwise look valid',async()=>{
+ const x=load(path=>path==='/api/mail/status'?reply({address:'hello@devonakins.com',configured:false}):reply({total:0,messages:[]}));
+ try{
+  diagnosticApp(x);x.dom.reconfigure({url:'http://station.example/#mail'});
+  await wait();const before=x.calls.length;
+  x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+  assert.equal(x.calls.length,before);
+  assert.equal(x.doc.querySelector('.mail-diagnostic [data-check]').dataset.check,'blocked');
+ }finally{x.dom.window.close();}
+});
