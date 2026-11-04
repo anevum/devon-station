@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,verifyDatabaseIsolation,
- verifyBindingParity,buildVersionForm,uploadAcceptanceVersion} from '../tools/comms-acceptance-upload.mjs';
+ verifyBindingParity,approvedSourceForMode,buildVersionForm,uploadAcceptanceVersion} from '../tools/comms-acceptance-upload.mjs';
 
 const sha256=s=>createHash('sha256').update(s).digest('hex');
 const sourceSha='a'.repeat(40);
@@ -193,4 +193,16 @@ test('owner Access audience must match the configured Worker audience',()=>{
  assert.equal(verifyOwnerAccess(app(),policies(),owner,'synthetic-audience'),true);
  assert.throws(()=>verifyOwnerAccess(app(),policies(),owner,'unrelated-audience'),/audience differs/);
  assert.throws(()=>verifyOwnerAccess({...app(),aud:null},policies(),owner,'synthetic-audience'),/audience differs/);
+});
+
+test('privileged upload runner must use a separately approved candidate SHA and a trusted checkout',()=>{
+ const current='b'.repeat(40),trusted='c'.repeat(40);
+ assert.equal(approvedSourceForMode({mode:'--verify',checkoutSha:sourceSha,manifestSha:sourceSha}),sourceSha);
+ assert.throws(()=>approvedSourceForMode({mode:'--verify',checkoutSha:current,manifestSha:sourceSha}),/not from this checkout/);
+ const ok={mode:'--upload',checkoutSha:trusted,manifestSha:sourceSha,approvedSha:sourceSha,trustedUploaderSha:trusted};
+ assert.equal(approvedSourceForMode(ok),sourceSha);
+ assert.throws(()=>approvedSourceForMode({...ok,approvedSha:current}),/candidate SHA/);
+ assert.throws(()=>approvedSourceForMode({...ok,trustedUploaderSha:current}),/trusted checkout/);
+ assert.throws(()=>approvedSourceForMode({...ok,checkoutSha:'invalid'}),/invalid local checkout/);
+ assert.throws(()=>approvedSourceForMode({...ok,mode:'--unsafe'}),/unknown acceptance execution mode/);
 });
