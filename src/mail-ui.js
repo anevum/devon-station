@@ -3,7 +3,7 @@
 (function(){
   'use strict';
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
-  const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null};
+  const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]}};
   function node(tag,className,text){
     const el=document.createElement(tag);
     if(className)el.className=className;
@@ -68,6 +68,24 @@
     }
     header.append(who,controls);
     root.append(header);
+    // Owner-controlled, read-only runtime acceptance. No message contents or credentials are displayed.
+    const acceptance=node('section','mail-diagnostic');
+    acceptance.setAttribute('aria-label','Owner mail release checks');
+    const acceptanceHead=node('div','mail-diagnostic-head');
+    acceptanceHead.append(node('strong','', 'Connection and release checks'));
+    const check=button(state.diagnostic.phase==='running'?'Checking…':'Check connection','diagnose');
+    check.disabled=state.diagnostic.phase==='running';
+    acceptanceHead.append(check);acceptance.append(acceptanceHead);
+    acceptance.append(node('p','mail-small','Checks the signed owner session, server configuration and cached inbox API. No provider sync or email sending occurs.'));
+    const diagnosticStatus=node('p','mail-diagnostic-status',state.diagnostic.summary);
+    diagnosticStatus.setAttribute('role','status');diagnosticStatus.setAttribute('aria-live','polite');
+    diagnosticStatus.dataset.check=state.diagnostic.phase;acceptance.append(diagnosticStatus);
+    if(state.diagnostic.items.length){
+      const results=node('ul','mail-diagnostic-results');
+      for(const item of state.diagnostic.items)results.append(node('li','',item));
+      acceptance.append(results);
+    }
+    root.append(acceptance);
     if(state.status?.draftsEnabled){const draftHost=node('section','mail-drafts-host');draftHost.id='mail-drafts';draftHost.dataset.draftsEnabled='true';draftHost.setAttribute('aria-label','Stored unsent drafts');root.append(draftHost);}
     const notice=node('p','mail-banner',state.status?.draftsEnabled && state.status?.outgoingEnabled===true?'Outgoing mail requires a separately saved draft, two explicit owner actions, and a confirmed SMTP outbox. Recipient delivery is not guaranteed. HTML and attachments remain unavailable.':state.status?.draftsEnabled?'Sending, HTML and attachments are not enabled in this release. Drafts are stored privately but never sent.':'Receiving is read-only. Sending, drafts, HTML and attachments are not enabled in this release.');
     root.append(notice);
@@ -139,6 +157,74 @@
     body.append(listing,reader);
     root.append(body);
     if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true,state.status?.outboxEnabled===true);
+  }
+  function diagnostic(phase,summary,items=[]){
+    state.diagnostic={phase,summary,items};render();
+  }
+  async function diagnose(){
+    if(state.diagnostic.phase==='running')return;
+    diagnostic('running','Checking the active DevonStation owner session…');
+    // An Access sign-in document is not the DevonStation application. Do not probe APIs
+    // from a foreign origin, embedded frame, sign-in document, or restrictive page CSP.
+    const meta=document.querySelector('meta[http-equiv="Content-Security-Policy"]');
+    const connect=meta?.getAttribute('content')?.split(';').map(x=>x.trim()).find(x=>x.startsWith('connect-src '));
+    if(location.protocol!=='https:'||window.top!==window.self||
+       document.title!=='Devon Station'||!document.querySelector('.app main#view')||
+       !document.getElementById('station-mail')){
+      diagnostic('blocked','Open the signed-in DevonStation workspace, not the Cloudflare Access sign-in page.');return;
+    }
+    if(!connect||!connect.split(/\s+/).includes("'self'")){
+      diagnostic('blocked','The running page policy does not permit same-origin checks. No request was attempted.');return;
+    }
+    async function read(path){
+      let response;
+      try{
+        response=await fetch(path,{method:'GET',credentials:'same-origin',cache:'no-store',
+          redirect:'manual',headers:{Accept:'application/json'}});
+      }catch{return {kind:'network'};}
+      if(response.type==='opaqueredirect'||response.status>=300&&response.status<400)return {kind:'sign_in'};
+      if(response.status===401||response.status===403)return {kind:'sign_in'};
+      if(!response.headers.get('content-type')?.toLowerCase().includes('application/json'))return {kind:'not_json'};
+      if(!response.ok)return {kind:'unavailable'};
+      try{return {kind:'ok',body:await response.json()};}catch{return {kind:'invalid_json'};}
+    }
+    function failure(stage,result){
+      const reason=result.kind==='network'?'The browser blocked the request or the connection failed. Check the active page policy and network; provider credentials were not tested.':
+        result.kind==='sign_in'||result.kind==='not_json'?'Cloudflare Access sign-in or an expired owner session was detected. Sign in to DevonStation and try again.':
+        'The '+stage+' endpoint did not return a valid authorized response. No mailbox changes were made.';
+      diagnostic('blocked',reason);return;
+    }
+    const session=await read('/api/session');
+    if(session.kind!=='ok'||session.body?.authenticated!==true||session.body?.mode!=='owner'){
+      failure('session',session.kind==='ok'?{kind:'sign_in'}:session);return;
+    }
+    diagnostic('running','Owner session verified. Checking mail configuration…',['Signed owner session: verified']);
+    const status=await read('/api/mail/status');
+    if(status.kind!=='ok'){failure('mail status',status);return;}
+    const flags=status.body;
+    if(!flags||typeof flags.configured!=='boolean'||flags.address!=='hello@devonakins.com'||flags.provider!=='purelymail'){
+      diagnostic('blocked','Mail status returned an unexpected response. No provider operation was attempted.');return;
+    }
+    const lines=['Signed owner session: verified',
+      'Purelymail configuration: '+(flags.configured?'available':'incomplete'),
+      'Saved drafts: '+(flags.draftsEnabled===true?'enabled':'disabled'),
+      'Outgoing submission: '+(flags.outgoingEnabled===true?'enabled; recipient delivery remains unverified':'disabled'),
+      'Outbox: '+(flags.outboxEnabled===true?'enabled':'disabled')];
+    if(!flags.configured){
+      diagnostic('blocked','Provider configuration is incomplete. No mailbox connection was attempted.',lines);return;
+    }
+    diagnostic('running','Mail configuration is available. Checking the encrypted-cache API…',lines);
+    // Read only a single cached record to verify the storage path. Never render or
+    // persist its contents in the diagnostics; normal message reading remains separate.
+    const inbox=await read('/api/mail/inbox?limit=1&offset=0');
+    if(inbox.kind!=='ok'){failure('cached inbox',inbox);return;}
+    if(!Number.isSafeInteger(inbox.body?.total)||inbox.body.total<0||
+       !Number.isSafeInteger(inbox.body?.revision)||!Array.isArray(inbox.body?.messages)||
+       inbox.body.messages.length>1){
+      diagnostic('blocked','Cached inbox API returned an invalid response. No provider sync was attempted.',lines);return;
+    }
+    lines.push('Cached inbox API: reachable ('+inbox.body.total+' indexed messages)');
+    diagnostic('checked','Read-only application checks completed. Real IMAP, SMTP and recipient delivery are not established by these checks.',lines);
   }
   async function start(){
     if(state.busy)return;
@@ -219,6 +305,7 @@
     const button=e.target.closest?.('[data-mail-action]');
     if(!button || !document.getElementById('station-mail')?.contains(button))return;
     const action=button.dataset.mailAction;
+    if(action==='diagnose'){void diagnose();return;}
     if(action==='older'){void page(state.offset+50);return;}
     if(action==='newer'){void page(state.offset-50);return;}
     if(action==='sync'){void sync();return;}
