@@ -103,7 +103,9 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
     if(url.pathname==='/api/mail/diagnostics/imap-check'){
       if(request.method!=='POST')return status('method_not_allowed',405);
       if(url.search)return status('invalid_mail_probe_request',400);
-      const input=await readBody(request,32);
+      let input;
+      try{input=await readBody(request,32);}
+      catch(error){return status(error?.status===413?'mail_probe_payload_too_large':'invalid_mail_probe_request',error?.status===413?413:400);}
       if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length)
         return status('invalid_mail_probe_request',400);
       try{return {status:200,body:await probeReadOnlyImap({request,env,connect})};}
