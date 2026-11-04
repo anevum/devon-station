@@ -1,8 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,buildVersionForm,
- uploadAcceptanceVersion} from '../tools/comms-acceptance-upload.mjs';
+import {verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,verifyDatabaseIsolation,
+ verifyBindingParity,buildVersionForm,uploadAcceptanceVersion} from '../tools/comms-acceptance-upload.mjs';
 
 const sha256=s=>createHash('sha256').update(s).digest('hex');
 const sourceSha='a'.repeat(40);
@@ -12,6 +12,12 @@ const appId='d75c6407-070e-4b43-8843-0216b166d712';
 const origin='https://devon-station-mail-acceptance.devonakins.workers.dev';
 const owner='synthetic-owner@example.test';
 const worker='devon-station-mail-acceptance';
+const d1ids={
+ acceptanceDB:'11111111-1111-4111-8111-111111111111',
+ acceptanceMail:'22222222-2222-4222-8222-222222222222',
+ productionDB:'33333333-3333-4333-8333-333333333333',
+ productionMail:'44444444-4444-4444-8444-444444444444'
+};
 function fakeBundle(){
  const marker=JSON.stringify('"privateDataLoaded":false').slice(1,-1);
  const modules={
@@ -31,8 +37,8 @@ function settings(){
  const bindings=[
   p('ACCESS_AUD','synthetic-audience'),p('ACCESS_ISSUER','https://synthetic-access.example.test'),
   p('ACCESS_JWKS_URL','https://synthetic-access.example.test/certs'),
-  p('APP_ORIGIN',origin),{name:'DB',type:'d1',database_id:'synthetic-main'},
-  {name:'MAIL_DB',type:'d1',database_id:'synthetic-mail'},
+  p('APP_ORIGIN',origin),{name:'DB',type:'d1',database_id:d1ids.acceptanceDB},
+  {name:'MAIL_DB',type:'d1',database_id:d1ids.acceptanceMail},
   p('MAIL_DRAFTS_ENABLED','true'),p('MAIL_ENABLED','false'),
   p('MAIL_IMAP_ADDRESS','hello@devonakins.com'),p('MAIL_OUTBOX_ENABLED','true'),
   p('MAIL_OWNER_SUB','synthetic-subject'),p('MAIL_PAYLOAD_KEY_ID','a'),
@@ -42,7 +48,13 @@ function settings(){
  ];
  return {compatibility_date:'2026-10-28',compatibility_flags:['nodejs_compat'],bindings};
 }
-const app=()=>({id:appId,type:'self_hosted',domain:new URL(origin).hostname});
+function productionSettings(){
+ const source=settings(),bindings=structuredClone(source.bindings);
+ bindings.find(b=>b.name==='DB').database_id=d1ids.productionDB;
+ bindings.find(b=>b.name==='MAIL_DB').database_id=d1ids.productionMail;
+ return {...source,bindings};
+}
+const app=()=>({id:appId,type:'self_hosted',domain:new URL(origin).hostname,aud:'synthetic-audience'});
 const policies=()=>[{decision:'allow',include:[{email:{email:owner}}],exclude:[],require:[]}];
 test('staging review matches exact checked-out SHA, source module hashes, privacy entrypoint and TLS socket import',()=>{
  const {bytes,manifest}=fakeBundle();
@@ -99,7 +111,8 @@ test('dry-run provider emulation proves only version upload, no deployment, secr
   const path=new URL(url).pathname+new URL(url).search;
   requests.push({path,method:options.method,body:options.body});
   let result;
-  if(path.endsWith('/settings'))result=settings();
+  if(path.endsWith('/workers/scripts/devon-station/settings'))result=productionSettings();
+  else if(path.endsWith('/settings'))result=settings();
   else if(path.endsWith('/access/apps/'+appId))result=app();
   else if(path.endsWith('/access/apps/'+appId+'/policies'))result=policies();
   else if(path.endsWith('/deployments'))result={deployments:[{id:deployed}]};
@@ -120,6 +133,7 @@ test('dry-run provider emulation proves only version upload, no deployment, secr
  assert.equal(requests.filter(x=>x.method==='POST')[0].path.endsWith('/versions?bindings_inherit=strict'),true);
  assert(requests.every(x=>!['PUT','PATCH','DELETE'].includes(x.method)));
  assert(requests.every(x=>!x.path.includes('/secrets')&&!x.path.includes('/d1/database')));
+ assert.equal(requests.filter(x=>x.path.endsWith('/workers/scripts/devon-station/settings')).length,1);
  assert(requests.filter(x=>x.path.endsWith('/deployments')).length===2);
 });
 test('upload refuses missing authorization or mutated live deployment',async()=>{
@@ -130,7 +144,8 @@ test('upload refuses missing authorization or mutated live deployment',async()=>
  const fetchImpl=async(url,options)=>{
   const path=new URL(url).pathname+new URL(url).search;
   let result;
-  if(path.endsWith('/settings'))result=settings();
+  if(path.endsWith('/workers/scripts/devon-station/settings'))result=productionSettings();
+  else if(path.endsWith('/settings'))result=settings();
   else if(path.endsWith('/access/apps/'+appId))result=app();
   else if(path.endsWith('/access/apps/'+appId+'/policies'))result=policies();
   else if(path.endsWith('/deployments'))result={deployments:[{id:++count===1?deployed:version}]};
@@ -141,4 +156,41 @@ test('upload refuses missing authorization or mutated live deployment',async()=>
  };
  await assert.rejects(uploadAcceptanceVersion({fetchImpl,accountId:'b'.repeat(32),
   token:'synthetic-restricted-token',sourceSha,modules}),/deployment changed/);
+});
+
+test('acceptance storage isolation proves all four D1 resources are distinct and unchanged after upload',()=>{
+ const a=settings(),p=productionSettings();
+ assert.equal(verifyDatabaseIsolation(a,p),true);
+ assert.equal(verifyDatabaseIsolation(a,p,structuredClone(a)),true);
+ const overlap=structuredClone(a);
+ overlap.bindings.find(b=>b.name==='MAIL_DB').database_id=d1ids.productionDB;
+ assert.throws(()=>verifyDatabaseIsolation(overlap,p),/storage overlaps production/);
+ const duplicate=structuredClone(a);
+ duplicate.bindings.find(b=>b.name==='MAIL_DB').database_id=d1ids.acceptanceDB;
+ assert.throws(()=>verifyDatabaseIsolation(duplicate,p),/duplicates mail storage/);
+ const changed=structuredClone(a);
+ changed.bindings.find(b=>b.name==='DB').database_id=d1ids.productionMail;
+ assert.throws(()=>verifyDatabaseIsolation(a,p,changed),/uploaded version D1 database changed/);
+ const malformed=structuredClone(p);
+ malformed.bindings.find(b=>b.name==='DB').database_id='not-a-uuid';
+ assert.throws(()=>verifyDatabaseIsolation(a,malformed),/invalid D1 resource identity/);
+});
+test('uploaded runtime must preserve every inherited binding including owner, flags, addresses and D1',()=>{
+ const initial=settings(),uploaded={...settings(),bindings:[...settings().bindings,{name:'CF_VERSION_METADATA',type:'version_metadata'}]};
+ assert.equal(verifyBindingParity(initial,uploaded),true);
+ for(const [name,newValue] of [['OWNER_EMAIL','other@example.test'],['MAIL_IMAP_ADDRESS','other@example.test'],['ACCESS_AUD','attacker-aud'],['MAIL_SEND_ENABLED','true']]){
+  const changed=structuredClone(uploaded);changed.bindings.find(b=>b.name===name).text=newValue;
+  assert.throws(()=>verifyBindingParity(initial,changed),/plain-text configuration changed/);
+ }
+ const secretChanged=structuredClone(uploaded);
+ secretChanged.bindings.find(b=>b.name==='MAIL_PAYLOAD_KEYS_JSON').type='plain_text';
+ assert.throws(()=>verifyBindingParity(initial,secretChanged),/binding type changed/);
+ const dropped=structuredClone(uploaded);
+ dropped.bindings=dropped.bindings.filter(b=>b.name!=='MAIL_DB');
+ assert.throws(()=>verifyBindingParity(initial,dropped),/binding inventory differs/);
+});
+test('owner Access audience must match the configured Worker audience',()=>{
+ assert.equal(verifyOwnerAccess(app(),policies(),owner,'synthetic-audience'),true);
+ assert.throws(()=>verifyOwnerAccess(app(),policies(),owner,'unrelated-audience'),/audience differs/);
+ assert.throws(()=>verifyOwnerAccess({...app(),aud:null},policies(),owner,'synthetic-audience'),/audience differs/);
 });
