@@ -1,0 +1,9 @@
+# Synthetic foundation prototype
+
+Original dependency-free Node.js contract proof. Run `npm test` with Node 22 or later. No services, deployment, existing state-schema changes, or real data are involved.
+
+`createFoundation` accepts a trusted, already verified owner claim and synthetic scoped project projections. It checks claims on every operation; callers must never construct those claims from untrusted request bodies. This prototype has no authentication provider, persistence, cross-process concurrency control, encrypted storage, or production authorization. Approval records a decision only and executes nothing. In-memory operation retries and receipts last only for the process lifetime unless exported and restored.
+
+`verifyImport` checks a bounded version 2 JSON export, owner and scope, structure, receipt sequence, operation associations, request fingerprints, and SHA-256 checksum, and returns detached history. `restoreFoundation` validates the export and matching trusted identity before reconstructing a separate mutable in-memory store with the original operation identifiers. Retry behavior is restored. Version 1 prototype exports are explicitly rejected because they omit operation identifiers; no migration or real data is involved. Unkeyed checksums and request hashes detect accidental corruption and structural inconsistency, not a determined attacker who can recompute them: authenticated encryption or signatures and trusted key management are necessary for authenticity. Export contains owner, project, action and operation metadata; receipts omit action summaries and source details. This prototype is synthetic-only, not a real-data backup.
+
+Historical recovery code, archives and graphics were not incorporated. Existing project license and inherited source rights remain unresolved; no license selection is implied by this prototype.
