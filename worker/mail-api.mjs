@@ -3,7 +3,8 @@
 import {handleMailOutboxApi,mailSendingEnabled} from './mail-outbox-api.mjs';
 import {createMailRegistry} from '../src/communications/mail-core.mjs';
 import {createD1MailStore} from '../src/communications/mail-d1-store.mjs';
-import {createReadOnlyImapProvider} from '../src/communications/mail-imap-readonly.mjs';
+import {createReadOnlyImapProvider,parseUidValidity,parseUidNext} from '../src/communications/mail-imap-readonly.mjs';
+import {PURELYMAIL} from '../src/communications/mail-onboarding.mjs';
 import {createPurelymailImapConnector} from '../src/communications/mail-imap-transport.mjs';
 import {decodeSafeMime} from '../src/communications/mail-mime-safe.mjs';
 import {handleMailDraftApi,mailDraftsEnabled} from './mail-drafts-api.mjs';
@@ -12,6 +13,46 @@ import {listReadOnlyInbox, pollReadOnlyMailbox, listReadOnlyMailboxes} from '../
 import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
 const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
 const MAILBOX = 'hello@devonakins.com';
+// An explicit owner-only provider preflight, never a sync or background poll.
+// Abort waiters enforce an upper bound even if an underlying socket promise stalls.
+function bounded(signal,action){
+  if(signal.aborted)return Promise.reject(Error('imap_probe_deadline'));
+  return new Promise((resolve,reject)=>{
+    let finished=false;
+    const finish=(cb,value)=>{
+      if(finished)return;
+      finished=true;signal.removeEventListener('abort',abort);cb(value);
+    };
+    const abort=()=>finish(reject,Error('imap_probe_deadline'));
+    signal.addEventListener('abort',abort,{once:true});
+    Promise.resolve().then(action).then(v=>finish(resolve,v),e=>finish(reject,e));
+  });
+}
+async function probeReadOnlyImap({request,env,connect}){
+  // This endpoint does not accept caller-supplied hostnames, mailbox paths, or
+  // credentials. The trusted connector permits only the audited command grammar.
+  const signal=AbortSignal.any([request.signal,AbortSignal.timeout(9000)]);
+  const connector=createPurelymailImapConnector({
+    connect,credentials:async username=>username===MAILBOX?env.MAIL_IMAP_PASSWORD:undefined,
+    decodeMime:decodeSafeMime
+  });
+  let connection;
+  try{
+    connection=await bounded(signal,()=>connector.open({
+      host:PURELYMAIL.incoming.host,port:PURELYMAIL.incoming.port,
+      servername:PURELYMAIL.incoming.host,tlsRequired:true,rejectUnauthorized:true,
+      username:MAILBOX,signal
+    }));
+    const examine=await bounded(signal,()=>connection.exchange('EXAMINE "INBOX"',{signal}));
+    parseUidValidity(examine);
+    parseUidNext(examine);
+    if(signal.aborted)throw Error('imap_probe_deadline');
+    return {imapAuthenticated:true,inboxReadOnly:true,messageContentRead:false,
+      remoteMailboxModified:false,cacheModified:false,smtpContacted:false};
+  }finally{
+    if(connection)await bounded(AbortSignal.timeout(1000),()=>connection.close());
+  }
+}
 const scope = Object.freeze({installationId:'personal',principalId:'owner'});
 const status = (code,httpStatus=400)=>({status:httpStatus,body:{error:code}});
 // Diagnostics must not SELECT, decrypt or return message contents.
@@ -55,10 +96,20 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(url.pathname==='/api/mail/status' && request.method==='GET')
     return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect)&&mailDraftsEnabled(env),outboxEnabled:env.MAIL_OUTBOX_ENABLED==='true'&&typeof env.MAIL_DB?.prepare==='function',draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
   if(url.pathname.startsWith('/api/mail/drafts'))return handleMailDraftApi({request,url,user,env,readBody});
-  if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync','/api/mail/diagnostics'].includes(url.pathname))
+  if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync','/api/mail/diagnostics','/api/mail/diagnostics/imap-check'].includes(url.pathname))
     return status('not_found',404);
   if(!ready)return status('mail_not_configured',503);
   try {
+    if(url.pathname==='/api/mail/diagnostics/imap-check'){
+      if(request.method!=='POST')return status('method_not_allowed',405);
+      if(url.search)return status('invalid_mail_probe_request',400);
+      const input=await readBody(request,32);
+      if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length)
+        return status('invalid_mail_probe_request',400);
+      try{return {status:200,body:await probeReadOnlyImap({request,env,connect})};}
+      catch{return status(request.signal.aborted?'mail_imap_probe_cancelled':'mail_imap_probe_failed',
+        request.signal.aborted?504:502);}
+    }
     if(url.pathname==='/api/mail/diagnostics') {
       if(request.method!=='GET')return status('method_not_allowed',405);
       if(url.search)return status('invalid_mail_diagnostics_request',400);
