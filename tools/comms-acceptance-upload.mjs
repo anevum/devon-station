@@ -5,6 +5,7 @@ import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
 import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
+import {resolve} from 'node:path';
 
 const WORKER='devon-station-mail-acceptance';
 const ORIGIN='https://devon-station-mail-acceptance.devonakins.workers.dev';
@@ -172,5 +173,5 @@ async function main(){
  });
  console.log(JSON.stringify(result));
 }
-if(process.argv[1]&&fileURLToPath(import.meta.url)===fileURLToPath(new URL('file://'+process.argv[1])))
+if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url))
  main().catch(error=>{console.error(error.message);process.exitCode=1;});
