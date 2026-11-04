@@ -2,7 +2,7 @@
 // All email content is appended via textContent, never HTML; no images or remote links.
 (function(){
   'use strict';
-  const SYNC_DIAGNOSTIC_CODES=new Set(["imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed"]);
+  const SYNC_DIAGNOSTIC_CODES=new Set(["imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed", "mime_wire_limit", "mime_parse_failed", "mime_invalid_from", "mime_subject_limit", "mime_html_conversion_failed", "mime_body_index_limit", "mail_sync_unclassified"]);
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
   const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
   function node(tag,className,text){
@@ -41,13 +41,26 @@
       headers:{'Accept':'application/json'}};
     if(method==='POST'){options.headers['Content-Type']='application/json';options.body='{}';}
     if(path===URLS.sync)options.headers['X-DevonStation-Mail-Diagnostics']='1';
-    const response=await fetch(path,options);
-    if(path===URLS.sync&&response.status===502&&response.headers.get('Content-Type')?.toLowerCase().includes('application/json')){
-      const failure=await response.json();
-      if(failure?.error==='mail_operation_failed'&&SYNC_DIAGNOSTIC_CODES.has(failure.diagnosticCode))
-        throw Error('mail_sync_diagnostic:'+failure.diagnosticCode);
+    let response;
+    try{response=await fetch(path,options);}
+    catch(error){if(path===URLS.sync)throw Error('mail_sync_response:network_failed');throw error;}
+    const isJson=response.headers.get('Content-Type')?.toLowerCase().includes('application/json');
+    if(path===URLS.sync){
+      if(response.status===401||response.status===403)throw Error('mail_sign_in_required');
+      if(response.status===409)throw Error('mail_inbox_changed');
+      let value;
+      if(isJson){
+        try{value=await response.json();}
+        catch{throw Error('mail_sync_response:invalid_json');}
+      }
+      if(response.status===502&&value?.error==='mail_operation_failed'&&SYNC_DIAGNOSTIC_CODES.has(value.diagnosticCode))
+        throw Error('mail_sync_diagnostic:'+value.diagnosticCode);
+      if(!response.ok)throw Error('mail_sync_response:'+(
+        Number.isInteger(response.status)&&response.status>=0&&response.status<=599?'http_'+response.status:'invalid_status'));
+      if(!isJson)throw Error('mail_sync_response:non_json');
+      return value;
     }
-    if(!response.ok || !response.headers.get('Content-Type')?.toLowerCase().includes('application/json'))
+    if(!response.ok || !isJson)
       throw Error(response.status===401||response.status===403?'mail_sign_in_required':
         response.status===409?'mail_inbox_changed':'mail_request_failed');
     return response.json();
@@ -340,9 +353,9 @@
     try {
       for(let i=0;i<maxBatches;i++){
         const result=await json(URLS.sync,'POST');
-        if(!Number.isSafeInteger(result.imported)||result.imported<0||result.imported>100||
+        if(!result||typeof result!=='object'||!Number.isSafeInteger(result.imported)||result.imported<0||result.imported>100||
            !Number.isSafeInteger(result.updated)||result.updated<0||result.updated>100||
-           typeof result.hasMore!=='boolean')throw Error('invalid_mail_response');
+           typeof result.hasMore!=='boolean')throw Error('mail_sync_response:invalid_receipt');
         state.run.batches++;state.run.imported+=result.imported;state.run.updated+=result.updated;
         state.hasMore=result.hasMore;
         if(state.stopRequested||!result.hasMore||!document.getElementById('station-mail'))break;
@@ -359,7 +372,8 @@
     }catch(error){
       state.phase='error';
       state.error=error?.message==='mail_sign_in_required'?'Owner session expired. Sign in again.':
-        (error?.message?.startsWith('mail_sync_diagnostic:')?'Synchronization stopped ('+error.message.slice(21)+'). ':'Confirmation or inbox refresh unavailable. ')+state.run.batches+' batch(es) confirmed, '+state.run.imported+
+        (error?.message?.startsWith('mail_sync_diagnostic:')?'Synchronization stopped ('+error.message.slice(21)+'). ':
+        error?.message?.startsWith('mail_sync_response:')?'Synchronization response unavailable ('+error.message.slice('mail_sync_response:'.length)+'). ':'Confirmation or inbox refresh unavailable. ')+state.run.batches+' batch(es) confirmed, '+state.run.imported+
         ' new messages saved. An unconfirmed request may still have committed; reload before retrying.';
       if(error?.message==='mail_sign_in_required'){state.items=[];state.total=0;state.selected=null;state.offset=0;state.revision=null;}
     }finally{state.busy=false;render();}

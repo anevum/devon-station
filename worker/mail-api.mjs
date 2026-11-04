@@ -12,7 +12,7 @@ import {listReadOnlyInbox, pollReadOnlyMailbox, listReadOnlyMailboxes} from '../
 
 import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
 const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
-const SYNC_DIAGNOSTIC_CODES=new Set(["imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed"]);
+const SYNC_DIAGNOSTIC_CODES=new Set(["imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed", "mime_wire_limit", "mime_parse_failed", "mime_invalid_from", "mime_subject_limit", "mime_html_conversion_failed", "mime_body_index_limit", "mail_sync_unclassified"]);
 const MAILBOX = 'hello@devonakins.com';
 // An explicit owner-only provider preflight, never a sync or background poll.
 // Abort waiters enforce an upper bound even if an underlying socket promise stalls.
@@ -150,8 +150,8 @@ export async function handleMailApi({request,url,user,env,connect,readBody,worke
     if(code==='mailbox_revision_conflict')return status(code,409);
     if(['invalid_inbox_page','invalid_readonly_poll_options'].includes(code))return status(code,400);
     // Avoid exposing provider credentials, IMAP line contents or SQL text to the caller or logs.
-    const diagnosticCode=SYNC_DIAGNOSTIC_CODES.has(code)?code:error instanceof TypeError?'mail_validation_failed':null;
-    if(url.pathname==='/api/mail/sync'&&request.headers.get('X-DevonStation-Mail-Diagnostics')==='1'&&diagnosticCode)
+    const diagnosticCode=SYNC_DIAGNOSTIC_CODES.has(code)?code:error instanceof TypeError?'mail_validation_failed':'mail_sync_unclassified';
+    if(url.pathname==='/api/mail/sync'&&request.headers.get('X-DevonStation-Mail-Diagnostics')==='1')
       return {status:502,body:{error:'mail_operation_failed',diagnosticCode}};
     return status('mail_operation_failed',502);
   }

@@ -17,7 +17,7 @@ function load(handler){
  return {dom,doc:dom.window.document,calls};
 }
 const reply=(body,status=200,type='application/json')=>({
- ok:status>=200&&status<300,status,headers:new Headers({'Content-Type':type}),json:async()=>Array.isArray(body.messages)?{revision:1,offset:0,limit:50,...body}:body
+ ok:status>=200&&status<300,status,headers:new Headers({'Content-Type':type}),json:async()=>Array.isArray(body?.messages)?{revision:1,offset:0,limit:50,...body}:body
 });
 const sample={key:'personal/hello/7/1',from:'author@example.org',subject:'<script>alert(1)</script>',
   text:'<img src="https://tracker.invalid/pixel"> is inert plaintext',
@@ -467,8 +467,33 @@ test('sync shows only allowlisted failure codes, keeps generic uncertainty for u
   click(x,'sync');await wait();
   const text=x.doc.getElementById('station-mail').textContent;
   if(code==='imap_invalid_fetch')assert.match(text,/Synchronization stopped \(imap_invalid_fetch\)/);
-  else {assert.doesNotMatch(text,/private.invalid/);assert.match(text,/Confirmation or inbox refresh unavailable/);}
+  else {assert.doesNotMatch(text,/private.invalid/);assert.match(text,/Synchronization response unavailable \(http_502\)/);}
   assert.equal(syncs,1);assert.equal(x.doc.querySelectorAll('img,script,iframe').length,0);
   x.dom.window.close();
+ }
+});
+
+
+test('sync response diagnostics distinguish HTTP, network and malformed receipts without raw response text or retries',async()=>{
+ const cases=[
+  [()=>reply({error:'mail_operation_failed',diagnosticCode:'mime_body_index_limit'},502),'Synchronization stopped (mime_body_index_limit)'],
+  [()=>reply({error:'PRIVATE_UPSTREAM'},500),'Synchronization response unavailable (http_500)'],
+  [()=>reply({error:'PRIVATE_UPSTREAM'},0),'Synchronization response unavailable (http_0)'],
+  [()=>reply({},200,'text/html'),'Synchronization response unavailable (non_json)'],
+  [()=>({...reply({}),json:async()=>{throw Error('PRIVATE_JSON');}}),'Synchronization response unavailable (invalid_json)'],
+  [()=>reply(null),'Synchronization response unavailable (invalid_receipt)'],
+  [()=>reply({imported:0,updated:0,hasMore:null}),'Synchronization response unavailable (invalid_receipt)'],
+  [()=>{throw Error('PRIVATE_NETWORK');},'Synchronization response unavailable (network_failed)']
+ ];
+ for(const [response,expected] of cases){
+  let posts=0;
+  const x=await ready(path=>{if(path==='/api/mail/sync'){posts++;return response();}return reply({total:0,messages:[]});});
+  try{
+   click(x,'sync');await wait();
+   const text=x.doc.querySelector('[role="status"]').textContent;
+   assert(text.includes(expected),text);assert.match(text,/0 batch\(es\) confirmed/);
+   assert.match(text,/may still have committed/);assert.doesNotMatch(text,/PRIVATE_/);
+   assert.equal(posts,1);await wait();assert.equal(posts,1);
+  }finally{x.dom.window.close();}
  }
 });

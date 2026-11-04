@@ -16,7 +16,7 @@ function d1Double(db) {
    catch(e){db.exec('ROLLBACK');throw e;}
  }};
 }
-function socketMock(payload=mime,{trailingMetadata=false,complete=true,loginRejected=false,badExamine=false}={}) {
+function socketMock(payload=mime,{trailingMetadata=false,complete=true,loginRejected=false,badExamine=false,fetchFailure=false}={}) {
  let controller,closed=false,calls=[];
  const respond = bytes => {const raw=typeof bytes==='string'?new TextEncoder().encode(bytes):bytes;
   for(let pos=0;pos<raw.length;pos+=11)controller.enqueue(raw.slice(pos,pos+11));};
@@ -30,6 +30,7 @@ function socketMock(payload=mime,{trailingMetadata=false,complete=true,loginReje
     else if(command.includes('EXAMINE'))respond('* OK [UIDVALIDITY 7]'+(badExamine?'':' [UIDNEXT 2]')+' selected\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID SEARCH'))respond('* SEARCH 1\r\n'+tag+' OK done\r\n');
     else if(command.includes('UID FETCH')) {
+      if(fetchFailure){controller.error(new Error('PRIVATE_PROVIDER_TEXT_DO_NOT_LEAK'));return;}
       respond((trailingMetadata?'* 1 FETCH (BODY[] {':'* 1 FETCH (UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500" BODY[] {')+payload.byteLength+'}\r\n');
       respond(payload);
       if(complete)respond((trailingMetadata?' UID 1 FLAGS (\\Seen) INTERNALDATE "02-Nov-2026 12:00:00 -0500"': '')+')\r\n');
@@ -330,4 +331,28 @@ test('explicit owner sync diagnostics expose only fixed codes and preserve empty
   const nonowner=await station.fetch(denied,{...env(binding),MAIL_OWNER_SUB:'different'});
   assert.equal(nonowner.status,403);assert.doesNotMatch(await nonowner.text(),/diagnosticCode/);
  }finally{db.close();}
+});
+
+
+test('MIME body limit and unclassified transport errors produce bounded opt-in diagnostics without writes',async()=>{
+ for(const [payload,options,code] of [
+  [new TextEncoder().encode('From: author@example.org\r\nSubject: PRIVATE_SUBJECT\r\n\r\n'+'A'.repeat(4200)),{},'mime_body_index_limit'],
+  [mime,{fetchFailure:true},'mail_sync_unclassified']
+ ]){
+  const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+  try{
+   for(const optedIn of [false,true]){
+    const mock=socketMock(payload,options),station=createStation({},auth,fetch,mock.connect);
+    const request=req('/api/mail/sync','POST');
+    if(optedIn)request.headers.set('X-DevonStation-Mail-Diagnostics','1');
+    const response=await station.fetch(request,env(binding));
+    assert.equal(response.status,502);
+    const raw=await response.text();
+    assert.deepEqual(JSON.parse(raw),{error:'mail_operation_failed',...(optedIn?{diagnosticCode:code}:{})});
+    assert.doesNotMatch(raw,/PRIVATE_|synthetic-password|author@example/);
+    assert.equal(binding.batches,0);assert.equal(mock.closed(),true);
+    assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_mailboxes').get().n,0);
+   }
+  }finally{db.close();}
+ }
 });
