@@ -77,6 +77,7 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
       const password = await credentials(username);
       if (!ascii(password, 1024)) reject('imap_credentials_unavailable');
       let socket, reader, writer, buffer = new Uint8Array(0), closed = false, tag = 0;
+      let openFailureCode = 'imap_tls_connect_failed';
       const cleanup = async () => {
         if (closed) return;
         closed = true;
@@ -94,6 +95,7 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
         if (!socket || !socket.opened || !socket.readable || !socket.writable || typeof socket.close !== 'function') reject('imap_socket_unavailable');
         await socket.opened;
         if (closed || signal?.aborted) reject('imap_session_cancelled');
+        openFailureCode = 'imap_greeting_failed';
         reader = socket.readable.getReader();
         writer = socket.writable.getWriter();
         async function fill() {
@@ -168,6 +170,7 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
             }
           }
         }
+        openFailureCode = 'imap_login_failed';
         await exchangeRaw('LOGIN '+quote(username)+' '+quote(password),'login');
         return Object.freeze({
           async exchange(command, {signal:stepSignal}={}) {
@@ -182,10 +185,13 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
           },
           async close(){signal?.removeEventListener('abort',abort);await cleanup();}
         });
-      } catch {
+      } catch(error) {
         signal?.removeEventListener('abort',abort);
         await cleanup();
-        reject('imap_transport_failed');
+        // Project only the trusted open stage, never native errors or provider text.
+        reject(signal?.aborted?'imap_session_cancelled':
+          openFailureCode==='imap_login_failed'&&error?.code==='imap_command_failed'?
+          'imap_login_rejected':openFailureCode);
       }
     }
   });

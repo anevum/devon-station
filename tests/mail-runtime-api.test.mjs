@@ -356,3 +356,22 @@ test('MIME body limit and unclassified transport errors produce bounded opt-in d
   }finally{db.close();}
  }
 });
+
+test('read-only probe projects opt-in open-stage failures, denies nonowners and never writes mail',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ try{
+  for(const [connect,expected] of [
+   [()=>{throw Error('PRIVATE_NATIVE_ERROR');},'imap_tls_connect_failed'],
+   [socketMock(mime,{loginRejected:true}).connect,'imap_login_rejected']
+  ]){
+   const station=createStation({},auth,fetch,connect);
+   const request=req('/api/mail/diagnostics/imap-check','POST');request.headers.set('X-DevonStation-Mail-Diagnostics','1');
+   const result=await station.fetch(request,env(binding));assert.equal(result.status,502);
+   const raw=await result.text();assert.deepEqual(JSON.parse(raw),{error:'mail_imap_probe_failed',diagnosticCode:expected});
+   assert.doesNotMatch(raw,/PRIVATE_|synthetic-password/);assert.equal(binding.batches,0);
+  }
+  const mock=socketMock(),request=req('/api/mail/diagnostics/imap-check','POST');request.headers.set('X-DevonStation-Mail-Diagnostics','1');
+  const denied=await createStation({},auth,fetch,mock.connect).fetch(request,{...env(binding),MAIL_OWNER_SUB:'other'});
+  assert.equal(denied.status,403);assert.doesNotMatch(await denied.text(),/diagnosticCode/);assert.equal(mock.calls().length,0);
+ }finally{db.close();}
+});

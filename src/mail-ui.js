@@ -2,7 +2,8 @@
 // All email content is appended via textContent, never HTML; no images or remote links.
 (function(){
   'use strict';
-  const SYNC_DIAGNOSTIC_CODES=new Set(["imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed", "mime_wire_limit", "mime_parse_failed", "mime_invalid_from", "mime_subject_limit", "mime_html_conversion_failed", "mime_body_index_limit", "mail_sync_unclassified"]);
+  const OPEN_DIAGNOSTIC_CODES=new Set(['imap_tls_connect_failed','imap_greeting_failed','imap_login_failed','imap_login_rejected','imap_session_cancelled']);
+  const SYNC_DIAGNOSTIC_CODES=new Set([...OPEN_DIAGNOSTIC_CODES, "imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed", "mime_wire_limit", "mime_parse_failed", "mime_invalid_from", "mime_subject_limit", "mime_html_conversion_failed", "mime_body_index_limit", "mail_sync_unclassified"]);
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
   const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
   function node(tag,className,text){
@@ -275,7 +276,7 @@
     try{
       response=await fetch('/api/mail/diagnostics/imap-check',{
         method:'POST',credentials:'same-origin',cache:'no-store',redirect:'manual',
-        headers:{Accept:'application/json','Content-Type':'application/json'},body:'{}'
+        headers:{Accept:'application/json','Content-Type':'application/json','X-DevonStation-Mail-Diagnostics':'1'},body:'{}'
       });
     }catch{
       finish('blocked','Browser or network prevented provider testing. No email was sent or synchronized.');return;
@@ -288,6 +289,12 @@
       finish('blocked','Unexpected sign-in or non-JSON response. No provider result was accepted.');return;
     }
     if(!response.ok){
+      if(response.status===502){
+        let failure;try{failure=await response.json();}catch{}
+        if(failure?.error==='mail_imap_probe_failed'&&OPEN_DIAGNOSTIC_CODES.has(failure.diagnosticCode)){
+          finish('blocked','The secure IMAP check stopped ('+failure.diagnosticCode+'). No message was downloaded or sent.');return;
+        }
+      }
       finish('blocked',response.status===503?'Provider credentials or encryption configuration are incomplete.':
         'The secure IMAP login or read-only INBOX check did not complete. Check credentials and connectivity.');return;
     }

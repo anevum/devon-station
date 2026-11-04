@@ -497,3 +497,27 @@ test('sync response diagnostics distinguish HTTP, network and malformed receipts
   }finally{x.dom.window.close();}
  }
 });
+
+test('read-only login probe renders fixed open stages and ignores arbitrary upstream diagnostic strings',async()=>{
+ for(const code of ['imap_tls_connect_failed','imap_login_rejected','PRIVATE_NATIVE_ERROR']){
+  let probes=0;
+  const x=load((path,options)=>{
+   if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true});
+   if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+   if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0});
+   if(path==='/api/mail/diagnostics/imap-check'){
+    probes++;assert.equal(options.headers['X-DevonStation-Mail-Diagnostics'],'1');
+    return reply({error:'mail_imap_probe_failed',diagnosticCode:code},502);
+   }
+   if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+   throw Error('unexpected');
+  });
+  try{
+   diagnosticApp(x);await wait();click(x,'diagnose');await wait();click(x,'provider-check');await wait();
+   const text=x.doc.querySelector('[data-provider-check]').textContent;
+   if(code==='PRIVATE_NATIVE_ERROR')assert.doesNotMatch(text,/PRIVATE_NATIVE_ERROR/);
+   else assert(text.includes('stopped ('+code+')'),text);
+   assert.equal(probes,1);assert.equal(x.calls.filter(c=>c.path==='/api/mail/sync').length,0);
+  }finally{x.dom.window.close();}
+ }
+});
