@@ -78,7 +78,8 @@
     acceptanceHead.append(check);acceptance.append(acceptanceHead);
     acceptance.append(node('p','mail-small','Checks the signed owner session, server configuration and cached inbox API. No provider sync or email sending occurs.'));
     const diagnosticStatus=node('p','mail-diagnostic-status',state.diagnostic.summary);
-    diagnosticStatus.setAttribute('role','status');diagnosticStatus.setAttribute('aria-live','polite');
+    // Keep the existing inbox role=status as the primary mail live region.
+    diagnosticStatus.setAttribute('aria-live','polite');
     diagnosticStatus.dataset.check=state.diagnostic.phase;acceptance.append(diagnosticStatus);
     if(state.diagnostic.items.length){
       const results=node('ul','mail-diagnostic-results');
