@@ -384,3 +384,19 @@ test('read-only probe projects opt-in open-stage failures, denies nonowners and 
   assert.equal(denied.status,403);assert.doesNotMatch(await denied.text(),/diagnosticCode/);assert.equal(mock.calls().length,0);
  }finally{db.close();}
 });
+
+
+test('mixed-case synthetic MIME sender reaches encrypted D1 and reader without canonical identity privileges',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ const payload=new TextEncoder().encode('From: Case.Sensitive@EXAMPLE.org\r\nSubject: Mixed case\r\nContent-Type: text/plain\r\n\r\nReadable sender metadata.');
+ const mock=socketMock(payload),station=createStation({},auth,fetch,mock.connect);
+ try{
+  const response=await station.fetch(req('/api/mail/sync','POST'),env(binding));
+  assert.equal(response.status,200);assert.equal((await response.json()).imported,1);
+  const stored=db.prepare('SELECT from_address,body_text FROM comms_ro_messages').get();
+  assert.equal(stored.from_address,'');assert.doesNotMatch(stored.body_text,/Case.Sensitive|Readable sender metadata/);
+  const rows=(await (await station.fetch(req('/api/mail/inbox'),env(binding))).json()).messages;
+  assert.equal(rows[0].from,'Case.Sensitive@EXAMPLE.org');assert.equal(rows[0].text,'Readable sender metadata.\n');
+  assert.equal(binding.batches,1);
+ }finally{db.close();}
+});

@@ -150,3 +150,17 @@ test('trusted scan watermark advances atomically with messages and rejects rollb
  const reset=reconcileImapBatch(sync({cursor:initial.cursor,batch:{uidValidity:202,messages:[],scannedThrough:256}}));
  assert.equal(reset.uidValidityReset,true);assert.equal(reset.cursor.highestUid,256);
 });
+
+
+test('incoming sender case/dot-atoms are preserved without expanding authenticated identities or grants',()=>{
+ for(const from of ['Case.Sensitive@Example.ORG','_newsletter+tag@EXAMPLE.org','9sender@example.net']){
+  const result=reconcileImapBatch(sync({batch:{uidValidity:101,messages:[entry(1,{from})]}}));
+  assert.equal(result.records[0].from,from);assert.equal(result.imported,1);
+ }
+ for(const from of ['.leading@example.org','trailing.@example.org','double..dot@example.org','two@@example.org','x@-bad.example','x@example..org','x@example.org\r\nBcc: evil@example.org','x<bad>@example.org'])
+  assert.throws(()=>reconcileImapBatch(sync({batch:{uidValidity:101,messages:[entry(1,{from})]}})),{code:'mail_sender_address_invalid'});
+ const altered=configuration();altered.mailboxes[2].address='Support@example.org';
+ assert.throws(()=>createMailRegistry(altered),/Invalid email address/);
+ assert.equal(evaluateFromIdentity(reg,supervisor,'client-support','Support@example.org').allowed,false);
+ assert.equal(hasMailPermission(reg,agent,'client-support','sync'),false);
+});

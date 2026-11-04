@@ -14,6 +14,16 @@ function requireAddress(value) {
       !ADDRESS.test(value) || value.includes('..')) throw new TypeError('Invalid email address');
   return value;
 }
+// Incoming metadata is inert display data, not an authenticated sending identity.
+// Accept ASCII dot-atom sender case without normalizing a possibly case-sensitive local part.
+function incomingAddress(value) {
+  const local=typeof value==='string'?value.split('@')[0]:'';
+  if (typeof value!=='string'||value.length>254||value.includes('..')||
+      local.startsWith('.')||local.endsWith('.')||
+      !/^[a-z0-9.!#$%&'*+/=?^_`{|}~-]{1,64}@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i.test(value))
+    throw Object.assign(new TypeError('Invalid incoming email address'),{code:'mail_sender_address_invalid'});
+  return value;
+}
 function immutable(item) { return Object.freeze(item); }
 function distinct(items, key, kind) {
   const seen = new Set();
@@ -141,7 +151,7 @@ function safeCursor(cursor) {
 }
 function messageRecord({uidValidity, installationId, mailboxId, item}) {
   const uid = positiveInt(item?.uid, 'message UID');
-  const from = requireAddress(item.from);
+  const from = incomingAddress(item.from);
   if (typeof item.subject !== 'string' || typeof item.text !== 'string') {
     throw new TypeError('Message must contain plain text');
   }
