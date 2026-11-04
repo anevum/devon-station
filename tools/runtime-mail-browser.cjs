@@ -28,7 +28,7 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    await page.getByRole('button',{name:'Check connection',exact:true}).click();
    await page.locator('.mail-diagnostic-status[data-check="checked"]').waitFor();
    assert.match(await page.locator('.mail-diagnostic-results').textContent(),/Isolated D1 cache metadata: reachable/);
-   assert.match(await page.locator('.mail-diagnostic-status').textContent(),/Decryption, real IMAP, SMTP and recipient delivery remain unverified/);
+   assert.match(await page.locator('.mail-diagnostic-status[data-check="checked"]').textContent(),/Decryption, real IMAP, SMTP and recipient delivery remain unverified/);
    const ownerChecks=diagnosticsRequests.filter(x=>['/api/session','/api/mail/status','/api/mail/diagnostics'].includes(x.path));
    assert.deepEqual(ownerChecks.slice(-3).map(x=>x.path),['/api/session','/api/mail/status','/api/mail/diagnostics']);
    assert(diagnosticsRequests.every(x=>x.method==='GET'));
