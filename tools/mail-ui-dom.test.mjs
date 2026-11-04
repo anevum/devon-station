@@ -367,3 +367,60 @@ test('in-app diagnostics refuse untrusted plain HTTP origins even if DOM and CSP
   assert.equal(x.doc.querySelector('.mail-diagnostic [data-check]').dataset.check,'blocked');
  }finally{x.dom.window.close();}
 });
+
+test('owner-triggered provider check is explicit, POST-only, and never reveals response text or syncs',async()=>{
+ const secret='NEVER_RENDER_PROVIDER_BANNER';
+ const x=load((path,options)=>{
+  if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true,draftsEnabled:true,outboxEnabled:false,outgoingEnabled:false});
+  if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+  if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0});
+  if(path==='/api/mail/diagnostics/imap-check'){
+   assert.equal(options.method,'POST');
+   assert.equal(options.credentials,'same-origin');
+   assert.equal(options.redirect,'manual');
+   assert.equal(options.body,'{}');
+   return reply({imapAuthenticated:true,inboxReadOnly:true,messageContentRead:false,
+    remoteMailboxModified:false,cacheModified:false,smtpContacted:false,serverBanner:secret});
+  }
+  if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+  throw Error('unexpected_endpoint');
+ });
+ try{
+  diagnosticApp(x);await wait();
+  const probe=x.doc.querySelector('[data-mail-action="provider-check"]');
+  assert.equal(probe.disabled,true);
+  assert.equal(x.calls.filter(c=>c.method==='POST').length,0);
+  x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+  assert.equal(x.doc.querySelector('[data-mail-action="provider-check"]').disabled,false);
+  x.doc.querySelector('[data-mail-action="provider-check"]').click();await wait();
+  assert.equal(x.doc.querySelector('[data-provider-check]').dataset.providerCheck,'checked');
+  assert.match(x.doc.querySelector('[data-provider-check]').textContent,/read-only INBOX selection succeeded/);
+  assert.doesNotMatch(x.doc.querySelector('.mail-diagnostic').textContent,/NEVER_RENDER_PROVIDER_BANNER/);
+  assert.deepEqual(x.calls.filter(c=>c.method==='POST').map(c=>c.path),['/api/mail/diagnostics/imap-check']);
+ }finally{x.dom.window.close();}
+});
+test('provider check fails closed on invalid safety flags, network error, and Access interstitials',async()=>{
+ const bad=[
+  ()=>reply({imapAuthenticated:true,inboxReadOnly:false,messageContentRead:false,remoteMailboxModified:false,cacheModified:false,smtpContacted:false}),
+  ()=>{throw TypeError('Failed to fetch synthetic private banner');},
+  ()=>({ok:true,status:200,headers:new Headers({'Content-Type':'text/html'}),json:async()=>'<title>Access Sign in</title>'}),
+  ()=>reply({error:'private provider credentials'},502)
+ ];
+ for(const response of bad){
+  const x=load(path=>{
+   if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true,outgoingEnabled:false});
+   if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+   if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0});
+   if(path==='/api/mail/diagnostics/imap-check')return response();
+   if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+   throw Error('unexpected');
+  });
+  try{
+   diagnosticApp(x);await wait();x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+   x.doc.querySelector('[data-mail-action="provider-check"]').click();await wait();
+   assert.equal(x.doc.querySelector('[data-provider-check]').dataset.providerCheck,'blocked');
+   assert.doesNotMatch(x.doc.querySelector('.mail-diagnostic').textContent,/private provider credentials|synthetic private banner|Access Sign in/);
+   assert.equal(x.calls.filter(c=>c.path==='/api/mail/diagnostics/imap-check').length,1);
+  }finally{x.dom.window.close();}
+ }
+});
