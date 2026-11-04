@@ -102,16 +102,25 @@ test('HTML-only email syncs as inert plain text and cannot add remote tracking a
  assert.equal(Object.hasOwn(rows[0],'html'),false);
  db.close();
 });
-test('oversize indexed text fails before any D1 transaction, retaining cursor for retry',async()=>{
+test('long valid message commits one encrypted bounded preview and advances cursor atomically',async()=>{
  const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
- const large=new TextEncoder().encode('From: author@example.org\r\nSubject: Oversize\r\nContent-Type: text/plain\r\n\r\n'+'A'.repeat(4200));
+ const large=new TextEncoder().encode('From: author@example.org\r\nSubject: Long valid message\r\nContent-Type: text/plain\r\n\r\n'+'A'.repeat(4200));
  const mock=socketMock(large),station=createStation({},auth,fetch,mock.connect);
- const sync=await station.fetch(req('/api/mail/sync','POST'),env(binding));
- assert.equal(sync.status,502);assert.deepEqual(await sync.json(),{error:'mail_operation_failed'});
- assert.equal(binding.batches,0);
- const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
- assert.equal((await inbox.json()).messages.length,0);
- db.close();
+ try{
+  const sync=await station.fetch(req('/api/mail/sync','POST'),env(binding));
+  assert.equal(sync.status,200);const receipt=await sync.json();assert.equal(receipt.imported,1);assert.equal(receipt.cursor.highestUid,1);
+  assert.equal(binding.batches,1);
+  const stored=db.prepare('SELECT from_address,subject,body_text FROM comms_ro_messages').get();
+  assert.equal(stored.from_address,'');assert.equal(stored.subject,'');assert.equal(JSON.parse(stored.body_text).alg,'A256GCM');
+  assert.doesNotMatch(stored.body_text,/Long valid message|author@example.org|AAAA|Message shortened/);
+  const inbox=await station.fetch(req('/api/mail/inbox'),env(binding));
+  const rows=(await inbox.json()).messages;assert.equal(rows.length,1);assert.equal(rows[0].text.length,4096);
+  assert.match(rows[0].text,/Message shortened/);assert.equal(rows[0].subject,'Long valid message');
+  const again=await station.fetch(req('/api/mail/sync','POST'),env(binding));assert.equal(again.status,200);
+  const next=await again.json();assert.equal(next.imported,0);assert.equal(next.updated,0);assert.equal(next.cursor.highestUid,1);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_messages').get().n,1);
+  assert.equal(mock.calls().filter(c=>c.includes('UID FETCH')).length,1);
+ }finally{db.close();}
 });
 
 test('reordered FETCH persists through owner API, while premature tagged OK cannot advance D1',async()=>{
@@ -334,9 +343,9 @@ test('explicit owner sync diagnostics expose only fixed codes and preserve empty
 });
 
 
-test('MIME body limit and unclassified transport errors produce bounded opt-in diagnostics without writes',async()=>{
+test('invalid MIME and unclassified transport errors produce bounded opt-in diagnostics without writes',async()=>{
  for(const [payload,options,code] of [
-  [new TextEncoder().encode('From: author@example.org\r\nSubject: PRIVATE_SUBJECT\r\n\r\n'+'A'.repeat(4200)),{},'mime_body_index_limit'],
+  [new TextEncoder().encode('Subject: PRIVATE_SUBJECT\r\n\r\nMissing sender'),{},'mime_invalid_from'],
   [mime,{fetchFailure:true},'mail_sync_unclassified']
  ]){
   const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
