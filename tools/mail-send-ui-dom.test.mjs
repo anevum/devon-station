@@ -165,6 +165,33 @@ test('fresh browser instance inspects durable receipts with sending disabled, wi
  x.dom.window.close();
 });
 
+test('linked delivery receipt shows expected Message-ID without asserting delivery or sending',async()=>{
+ const x=setup({outgoing:false});
+ const row={deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'};
+ x.outbox.push(row);
+ await wait();
+ const refresh=async()=>{
+  const inspect=x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]');assert(inspect);
+  inspect.click();await wait();
+  return x.doc.querySelector('[aria-label="Durable outbox status history"]');
+ };
+ for(const state of ['accepted','claimed','uncertain']){
+  x.outbox[0].state=state;
+  const history=await refresh();
+  assert(history.textContent.includes('Expected Message-ID <'+deliveryId+'@devonakins.com>'));
+  assert(history.textContent.includes('not proof of delivery'));
+  assert.equal(history.querySelectorAll('a[href],button,script,img,iframe').length,0);
+ }
+ x.outbox[0]={...row,state:'queued'};
+ assert(!(await refresh()).textContent.includes('Expected Message-ID'));
+ x.outbox[0]={deliveryId,state:'accepted',createdAt:row.createdAt,updatedAt:row.updatedAt};
+ assert(!(await refresh()).textContent.includes('Expected Message-ID'));
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.dom.window.close();
+});
+
 test('malformed stored receipt fails closed and never becomes executable DOM',async()=>{
  const x=setup({outgoing:false});
  x.outbox.push({deliveryId,state:'accepted',

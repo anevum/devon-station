@@ -111,6 +111,11 @@ function render(){
     item.append(element('strong','',outboxStateLabel(entry.state)));
     item.append(element('span','mail-draft-notice','Delivery '+entry.deliveryId));
     if(entry.draftId)item.append(element('span','mail-draft-notice','Saved draft revision '+entry.draftRevision));
+    // The wire Message-ID is deterministic for a linked saved draft. This is
+    // only a search handle; it never asserts that a provider delivered.
+    if(entry.draftId&&['claimed','accepted','uncertain'].includes(entry.state))
+     item.append(element('span','mail-draft-notice',
+      'Expected Message-ID <'+entry.deliveryId+'@devonakins.com> · Correlation only; not proof of delivery.'));
     item.append(element('time','mail-draft-notice','Updated '+new Date(entry.updatedAt).toLocaleString()));
     item.append(element('p','mail-draft-notice',outboxStateAdvice(entry.state)));
     list.append(item);
