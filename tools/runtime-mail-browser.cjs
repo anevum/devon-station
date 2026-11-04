@@ -35,6 +35,18 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    assert.equal(provider.evidence.imapConnections,0);
    assert.equal(provider.evidence.smtpConnections,0);
    assert.equal(provider.evidence.dataWrites,0);
+   // Distinct explicit owner POST opens TLS IMAP only for LOGIN + read-only EXAMINE;
+   // no fetched messages, cache writes or outgoing SMTP.
+   const probe=page.getByRole('button',{name:'Test IMAP login (read-only)',exact:true});
+   assert.equal(await probe.isDisabled(),false);
+   await probe.click();
+   await page.locator('.mail-diagnostic-status[data-provider-check="checked"]').waitFor();
+   assert.match(await page.locator('[data-provider-check]').textContent(),/IMAP TLS login and read-only INBOX selection succeeded/);
+   assert.equal(provider.evidence.imapConnections,1);
+   assert.equal(provider.evidence.smtpConnections,0);
+   assert.equal(provider.evidence.dataWrites,0);
+   const providerPosts=diagnosticsRequests.filter(x=>x.method==='POST');
+   assert.deepEqual(providerPosts.map(x=>x.path),['/api/mail/diagnostics/imap-check']);
    await page.getByRole('button',{name:'Synchronize Inbox',exact:true}).click();
    await page.locator('.mail-message').waitFor();await page.locator('.mail-message').click();
    await page.getByRole('heading',{name:'Browser incoming fixture',exact:true}).waitFor();
@@ -64,7 +76,7 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    // A different signed subject cannot list mail even with the same named email.
    const denied=await context.request.get(server.url+'/api/mail/inbox',{headers:{'Cf-Access-Jwt-Assertion':token('not-owner')}});assert.equal(denied.status(),403);
    assert.equal(server.externalCalls(),0);
-   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,inboxRead:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
+   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
    await context.close();await server.close();server=null;
   }
   writeFileSync(join(__dirname,'mail-browser-results.json'),JSON.stringify({provider:'synthetic-only',results},null,2));console.log(JSON.stringify({provider:'synthetic-only',results}));
