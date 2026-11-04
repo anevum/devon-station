@@ -288,3 +288,31 @@ test('IMAP probe abort during stalled TLS setup closes socket and returns only a
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_messages').get().n,0);
  }finally{db.close();}
 });
+
+test('owner session, status and cache diagnostics expose the same trusted Cloudflare Worker version ID only',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);
+ const binding=d1Double(db),mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
+ const id='a1b2c3d4-1111-4444-8888-0123456789ab';
+ try{
+  const configured={...env(binding),CF_VERSION_METADATA:{id,tag:'untrusted tag with secrets'}};
+  const paths=['/api/session','/api/mail/status','/api/mail/diagnostics'];
+  for(const path of paths){
+   const r=await station.fetch(req(path),configured);
+   assert.equal(r.status,200);
+   const data=await r.json();
+   assert.equal(data.workerVersionId,id);
+   assert.doesNotMatch(JSON.stringify(data),/untrusted tag with secrets/);
+  }
+  for(const id of ['unsafe<script>','',123,null]){
+   const modified={...configured,CF_VERSION_METADATA:{id}};
+   for(const path of paths){
+    const response=await station.fetch(req(path),modified);
+    assert.equal(response.status,200);
+    assert.equal(Object.hasOwn(await response.json(),'workerVersionId'),false);
+   }
+  }
+  const nonowner=createStation({},async()=>({email:'other@example.org',subject:'unknown'}),fetch,mock.connect);
+  for(const path of paths)assert.equal((await nonowner.fetch(req(path),configured)).status,403);
+  assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
+ }finally{db.close();}
+});

@@ -210,14 +210,20 @@
     if(session.kind!=='ok'||session.body?.authenticated!==true||session.body?.mode!=='owner'){
       failure('session',session.kind==='ok'?{kind:'sign_in'}:session);return;
     }
+    const activeVersion=session.body.workerVersionId??null;
+    if(activeVersion!==null&&(typeof activeVersion!=='string'||!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(activeVersion))){
+      diagnostic('blocked','Invalid Worker version metadata. Release identity cannot be verified.');return;
+    }
     diagnostic('running','Owner session verified. Checking mail configuration…',['Signed owner session: verified']);
     const status=await read('/api/mail/status');
     if(status.kind!=='ok'){failure('mail status',status);return;}
     const flags=status.body;
+    if((flags?.workerVersionId??null)!==activeVersion){diagnostic('blocked','Different Worker versions handled the owner session and mail status. No provider test was attempted.');return;}
     if(!flags||typeof flags.configured!=='boolean'||flags.address!=='hello@devonakins.com'||flags.provider!=='purelymail'){
       diagnostic('blocked','Mail status returned an unexpected response. No provider operation was attempted.');return;
     }
     const lines=['Signed owner session: verified',
+      'Worker version: '+(activeVersion??'not reported (cannot prove staged source)'),
       'Purelymail configuration: '+(flags.configured?'available':'incomplete'),
       'Saved drafts: '+(flags.draftsEnabled===true?'enabled':'disabled'),
       'Outgoing submission: '+(flags.outgoingEnabled===true?'enabled; recipient delivery remains unverified':'disabled'),
@@ -230,6 +236,9 @@
     // ciphertext, provider credentials or raw SQL.
     const cache=await read('/api/mail/diagnostics');
     if(cache.kind!=='ok'){failure('mail cache',cache);return;}
+    if((cache.body?.workerVersionId??null)!==activeVersion){
+      diagnostic('blocked','Different Worker versions handled the mail cache and owner session. No provider test was attempted.',lines);return;
+    }
     if(cache.body?.cacheReady!==true||
        !Number.isSafeInteger(cache.body.indexedCount)||cache.body.indexedCount<0||cache.body.indexedCount>500||
        !Number.isSafeInteger(cache.body.revision)||cache.body.revision<0){

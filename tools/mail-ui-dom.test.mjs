@@ -424,3 +424,32 @@ test('provider check fails closed on invalid safety flags, network error, and Ac
   }finally{x.dom.window.close();}
  }
 });
+
+test('release diagnostics report matching Cloudflare Worker IDs but reject mixed versions before provider probes',async()=>{
+ const id='a1b2c3d4-1111-4444-8888-0123456789ab';
+ const other='99999999-2222-4444-8888-0123456789ab';
+ for(const changed of ['none','status','cache']){
+  const x=load(path=>{
+   if(path==='/api/mail/status')return reply({configured:true,provider:'purelymail',address:'hello@devonakins.com',workerVersionId:changed==='status'?other:id});
+   if(path==='/api/session')return reply({authenticated:true,mode:'owner',workerVersionId:id});
+   if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0,workerVersionId:changed==='cache'?other:id});
+   if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+   throw Error('unexpected');
+  });
+  try{
+   diagnosticApp(x);await wait();
+   x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+   const panel=x.doc.querySelector('.mail-diagnostic');
+   if(changed==='none'){
+    assert.equal(panel.querySelector('[data-check]').dataset.check,'checked');
+    assert.match(panel.textContent,/Worker version: a1b2c3d4-1111-4444-8888-0123456789ab/);
+    assert.equal(panel.querySelector('[data-mail-action="provider-check"]').disabled,false);
+   }else{
+    assert.equal(panel.querySelector('[data-check]').dataset.check,'blocked');
+    assert.match(panel.textContent,/Different Worker versions/);
+    assert.equal(panel.querySelector('[data-mail-action="provider-check"]').disabled,true);
+   }
+   assert(x.calls.every(x=>x.method==='GET'));
+  }finally{x.dom.window.close();}
+ }
+});

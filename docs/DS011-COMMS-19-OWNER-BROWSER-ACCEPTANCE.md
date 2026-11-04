@@ -23,6 +23,13 @@ The Worker accepts no hostname, mailbox, message ID, credentials, or command str
 
 A successful check proves only that the **currently deployed Worker** can authenticate to the provider and open INBOX in read-only mode. It does not synchronize an email, decrypt stored content, test SMTP, create delivery evidence, or indicate production readiness. It cannot run against the current acceptance Worker until that Worker has a securely installed IMAP-only app password; never copy or display the secret through GitHub, Notion or ChatGPT. A failed check remains sanitized and does not enable sending. The action should be performed on the signed owner application on the intended acceptance version, not on an Access sign-in page or an earlier production release.
 
+
+## Worker version identity and split-traffic acceptance
+
+The signed owner session, mail-status response, and cache-diagnostic response optionally include **\`workerVersionId\`**, sourced exclusively from Cloudflare's \`CF_VERSION_METADATA\` platform binding, validated as a UUID. The tag and other metadata are never exposed. The in-app checks compare all three responses and refuse inconsistent IDs; this matters when a candidate and legacy version have different percentages in the current deployment. When the binding is absent, the diagnostics state "not reported" and are **not** sufficient to establish release identity. For a production acceptance version, include \`{"type":"version_metadata","name":"CF_VERSION_METADATA"}\` in the uploaded Worker bindings, then independently compare the signed owner's reported UUID with the exact Cloudflare deployment/versions API record and its annotated source SHA. A self-reported version ID alone does not prove the source bytes or production readiness.
+
+Version URLs are not automatically covered by the production hostname's Cloudflare Access policy and must not be used with private mail bindings unless independently protected. Version overrides can select a zero-percent version only when it is in the active deployment and remain subject to its actual routed Access policies. Do not weaken CSP, switch DNS, or assume a browser-console override is an owner acceptance workflow.
+
 ## Interpretation and fail-closed behavior
 
 - **Signed owner session not established:** finish Cloudflare Access sign-in and open the actual application. A non-JSON/HTML sign-in response, 401/403 or redirect is never counted as an authenticated endpoint response.

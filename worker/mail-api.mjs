@@ -88,13 +88,13 @@ const numberParam=(value, fallback, min, max) => {
   const n=Number(value);return n>=min&&n<=max?n:null;
 };
 /** Signed owner check must already have run in createStation. This adds explicit subject binding. */
-export async function handleMailApi({request,url,user,env,connect,readBody}) {
+export async function handleMailApi({request,url,user,env,connect,readBody,workerVersionId=null}) {
   if(!user?.subject || !env?.MAIL_OWNER_SUB || user.subject !== env.MAIL_OWNER_SUB)
     return status('mail_owner_not_authorized',403);
   if(url.pathname.startsWith('/api/mail/outbox'))return handleMailOutboxApi({request,url,user,env,readBody,registry:registry(env.MAIL_SENDER_VERIFIED==='true'),connect});
   const ready=isEnabled(env) && typeof connect==='function';
   if(url.pathname==='/api/mail/status' && request.method==='GET')
-    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect)&&mailDraftsEnabled(env),outboxEnabled:env.MAIL_OUTBOX_ENABLED==='true'&&typeof env.MAIL_DB?.prepare==='function',draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
+    return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect)&&mailDraftsEnabled(env),outboxEnabled:env.MAIL_OUTBOX_ENABLED==='true'&&typeof env.MAIL_DB?.prepare==='function',draftsEnabled:mailDraftsEnabled(env),provider:'purelymail',...(workerVersionId?{workerVersionId}:{})}};
   if(url.pathname.startsWith('/api/mail/drafts'))return handleMailDraftApi({request,url,user,env,readBody});
   if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync','/api/mail/diagnostics','/api/mail/diagnostics/imap-check'].includes(url.pathname))
     return status('not_found',404);
@@ -115,7 +115,7 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
     if(url.pathname==='/api/mail/diagnostics') {
       if(request.method!=='GET')return status('method_not_allowed',405);
       if(url.search)return status('invalid_mail_diagnostics_request',400);
-      return {status:200,body:await cacheDiagnostics(env.MAIL_DB)};
+      return {status:200,body:{...await cacheDiagnostics(env.MAIL_DB),...(workerVersionId?{workerVersionId}:{})}};
     }
     const mailRegistry=registry(),store=createD1MailStore(env.MAIL_DB,{cipher:payloadCipher(env),ownerSub:user.subject});
     if(url.pathname==='/api/mail/mailboxes' && request.method==='GET') {
