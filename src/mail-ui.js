@@ -3,7 +3,7 @@
 (function(){
   'use strict';
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
-  const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]}};
+  const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
   function node(tag,className,text){
     const el=document.createElement(tag);
     if(className)el.className=className;
@@ -74,13 +74,20 @@
     const acceptanceHead=node('div','mail-diagnostic-head');
     acceptanceHead.append(node('strong','', 'Connection and release checks'));
     const check=button(state.diagnostic.phase==='running'?'Checking…':'Check connection','diagnose');
-    check.disabled=state.diagnostic.phase==='running';
+    check.disabled=state.diagnostic.phase==='running'||state.provider.phase==='running';
     acceptanceHead.append(check);acceptance.append(acceptanceHead);
     acceptance.append(node('p','mail-small','Checks the signed owner session, server configuration and cache metadata without reading message contents or contacting the mail provider.'));
     const diagnosticStatus=node('p','mail-diagnostic-status',state.diagnostic.summary);
     // Keep the existing inbox role=status as the primary mail live region.
     diagnosticStatus.setAttribute('aria-live','polite');
     diagnosticStatus.dataset.check=state.diagnostic.phase;acceptance.append(diagnosticStatus);
+    const probe=button(state.provider.phase==='running'?'Checking Purelymail…':'Test IMAP login (read-only)','provider-check');
+    probe.disabled=state.diagnostic.phase!=='checked'||state.provider.phase==='running';
+    acceptance.append(probe);
+    acceptance.append(node('p','mail-small','Optional provider test: opens a TLS session and EXAMINEs INBOX without downloading messages. It does not send mail.'));
+    const providerStatus=node('p','mail-diagnostic-status',state.provider.summary);
+    providerStatus.setAttribute('aria-live','polite');
+    providerStatus.dataset.providerCheck=state.provider.phase;acceptance.append(providerStatus);
     if(state.diagnostic.items.length){
       const results=node('ul','mail-diagnostic-results');
       for(const item of state.diagnostic.items)results.append(node('li','',item));
@@ -231,6 +238,41 @@
     lines.push('Isolated D1 cache metadata: reachable ('+cache.body.indexedCount+' indexed messages)');
     diagnostic('checked','Read-only application checks completed. Decryption, real IMAP, SMTP and recipient delivery remain unverified.',lines);
   }
+  async function providerCheck(){
+    if(state.diagnostic.phase!=='checked'||state.provider.phase==='running')return;
+    state.provider={phase:'running',summary:'Checking Purelymail TLS login and read-only INBOX selection…'};render();
+    const finish=(phase,summary)=>{state.provider={phase,summary};render();};
+    let response;
+    try{
+      response=await fetch('/api/mail/diagnostics/imap-check',{
+        method:'POST',credentials:'same-origin',cache:'no-store',redirect:'manual',
+        headers:{Accept:'application/json','Content-Type':'application/json'},body:'{}'
+      });
+    }catch{
+      finish('blocked','Browser or network prevented provider testing. No email was sent or synchronized.');return;
+    }
+    if(response.type==='opaqueredirect'||response.status===401||response.status===403||
+       response.status>=300&&response.status<400){
+      finish('blocked','Owner session expired or Cloudflare Access sign-in is required.');return;
+    }
+    if(!response.headers.get('content-type')?.toLowerCase().includes('application/json')){
+      finish('blocked','Unexpected sign-in or non-JSON response. No provider result was accepted.');return;
+    }
+    if(!response.ok){
+      finish('blocked',response.status===503?'Provider credentials or encryption configuration are incomplete.':
+        'The secure IMAP login or read-only INBOX check did not complete. Check credentials and connectivity.');return;
+    }
+    let value;
+    try{value=await response.json();}catch{
+      finish('blocked','Provider diagnostic returned invalid JSON.');return;
+    }
+    if(value?.imapAuthenticated!==true||value.inboxReadOnly!==true||
+       value.messageContentRead!==false||value.remoteMailboxModified!==false||
+       value.cacheModified!==false||value.smtpContacted!==false){
+      finish('blocked','Provider diagnostic returned unexpected safety flags. No result was accepted.');return;
+    }
+    finish('checked','IMAP TLS login and read-only INBOX selection succeeded. Message synchronization, decryption, SMTP and delivery remain unverified.');
+  }
   async function start(){
     if(state.busy)return;
     state.busy=true;
@@ -311,6 +353,7 @@
     if(!button || !document.getElementById('station-mail')?.contains(button))return;
     const action=button.dataset.mailAction;
     if(action==='diagnose'){void diagnose();return;}
+    if(action==='provider-check'){void providerCheck();return;}
     if(action==='older'){void page(state.offset+50);return;}
     if(action==='newer'){void page(state.offset-50);return;}
     if(action==='sync'){void sync();return;}
