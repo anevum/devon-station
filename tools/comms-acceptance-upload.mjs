@@ -39,7 +39,7 @@ export function verifyReviewCandidate({manifest,candidateBytes,expectedSha}){
  const entry=modules['index.mjs'];
  if(!entry.startsWith("import {connect} from 'cloudflare:sockets';\n")||
     !entry.includes("export default createStation(assets,undefined,undefined,connect);")||
-    !entry.includes('"privateDataLoaded":false')||
+    !entry.includes(JSON.stringify('"privateDataLoaded":false').slice(1,-1))||
     !modules['worker/mail-api.mjs'].includes('/api/mail/diagnostics/imap-check')||
     !modules['worker/index.mjs'].includes('CF_VERSION_METADATA'))
   refuse('missing reviewed TLS, privacy, diagnostics or version entrypoint');
