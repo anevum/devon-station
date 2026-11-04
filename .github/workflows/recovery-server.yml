@@ -76,6 +76,7 @@ jobs:
         shell: bash
         run: |
           node tools/prepare-rb01-review.mjs
+          node tools/comms-acceptance-upload.mjs --verify
           (cd release-review && sha256sum -c SHA256SUMS)
           cp release-review/SHA256SUMS "$RUNNER_TEMP/rb01-first-sums"
           node tools/prepare-rb01-review.mjs
