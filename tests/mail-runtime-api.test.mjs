@@ -316,3 +316,18 @@ test('owner session, status and cache diagnostics expose the same trusted Cloudf
   assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
  }finally{db.close();}
 });
+
+test('explicit owner sync diagnostics expose only fixed codes and preserve empty storage on failed FETCH',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ try{
+  const mock=socketMock(mime,{complete:false});const station=createStation({},auth,fetch,mock.connect);
+  const request=req('/api/mail/sync','POST');request.headers.set('X-DevonStation-Mail-Diagnostics','1');
+  const response=await station.fetch(request,env(binding));
+  assert.equal(response.status,502);
+  assert.deepEqual(await response.json(),{error:'mail_operation_failed',diagnosticCode:'imap_invalid_fetch'});
+  assert.equal(binding.batches,0);
+  const denied=req('/api/mail/sync','POST');denied.headers.set('X-DevonStation-Mail-Diagnostics','1');
+  const nonowner=await station.fetch(denied,{...env(binding),MAIL_OWNER_SUB:'different'});
+  assert.equal(nonowner.status,403);assert.doesNotMatch(await nonowner.text(),/diagnosticCode/);
+ }finally{db.close();}
+});

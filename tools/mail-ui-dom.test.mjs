@@ -453,3 +453,22 @@ test('release diagnostics report matching Cloudflare Worker IDs but reject mixed
   }finally{x.dom.window.close();}
  }
 });
+
+test('sync shows only allowlisted failure codes, keeps generic uncertainty for unknown data and never retries',async()=>{
+ for(const code of ['imap_invalid_fetch','<img src="https://private.invalid/">']){
+  let syncs=0;
+  const x=await ready((path,options)=>{
+   if(path==='/api/mail/sync'){
+    syncs++;assert.equal(options.headers['X-DevonStation-Mail-Diagnostics'],'1');
+    return reply({error:'mail_operation_failed',diagnosticCode:code},502);
+   }
+   return reply({total:0,messages:[]});
+  });
+  click(x,'sync');await wait();
+  const text=x.doc.getElementById('station-mail').textContent;
+  if(code==='imap_invalid_fetch')assert.match(text,/Synchronization stopped \(imap_invalid_fetch\)/);
+  else {assert.doesNotMatch(text,/private.invalid/);assert.match(text,/Confirmation or inbox refresh unavailable/);}
+  assert.equal(syncs,1);assert.equal(x.doc.querySelectorAll('img,script,iframe').length,0);
+  x.dom.window.close();
+ }
+});
