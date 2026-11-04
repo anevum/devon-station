@@ -138,8 +138,19 @@ export async function uploadAcceptanceVersion({fetchImpl=fetch,token,accountId,s
   {method:'POST',body:form});
  if(!UUID.test(uploaded?.id||''))refuse('no immutable Cloudflare version ID returned');
  const version=await cloudflareCall(fetchImpl,token,work+'/versions/'+uploaded.id);
- if(version.id!==uploaded.id||version?.metadata?.annotations?.['workers/commit_sha']!==sourceSha)
+ if(version.id!==uploaded.id||version?.annotations?.['workers/commit_sha']!==sourceSha)
   refuse('uploaded version provenance readback did not match');
+ const resources=version?.resources;
+ if(!resources?.bindings||!resources.script_runtime||
+    !resources.bindings.some(b=>b.name==='CF_VERSION_METADATA'&&b.type==='version_metadata'))
+  refuse('uploaded version omitted required runtime or version metadata binding');
+ const confirmed=verifyAcceptanceSettings({
+  bindings:resources.bindings,
+  compatibility_date:resources.script_runtime.compatibility_date,
+  compatibility_flags:resources.script_runtime.compatibility_flags
+ });
+ if(confirmed.owner!==checked.owner)
+  refuse('uploaded version has changed owner authorization');
  const after=await cloudflareCall(fetchImpl,token,work+'/deployments');
  if(after?.deployments?.[0]?.id!==liveId)refuse('deployment changed during upload; manual review required');
  return {status:'VERSION_UPLOADED_NOT_DEPLOYED',versionId:uploaded.id,
