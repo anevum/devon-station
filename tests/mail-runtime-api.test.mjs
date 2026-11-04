@@ -258,3 +258,33 @@ test('IMAP preflight sanitizes socket initialization failures and does not expos
   assert.equal(binding.batches,0);
  }finally{db.close();}
 });
+
+test('IMAP probe abort during stalled TLS setup closes socket and returns only a sanitized cancellation', {timeout:2000}, async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);const binding=d1Double(db);
+ const controller=new AbortController();
+ let socketStarted;
+ const started=new Promise(resolve=>{socketStarted=resolve;});
+ let closed=0,connections=0;
+ const connect=(address,options)=>{
+  assert.deepEqual(address,{hostname:'imap.purelymail.com',port:993});
+  assert.deepEqual(options,{secureTransport:'on'});
+  connections++;socketStarted();
+  return {opened:new Promise(()=>{}),readable:new ReadableStream({start(){}}),
+   writable:new WritableStream({write(){throw Error('no writes allowed before open');}}),
+   async close(){closed++;}
+  };
+ };
+ try{
+  const station=createStation({},auth,fetch,connect);
+  const pending=station.fetch(req('/api/mail/diagnostics/imap-check','POST',{signal:controller.signal}),env(binding));
+  await started;
+  controller.abort();
+  const response=await pending;
+  assert.equal(response.status,504);
+  assert.deepEqual(await response.json(),{error:'mail_imap_probe_cancelled'});
+  await Promise.resolve();
+  assert.equal(connections,1);assert.equal(closed,1);
+  assert.equal(binding.batches,0);
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM comms_ro_messages').get().n,0);
+ }finally{db.close();}
+});
