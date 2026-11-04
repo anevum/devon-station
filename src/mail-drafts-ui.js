@@ -34,6 +34,16 @@ async function api(url,body){
  if(body!==undefined){options.headers['Content-Type']='application/json';options.body=JSON.stringify(body);}
  const res=await fetch(url,options);
  if(!res.ok){
+   // A recognized validation refusal is definitive: nothing was saved. Keep
+   // edits available for correction instead of presenting it as network doubt.
+   if(url===path+'/save'&&[400,413].includes(res.status)&&
+      res.headers.get('content-type')?.toLowerCase().includes('application/json')){
+    const errorBody=await res.json();
+    if(res.status===400&&['invalid_mail_draft_recipient','invalid_mail_draft_payload'].includes(errorBody?.error))
+     throw Error(errorBody.error);
+    if(res.status===413&&errorBody?.error==='mail_draft_payload_too_large')
+     throw Error('mail_draft_payload_too_large');
+   }
    // Only read a bounded, explicitly recognized error code from our own API.
    // A 409 for this saved-draft revision means another durable delivery exists.
    if(res.status===409&&
@@ -229,7 +239,14 @@ async function save(){
   state.dirty=false;state.pendingSave=null;
   state.notice='Draft saved at revision '+state.working.revision+'. No message was sent.';
  }catch(e){
-  state.error=e.message==='mail_draft_delivery_locked'?
+  const invalidRecipient=e.message==='invalid_mail_draft_recipient';
+  const invalidPayload=['invalid_mail_draft_payload','mail_draft_payload_too_large'].includes(e.message);
+  if(invalidRecipient||invalidPayload)state.pendingSave=null;
+  state.error=invalidRecipient?
+   'Recipient address is invalid. Correct the To field and save again. Your edits remain unsaved; no message was sent.':
+   invalidPayload?
+   'Draft content was refused. Check recipients, subject and message limits, then save again. Your edits remain unsaved; no message was sent.':
+   e.message==='mail_draft_delivery_locked'?
    'This draft is linked to a previous delivery. Edits are blocked to preserve the message that may have been sent. Copy your changes into a new draft.':
    e.message==='mail_draft_conflict'?
    'Another version was saved. Copy your unsaved edits before reloading; no overwrite occurred.':
