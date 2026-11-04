@@ -13,8 +13,9 @@ const origin='https://devon-station-mail-acceptance.devonakins.workers.dev';
 const owner='synthetic-owner@example.test';
 const worker='devon-station-mail-acceptance';
 function fakeBundle(){
+ const marker=JSON.stringify('"privateDataLoaded":false').slice(1,-1);
  const modules={
-  'index.mjs':"import {connect} from 'cloudflare:sockets';\nconst s='\"privateDataLoaded\":false';\nexport default createStation(assets,undefined,undefined,connect);\n",
+  'index.mjs':"import {connect} from 'cloudflare:sockets';\nconst s='"+marker+"';\nexport default createStation(assets,undefined,undefined,connect);\n",
   'worker/mail-api.mjs':"const path='/api/mail/diagnostics/imap-check';",
   'worker/index.mjs':"const v=env.CF_VERSION_METADATA?.id;"
  };
