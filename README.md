@@ -24,4 +24,4 @@ DevonStation is an independent, personal operations workspace project. The targe
 
 Development continues on the existing source until a verified cutover. Do not replace the working application with a newly generated skeleton.
 
-Project index: [Anevum project registry](https://github.com/devonalanakins/anevum) · Historical handoff: [GitHub reorganization](https://github.com/devonalanakins/anevum/blob/main/handoffs/ANEVUM.OPS.PACKAGE.2026-10-30.002.md)
+Portfolio context: [Devon Alan Akins](https://github.com/devonalanakins/anevum) · [October 2026 historical source handoff](https://github.com/devonalanakins/anevum/blob/main/handoffs/ANEVUM.OPS.PACKAGE.2026-10-30.002.md). DevonStation is a separate personal system, not an Anevum creative-studio product.
