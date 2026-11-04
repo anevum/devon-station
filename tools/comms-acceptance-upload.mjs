@@ -8,6 +8,7 @@ import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 
 const WORKER='devon-station-mail-acceptance';
+const PRODUCTION_WORKER='devon-station';
 const ORIGIN='https://devon-station-mail-acceptance.devonakins.workers.dev';
 const APP='d75c6407-070e-4b43-8843-0216b166d712';
 const SHA=/^[0-9a-f]{40}$/;
@@ -53,7 +54,11 @@ export function verifyAcceptanceSettings(settings){
   refuse('acceptance Worker runtime differs from reviewed runtime');
  const bindings=new Map();
  for(const b of settings.bindings){
-  if(!b?.name||bindings.has(b.name)||!['plain_text','d1','secret_text','version_metadata'].includes(b.type))
+  if(!b?.name||bindings.has(b.name)||
+     ![...knownNames,'MAIL_IMAP_PASSWORD','CF_VERSION_METADATA'].includes(b.name)||
+     (b.name==='MAIL_IMAP_PASSWORD'&&b.type!=='secret_text')||
+     (b.name==='CF_VERSION_METADATA'&&b.type!=='version_metadata')||
+     !['plain_text','d1','secret_text','version_metadata'].includes(b.type))
    refuse('unexpected or duplicate acceptance binding');
   bindings.set(b.name,b);
  }
@@ -67,6 +72,14 @@ export function verifyAcceptanceSettings(settings){
    refuse('outgoing email must remain disabled');
  }
  if(bindings.get('APP_ORIGIN')?.text!==ORIGIN)refuse('acceptance APP_ORIGIN mismatch');
+ for(const [name,expected] of [['MAIL_IMAP_ADDRESS','hello@devonakins.com'],
+   ['MAIL_SMTP_ADDRESS','hello@devonakins.com']]){
+  if(bindings.get(name)?.type!=='plain_text'||bindings.get(name)?.text!==expected)
+   refuse('unexpected mail address binding');
+ }
+ if(typeof bindings.get('ACCESS_AUD')?.text!=='string'||!bindings.get('ACCESS_AUD').text||
+    typeof bindings.get('MAIL_OWNER_SUB')?.text!=='string'||!bindings.get('MAIL_OWNER_SUB').text)
+  refuse('missing signed owner identity configuration');
  if(bindings.has('MAIL_SMTP_PASSWORD'))refuse('acceptance Worker must have no SMTP password');
  if(bindings.get('MAIL_ENABLED')?.text!=='false'&&bindings.get('MAIL_ENABLED')?.text!=='true')
   refuse('invalid IMAP feature flag');
@@ -77,10 +90,50 @@ export function verifyAcceptanceSettings(settings){
  return {owner,inherited,bindingCount:bindings.size};
 }
 
-export function verifyOwnerAccess(app,policies,owner){
+// Never permit staging to inherit either production D1 database, or to change
+// its own two isolated databases between preflight and uploaded-version readback.
+function d1Binding(settings,name){
+ const binding=settings?.bindings?.find(b=>b.name===name);
+ const id=binding?.database_id??binding?.id;
+ if(binding?.type!=='d1'||typeof id!=='string'||!UUID.test(id))
+  refuse('missing or invalid D1 resource identity');
+ return id;
+}
+export function verifyDatabaseIsolation(acceptance,production,uploaded=null){
+ const candidateIds=['DB','MAIL_DB'].map(n=>d1Binding(acceptance,n));
+ const productionIds=['DB','MAIL_DB'].map(n=>d1Binding(production,n));
+ if(new Set([...candidateIds,...productionIds]).size!==4)
+  refuse('acceptance storage overlaps production or duplicates mail storage');
+ if(uploaded){
+  if(['DB','MAIL_DB'].some((n,i)=>d1Binding(uploaded,n)!==candidateIds[i]))
+   refuse('uploaded version D1 database changed after preflight');
+ }
+ return true;
+}
+// Verify every inherited binding is exactly the reviewed runtime resource
+// (without reading or comparing secret values); only version metadata is added.
+export function verifyBindingParity(initial,uploaded){
+ const current=new Map(initial?.bindings?.map(b=>[b.name,b])||[]);
+ const actual=new Map(uploaded?.bindings?.map(b=>[b.name,b])||[]);
+ if(current.size!==initial?.bindings?.length||actual.size!==uploaded?.bindings?.length||
+   actual.size!==current.size+(current.has('CF_VERSION_METADATA')?0:1)||
+   actual.get('CF_VERSION_METADATA')?.type!=='version_metadata')
+  refuse('uploaded binding inventory differs from reviewed configuration');
+ for(const [name,a] of current){
+  const b=actual.get(name);
+  if(!b||a.type!==b.type)refuse('uploaded binding type changed');
+  if(a.type==='plain_text'&&a.text!==b.text)refuse('uploaded plain-text configuration changed');
+  if(a.type==='d1'&&d1Binding(initial,name)!==d1Binding(uploaded,name))
+   refuse('uploaded D1 binding changed');
+ }
+ return true;
+}
+export function verifyOwnerAccess(app,policies,owner,audience=null){
  if(!app||app.id!==APP||app.type!=='self_hosted'||app.domain!==new URL(ORIGIN).hostname||
     !Array.isArray(policies)||policies.length!==1)
   refuse('unexpected owner Access app or policy count');
+ if(audience!==null&&(!audience||app.aud!==audience))
+  refuse('Cloudflare Access audience differs from Worker binding');
  const p=policies[0];
  if(p.decision!=='allow'||!Array.isArray(p.include)||p.include.length!==1||
     p.include[0]?.email?.email!==owner||(p.exclude||[]).length||(p.require||[]).length)
@@ -129,7 +182,11 @@ export async function uploadAcceptanceVersion({fetchImpl=fetch,token,accountId,s
  const checked=verifyAcceptanceSettings(settings);
  const app=await cloudflareCall(fetchImpl,token,prefix+'/access/apps/'+APP);
  const ps=await cloudflareCall(fetchImpl,token,prefix+'/access/apps/'+APP+'/policies');
- verifyOwnerAccess(app,Array.isArray(ps)?ps:ps.items||[],checked.owner);
+ verifyOwnerAccess(app,Array.isArray(ps)?ps:ps.items||[],checked.owner,
+  settings.bindings.find(b=>b.name==='ACCESS_AUD')?.text);
+ const production=await cloudflareCall(fetchImpl,token,
+  prefix+'/workers/scripts/'+PRODUCTION_WORKER+'/settings');
+ verifyDatabaseIsolation(settings,production);
  const before=await cloudflareCall(fetchImpl,token,work+'/deployments');
  const liveId=before?.deployments?.[0]?.id;
  if(!UUID.test(liveId||''))refuse('could not anchor existing acceptance deployment');
@@ -151,6 +208,8 @@ export async function uploadAcceptanceVersion({fetchImpl=fetch,token,accountId,s
  });
  if(confirmed.owner!==checked.owner)
   refuse('uploaded version has changed owner authorization');
+ verifyDatabaseIsolation(settings,production,resources);
+ verifyBindingParity(settings,resources);
  const after=await cloudflareCall(fetchImpl,token,work+'/deployments');
  if(after?.deployments?.[0]?.id!==liveId)refuse('deployment changed during upload; manual review required');
  return {status:'VERSION_UPLOADED_NOT_DEPLOYED',versionId:uploaded.id,
