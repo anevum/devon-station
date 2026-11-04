@@ -216,6 +216,23 @@ export async function uploadAcceptanceVersion({fetchImpl=fetch,token,accountId,s
   sourceCommit:sourceSha,existingDeploymentId:liveId,trafficUnchanged:true};
 }
 
+// In the privileged workflow, code must come from the trusted workflow commit,
+// while the untrusted candidate is only parsed as data after exact-SHA verification.
+export function approvedSourceForMode({mode,checkoutSha,manifestSha,approvedSha,trustedUploaderSha}){
+ if(!SHA.test(checkoutSha))refuse('invalid local checkout identity');
+ if(mode==='--verify'){
+  if(manifestSha!==checkoutSha)refuse('review manifest is not from this checkout');
+  return checkoutSha;
+ }
+ if(mode==='--upload'){
+  if(!SHA.test(approvedSha)||manifestSha!==approvedSha)
+   refuse('candidate SHA does not match explicit owner upload approval');
+  if(!SHA.test(trustedUploaderSha)||checkoutSha!==trustedUploaderSha)
+   refuse('uploader source is not the explicitly trusted checkout');
+  return approvedSha;
+ }
+ refuse('unknown acceptance execution mode');
+}
 async function main(){
  const args=process.argv.slice(2);
  if(args.length!==1||!['--verify','--upload'].includes(args[0]))
@@ -227,19 +244,24 @@ async function main(){
  const dirty=execFileSync('git',['status','--porcelain=v1','--untracked-files=no'],
   {cwd:fileURLToPath(root),encoding:'utf8'}).trim();
  if(dirty)refuse('tracked source checkout not clean');
- const modules=verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha:sha});
+ const sourceSha=approvedSourceForMode({
+  mode:args[0],checkoutSha:sha,manifestSha:manifest.sourceCommit,
+  approvedSha:process.env.DS011_APPROVED_SOURCE_SHA,
+  trustedUploaderSha:process.env.DS011_TRUSTED_UPLOADER_SHA
+ });
+ const modules=verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha:sourceSha});
  if(args[0]==='--verify'){
   console.log(JSON.stringify({status:'OFFLINE_REVIEW_VERIFIED_NOT_DEPLOYED',sourceCommit:sha,
    moduleCount:Object.keys(modules).length,candidateSha256:sha256(bytes)}));
   return;
  }
  if(process.env.DS011_ALLOW_ACCEPTANCE_UPLOAD!=='true'||
-    process.env.DS011_APPROVED_SOURCE_SHA!==sha)
+    process.env.DS011_APPROVED_SOURCE_SHA!==sourceSha)
   refuse('explicit matching acceptance-upload authorization missing');
  const result=await uploadAcceptanceVersion({
   token:process.env.CLOUDFLARE_API_TOKEN,
   accountId:process.env.CLOUDFLARE_ACCOUNT_ID,
-  sourceSha:sha,modules
+  sourceSha,modules
  });
  console.log(JSON.stringify(result));
 }
