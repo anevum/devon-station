@@ -1,4 +1,10 @@
+<p align="center"><img src=".github/assets/readme-hero.svg" alt="Original DevonStation project banner" width="100%" /></p>
+
 # DevonStation
+
+> **Repository status · November 3, 2026:** The default `main` branch remains a public-safe recovery/documentation landing page. The integrated application and Communications are source-verified on draft review branches, not merged or proven live. Review [the development PRs](https://github.com/devonalanakins/devon-station/pulls) before treating any feature as released.
+
+DevonStation is an independent personal workspace, separate from the Anevum creative studio. Private notes, credentials and operational snapshots are never part of the public repository.
 
 DevonStation is Devon Akins's personal operating workspace: source-linked projects, scoped proposals and decisions, durable receipts, private capture and encrypted portable recovery. Original software and the original DS icon are licensed under **GNU AGPL version 3 only**. See [LICENSE](LICENSE).
 
