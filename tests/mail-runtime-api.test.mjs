@@ -177,3 +177,14 @@ test('cache metadata route refuses nonowner, wrong origin, queries and writes',a
   assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
  }finally{db.close();}
 });
+
+test('cache diagnostic storage failure is sanitized without exposing SQL, message data or changing state',async()=>{
+ const mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
+ const db={prepare(){throw new Error('private SQL and encrypted-message marker MUST_NOT_LEAK');},async batch(){throw Error('must_not_write');}};
+ const response=await station.fetch(req('/api/mail/diagnostics'),env(db));
+ assert.equal(response.status,502);
+ const raw=await response.text();
+ assert.deepEqual(JSON.parse(raw),{error:'mail_operation_failed'});
+ assert.doesNotMatch(raw,/private SQL|MUST_NOT_LEAK|encrypted-message|must_not_write/);
+ assert.equal(mock.calls().length,0);
+});
