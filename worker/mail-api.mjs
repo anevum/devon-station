@@ -14,6 +14,19 @@ const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return
 const MAILBOX = 'hello@devonakins.com';
 const scope = Object.freeze({installationId:'personal',principalId:'owner'});
 const status = (code,httpStatus=400)=>({status:httpStatus,body:{error:code}});
+// Diagnostics must not SELECT, decrypt or return message contents.
+// Metadata-only D1 checks cannot establish IMAP connectivity or payload recovery.
+async function cacheDiagnostics(db) {
+  const row=await db.prepare(`SELECT
+    (SELECT COUNT(*) FROM comms_ro_messages WHERE installation_id=? AND mailbox_id=?) AS indexed_count,
+    (SELECT revision FROM comms_ro_mailboxes WHERE installation_id=? AND mailbox_id=?) AS revision`)
+    .bind('personal','hello','personal','hello').first();
+  const revision=row?.revision??0;
+  if(!row||!Number.isSafeInteger(row.indexed_count)||row.indexed_count<0||row.indexed_count>500||
+    !Number.isSafeInteger(revision)||revision<0||revision>1_000_000_000||
+    (row.indexed_count>0&&revision===0))throw Error('invalid_mail_cache_metadata');
+  return {cacheReady:true,indexedCount:row.indexed_count,revision};
+}
 function isEnabled(env) {
   return env?.MAIL_ENABLED === 'true' && env.MAIL_IMAP_ADDRESS === MAILBOX &&
     typeof env.MAIL_OWNER_SUB === 'string' && env.MAIL_OWNER_SUB.length > 0 &&
@@ -42,10 +55,15 @@ export async function handleMailApi({request,url,user,env,connect,readBody}) {
   if(url.pathname==='/api/mail/status' && request.method==='GET')
     return {status:200,body:{configured:ready,address:MAILBOX,incomingVerified:false,outgoingEnabled:mailSendingEnabled(env,connect)&&mailDraftsEnabled(env),outboxEnabled:env.MAIL_OUTBOX_ENABLED==='true'&&typeof env.MAIL_DB?.prepare==='function',draftsEnabled:mailDraftsEnabled(env),provider:'purelymail'}};
   if(url.pathname.startsWith('/api/mail/drafts'))return handleMailDraftApi({request,url,user,env,readBody});
-  if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync'].includes(url.pathname))
+  if(!['/api/mail/mailboxes','/api/mail/inbox','/api/mail/sync','/api/mail/diagnostics'].includes(url.pathname))
     return status('not_found',404);
   if(!ready)return status('mail_not_configured',503);
   try {
+    if(url.pathname==='/api/mail/diagnostics') {
+      if(request.method!=='GET')return status('method_not_allowed',405);
+      if(url.search)return status('invalid_mail_diagnostics_request',400);
+      return {status:200,body:await cacheDiagnostics(env.MAIL_DB)};
+    }
     const mailRegistry=registry(),store=createD1MailStore(env.MAIL_DB,{cipher:payloadCipher(env),ownerSub:user.subject});
     if(url.pathname==='/api/mail/mailboxes' && request.method==='GET') {
       return {status:200,body:{mailboxes:listReadOnlyMailboxes(mailRegistry,scope)}};

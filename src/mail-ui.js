@@ -76,7 +76,7 @@
     const check=button(state.diagnostic.phase==='running'?'Checking…':'Check connection','diagnose');
     check.disabled=state.diagnostic.phase==='running';
     acceptanceHead.append(check);acceptance.append(acceptanceHead);
-    acceptance.append(node('p','mail-small','Checks the signed owner session, server configuration and cached inbox API. No provider sync or email sending occurs.'));
+    acceptance.append(node('p','mail-small','Checks the signed owner session, server configuration and cache metadata without reading message contents or contacting the mail provider.'));
     const diagnosticStatus=node('p','mail-diagnostic-status',state.diagnostic.summary);
     // Keep the existing inbox role=status as the primary mail live region.
     diagnosticStatus.setAttribute('aria-live','polite');
@@ -214,18 +214,18 @@
     if(!flags.configured){
       diagnostic('blocked','Provider configuration is incomplete. No mailbox connection was attempted.',lines);return;
     }
-    diagnostic('running','Mail configuration is available. Checking the encrypted-cache API…',lines);
-    // Read only a single cached record to verify the storage path. Never render or
-    // persist its contents in the diagnostics; normal message reading remains separate.
-    const inbox=await read('/api/mail/inbox?limit=1&offset=0');
-    if(inbox.kind!=='ok'){failure('cached inbox',inbox);return;}
-    if(!Number.isSafeInteger(inbox.body?.total)||inbox.body.total<0||
-       !Number.isSafeInteger(inbox.body?.revision)||!Array.isArray(inbox.body?.messages)||
-       inbox.body.messages.length>1){
-      diagnostic('blocked','Cached inbox API returned an invalid response. No provider sync was attempted.',lines);return;
+    diagnostic('running','Mail configuration is available. Checking isolated cache metadata…',lines);
+    // This endpoint returns only aggregate D1 metadata: no message plaintext,
+    // ciphertext, provider credentials or raw SQL.
+    const cache=await read('/api/mail/diagnostics');
+    if(cache.kind!=='ok'){failure('mail cache',cache);return;}
+    if(cache.body?.cacheReady!==true||
+       !Number.isSafeInteger(cache.body.indexedCount)||cache.body.indexedCount<0||cache.body.indexedCount>500||
+       !Number.isSafeInteger(cache.body.revision)||cache.body.revision<0){
+      diagnostic('blocked','Mail cache metadata returned an invalid response. No provider sync was attempted.',lines);return;
     }
-    lines.push('Cached inbox API: reachable ('+inbox.body.total+' indexed messages)');
-    diagnostic('checked','Read-only application checks completed. Real IMAP, SMTP and recipient delivery are not established by these checks.',lines);
+    lines.push('Isolated D1 cache metadata: reachable ('+cache.body.indexedCount+' indexed messages)');
+    diagnostic('checked','Read-only application checks completed. Decryption, real IMAP, SMTP and recipient delivery remain unverified.',lines);
   }
   async function start(){
     if(state.busy)return;

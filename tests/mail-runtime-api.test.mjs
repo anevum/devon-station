@@ -145,3 +145,35 @@ test('inbox revision query is bounded and invalid tokens never reach provider so
   assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
  }finally{db.close();}
 });
+
+test('signed owner sees only aggregate cache metadata, never stored ciphertext or provider requests',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);db.exec('PRAGMA foreign_keys=ON');
+ const binding=d1Double(db),mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
+ try{
+  const first=await station.fetch(req('/api/mail/diagnostics'),env(binding));
+  assert.equal(first.status,200);
+  assert.deepEqual(await first.json(),{cacheReady:true,indexedCount:0,revision:0});
+  db.prepare('INSERT INTO comms_ro_mailboxes (installation_id,mailbox_id,revision,uid_validity,highest_uid) VALUES(?,?,?,?,?)').run('personal','hello',3,7,1);
+  db.prepare('INSERT INTO comms_ro_messages (installation_id,mailbox_id,uid_validity,uid,from_address,subject,body_text,received_at,flags_json) VALUES(?,?,?,?,?,?,?,?,?)').run(
+   'personal','hello',7,1,'','',JSON.stringify({alg:'A256GCM',privateTestMarker:'DO_NOT_EXPOSE'}),'2026-11-02T17:00:00.000Z','[]');
+  const next=await station.fetch(req('/api/mail/diagnostics'),env(binding));
+  const raw=await next.text();
+  assert.equal(next.status,200);
+  assert.deepEqual(JSON.parse(raw),{cacheReady:true,indexedCount:1,revision:3});
+  assert.doesNotMatch(raw,/DO_NOT_EXPOSE|A256GCM|privateTestMarker|mailboxes|hello@devonakins.com/);
+  assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
+ }finally{db.close();}
+});
+test('cache metadata route refuses nonowner, wrong origin, queries and writes',async()=>{
+ const db=new DatabaseSync(':memory:');db.exec(schema);
+ const binding=d1Double(db),mock=socketMock(),station=createStation({},auth,fetch,mock.connect);
+ try{
+  assert.equal((await station.fetch(req('/api/mail/diagnostics'),{...env(binding),MAIL_OWNER_SUB:'different-sub'})).status,403);
+  assert.equal((await createStation({},async()=>({email:'nonowner@example.org',subject:'trusted-owner-sub'}),fetch,mock.connect)
+   .fetch(req('/api/mail/diagnostics'),env(binding))).status,403);
+  assert.equal((await station.fetch(new Request('https://evil.example/api/mail/diagnostics'),env(binding))).status,403);
+  assert.equal((await station.fetch(req('/api/mail/diagnostics?debug=1'),env(binding))).status,400);
+  assert.equal((await station.fetch(req('/api/mail/diagnostics','POST'),env(binding))).status,405);
+  assert.equal(mock.calls().length,0);assert.equal(binding.batches,0);
+ }finally{db.close();}
+});

@@ -292,6 +292,7 @@ test('in-app owner diagnostics check same-origin APIs, never sync, and never ren
  const x=load(path=>{
   if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true,draftsEnabled:true,outboxEnabled:false,outgoingEnabled:false});
   if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+  if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:1,revision:1,privateText});
   if(path.startsWith('/api/mail/inbox?'))return reply({total:1,messages:[sampleMail]});
   throw Error('unexpected_endpoint');
  });
@@ -307,7 +308,7 @@ test('in-app owner diagnostics check same-origin APIs, never sync, and never ren
   assert.doesNotMatch(panel.textContent,/private diagnostic marker/);
   assert.deepEqual(x.calls.map(x=>x.path),[
    '/api/mail/status','/api/mail/inbox?limit=50&offset=0',
-   '/api/session','/api/mail/status','/api/mail/inbox?limit=1&offset=0']);
+   '/api/session','/api/mail/status','/api/mail/diagnostics']);
   assert(x.calls.every(x=>x.method==='GET'&&x.credentials==='same-origin'&&x.redirect==='manual'));
  }finally{x.dom.window.close();}
 });
