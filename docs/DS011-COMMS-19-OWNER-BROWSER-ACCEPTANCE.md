@@ -15,6 +15,14 @@ The control is a user-initiated, read-only sequence:
 
 No diagnostic step performs IMAP login, provider synchronization, draft modification, outgoing preparation or SMTP submission. A green result proves only owner-facing application/auth/config/cache-metadata paths, **not** payload decryption, authentic IMAP, SMTP acceptance or actual delivery. The normal Mail inbox is intentionally separate from diagnostics and may display authenticated message text; its own read requests are not a diagnostic operation.
 
+## Optional real Purelymail IMAP sign-in check
+
+Once **Connection and release checks** completes, the separate **Test IMAP login (read-only)** control becomes available. This is an explicit owner action, not a background poll or automatic request. The browser sends same-origin JSON `POST /api/mail/diagnostics/imap-check` through the existing Cloudflare Access owner gate.
+
+The Worker accepts no hostname, mailbox, message ID, credentials, or command string from the request. It uses the existing secret binding to create a fixed-host TLS connection to Purelymail IMAP on port 993, performs `LOGIN` and `EXAMINE "INBOX"`, validates the returned UID metadata, and closes the session. The adapter's command allowlist forbids `SELECT`, `FETCH`, `SEARCH`, `STORE`, `APPEND` and `EXPUNGE` along this probe path. The response contains only safe booleans about the session and no account information or remote response text. A 9-second abort deadline and best-effort bounded cleanup prevent an ordinary stalled provider response from holding the UI indefinitely.
+
+A successful check proves only that the **currently deployed Worker** can authenticate to the provider and open INBOX in read-only mode. It does not synchronize an email, decrypt stored content, test SMTP, create delivery evidence, or indicate production readiness. It cannot run against the current acceptance Worker until that Worker has a securely installed IMAP-only app password; never copy or display the secret through GitHub, Notion or ChatGPT. A failed check remains sanitized and does not enable sending. The action should be performed on the signed owner application on the intended acceptance version, not on an Access sign-in page or an earlier production release.
+
 ## Interpretation and fail-closed behavior
 
 - **Signed owner session not established:** finish Cloudflare Access sign-in and open the actual application. A non-JSON/HTML sign-in response, 401/403 or redirect is never counted as an authenticated endpoint response.
