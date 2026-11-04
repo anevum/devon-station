@@ -1,4 +1,10 @@
+<p align="center"><img src=".github/assets/readme-hero.svg" alt="Original DevonStation project banner" width="100%" /></p>
+
 # DevonStation
+
+> **Repository status · November 3, 2026:** The default branch is a recovery/documentation landing page. Application and communications implementation is under active review in draft PRs; do not infer that any specific branch has been merged or deployed.
+
+[Current development PRs](https://github.com/devonalanakins/devon-station/pulls) · [Source repository](https://github.com/devonalanakins/devon-station)
 
 DevonStation is an independent, personal operations workspace project. The target repository is intended to hold **public-safe application source**, tests, setup documentation, and release history—not private operational records.
 
