@@ -2,8 +2,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
 import {readFileSync} from 'node:fs';
+import vm from 'node:vm';
 import {verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,verifyDatabaseIsolation,
- verifyBindingParity,approvedSourceForMode,buildVersionForm,uploadAcceptanceVersion} from '../tools/comms-acceptance-upload.mjs';
+ verifyBindingParity,approvedSourceForMode,buildVersionForm,uploadAcceptanceVersion,buildConnectedAcceptanceCode} from '../tools/comms-acceptance-upload.mjs';
 
 const sha256=s=>createHash('sha256').update(s).digest('hex');
 const sourceSha='a'.repeat(40);
@@ -116,6 +117,7 @@ test('dry-run provider emulation proves only version upload, no deployment, secr
   else if(path.endsWith('/settings'))result=settings();
   else if(path.endsWith('/access/apps/'+appId))result=app();
   else if(path.endsWith('/access/apps/'+appId+'/policies'))result=policies();
+  else if(path.endsWith('/subdomain'))result={enabled:true,previews_enabled:false};
   else if(path.endsWith('/deployments'))result={deployments:[{id:deployed}]};
   else if(path.endsWith('/versions?bindings_inherit=strict')){
    assert.equal(options.method,'POST');
@@ -135,7 +137,7 @@ test('dry-run provider emulation proves only version upload, no deployment, secr
  assert(requests.every(x=>!['PUT','PATCH','DELETE'].includes(x.method)));
  assert(requests.every(x=>!x.path.includes('/secrets')&&!x.path.includes('/d1/database')));
  assert.equal(requests.filter(x=>x.path.endsWith('/workers/scripts/devon-station/settings')).length,1);
- assert(requests.filter(x=>x.path.endsWith('/deployments')).length===2);
+ assert(requests.filter(x=>x.path.endsWith('/deployments')).length===4);
 });
 test('upload refuses missing authorization or mutated live deployment',async()=>{
  const {modules}=fakeBundle();
@@ -149,6 +151,8 @@ test('upload refuses missing authorization or mutated live deployment',async()=>
   else if(path.endsWith('/settings'))result=settings();
   else if(path.endsWith('/access/apps/'+appId))result=app();
   else if(path.endsWith('/access/apps/'+appId+'/policies'))result=policies();
+  else if(path.endsWith('/workers/scripts/devon-station/deployments'))result={deployments:[{id:deployed}]};
+  else if(path.endsWith('/subdomain'))result={enabled:true,previews_enabled:false};
   else if(path.endsWith('/deployments'))result={deployments:[{id:++count===1?deployed:version}]};
   else if(path.endsWith('/versions?bindings_inherit=strict'))result={id:version};
   else if(path.endsWith('/versions/'+version))result={id:version,annotations:{'workers/commit_sha':sourceSha},resources:{bindings:[...settings().bindings,{name:'CF_VERSION_METADATA',type:'version_metadata'}],script_runtime:{compatibility_date:'2026-10-28',compatibility_flags:['nodejs_compat']}}};
@@ -230,4 +234,121 @@ test('manual staging workflow never grants Cloudflare secrets to untrusted candi
  assert.match(upload,/gh api/);
  assert.match(upload,/node tools\/comms-acceptance-upload\.mjs --upload/);
  assert.doesNotMatch(upload,/npm ci|npm run build|node tools\/prepare-rb01-review/);
+});
+
+function connectedHarness(operation='PREFLIGHT_ONLY',alter=()=>{}){
+ const {manifest,bytes,modules}=fakeBundle();
+ const args={manifest,candidateBytes:bytes,expectedSha:sourceSha,
+  expectedCandidateSha256:sha256(bytes),accountId:'b'.repeat(32),operation};
+ const calls=[];
+ const cloudflare={request:async options=>{
+  calls.push(options);
+  const path=options.path;
+  let result;
+  if(path.endsWith('/workers/scripts/devon-station/settings'))result=productionSettings();
+  else if(path.endsWith('/settings'))result=settings();
+  else if(path.endsWith('/access/apps/'+appId))result=app();
+  else if(path.endsWith('/access/apps/'+appId+'/policies'))result=policies();
+  else if(path.endsWith('/subdomain'))result={enabled:true,previews_enabled:false};
+  else if(path.endsWith('/deployments'))result={deployments:[{id:deployed}]};
+  else if(path.endsWith('/versions')&&options.method==='POST')result={id:version};
+  else if(path.endsWith('/versions/'+version))result={id:version,annotations:{'workers/commit_sha':sourceSha},
+   resources:{bindings:[...settings().bindings,{name:'CF_VERSION_METADATA',type:'version_metadata'}],
+    script_runtime:{compatibility_date:'2026-10-28',compatibility_flags:['nodejs_compat']}}};
+  else throw Error('unallowlisted API reached '+path);
+  alter(options,result);
+  return {success:true,result};
+ }};
+ const run=code=>vm.runInNewContext('('+code+')',{
+  cloudflare,accountId:args.accountId,crypto:globalThis.crypto,TextEncoder,FormData,Blob,URL
+ })();
+ return {args,calls,run,modules};
+}
+test('connected preflight rehashes data, inspects boundaries and makes no mutations',async()=>{
+ const h=connectedHarness();
+ const code=buildConnectedAcceptanceCode(h.args);
+ const result=await h.run(code);
+ assert.equal(result.status,'CONNECTED_PREFLIGHT_VERIFIED_NO_UPLOAD');
+ assert.equal(result.candidateSha256,h.args.expectedCandidateSha256);
+ assert.equal(h.calls.length,7);
+ assert(h.calls.every(c=>c.method==='GET'));
+ assert.doesNotMatch(code,/Bearer |CLOUDFLARE_API_TOKEN|eval\(/);
+});
+test('connected version-only upload preserves exact multipart module bytes and strict binding inheritance',async()=>{
+ const h=connectedHarness('UPLOAD_VERSION_ONLY_NO_DEPLOY');
+ const result=await h.run(buildConnectedAcceptanceCode(h.args));
+ assert.equal(result.status,'VERSION_UPLOADED_NOT_DEPLOYED');
+ assert.equal(result.trafficUnchanged,true);
+ const writes=h.calls.filter(c=>c.method!=='GET');
+ assert.equal(writes.length,1);
+ const upload=writes[0];
+ assert(upload.path.endsWith('/workers/scripts/'+worker+'/versions'));
+ assert.equal(upload.query.bindings_inherit,'strict');
+ assert.equal(upload.rawBody,true);
+ const form=await new Response(upload.body,{headers:{'content-type':upload.contentType}}).formData();
+ assert.equal([...form.keys()].length,44);
+ for(const [name,source] of Object.entries(h.modules))assert.equal(await form.get(name).text(),source);
+ const metadata=JSON.parse(await form.get('metadata').text());
+ assert.equal(metadata.annotations['workers/commit_sha'],sourceSha);
+ assert(metadata.bindings.every(b=>['inherit','version_metadata'].includes(b.type)));
+});
+test('connected candidate corruption, wrong account, digest and approval fail before provider calls',async()=>{
+ for(const mutate of [
+  code=>code.replace('export const x=39;','export const x=38;'),
+  code=>code.replace('const approvedAccount="'+'b'.repeat(32)+'"','const approvedAccount="'+'c'.repeat(32)+'"')
+ ]){
+  const h=connectedHarness();
+  await assert.rejects(h.run(mutate(buildConnectedAcceptanceCode(h.args))),/checksum|account differs/);
+  assert.equal(h.calls.length,0);
+ }
+ const h=connectedHarness();
+ assert.throws(()=>buildConnectedAcceptanceCode({...h.args,expectedCandidateSha256:'0'.repeat(64)}),/pinned artifact/);
+ assert.throws(()=>buildConnectedAcceptanceCode({...h.args,expectedSha:'c'.repeat(40)}),/source SHA/);
+ assert.throws(()=>buildConnectedAcceptanceCode({...h.args,operation:'DEPLOY'}),/explicit connected execution/);
+});
+test('connected path refuses unsafe Access, overlapping storage and send configuration before upload',async()=>{
+ for(const alter of [
+  (o,r)=>{if(o.path.endsWith('/settings'))r.bindings.find(b=>b.name==='MAIL_SEND_ENABLED').text='true';},
+  (o,r)=>{if(o.path.endsWith('/policies'))r[0].include=[{everyone:{}}];},
+  (o,r)=>{if(o.path.endsWith('/workers/scripts/devon-station/settings'))r.bindings.find(b=>b.name==='DB').database_id=d1ids.acceptanceDB;}
+ ]){
+  const h=connectedHarness('UPLOAD_VERSION_ONLY_NO_DEPLOY',alter);
+  await assert.rejects(h.run(buildConnectedAcceptanceCode(h.args)),/refused/);
+  assert(h.calls.every(c=>c.method==='GET'));
+ }
+});
+test('connected post-upload failure never deploys or retries the version',async()=>{
+ const h=connectedHarness('UPLOAD_VERSION_ONLY_NO_DEPLOY',(o,r)=>{
+  if(o.path.endsWith('/versions/'+version))r.annotations['workers/commit_sha']='c'.repeat(40);
+ });
+ await assert.rejects(h.run(buildConnectedAcceptanceCode(h.args)),/provenance/);
+ assert.equal(h.calls.filter(c=>c.method==='POST').length,1);
+ assert(h.calls.every(c=>c.method==='GET'||c.path.endsWith('/versions')));
+});
+
+test('acceptance preflight rejects typed configuration and conflicting D1 identifiers',()=>{
+ const typed=settings();typed.bindings.find(b=>b.name==='ACCESS_ISSUER').type='secret_text';
+ assert.throws(()=>verifyAcceptanceSettings(typed),/plain-text configuration/);
+ const flag=settings();flag.bindings.find(b=>b.name==='MAIL_OUTBOX_ENABLED').text='sometimes';
+ assert.throws(()=>verifyAcceptanceSettings(flag),/feature flag/);
+ const conflict=settings();conflict.bindings.find(b=>b.name==='DB').id=d1ids.productionDB;
+ assert.throws(()=>verifyDatabaseIsolation(conflict,productionSettings()),/conflicting D1/);
+});
+test('connected executor refuses enabled preview URLs and invalid provider results without upload',async()=>{
+ const h=connectedHarness('UPLOAD_VERSION_ONLY_NO_DEPLOY',(o,r)=>{
+  if(o.path.endsWith('/subdomain'))r.previews_enabled=true;
+ });
+ await assert.rejects(h.run(buildConnectedAcceptanceCode(h.args)),/preview URLs/);
+ assert(h.calls.every(c=>c.method==='GET'));
+});
+test('candidate source remains inert data in the connected executor',async()=>{
+ const h=connectedHarness();
+ const modules=JSON.parse(h.args.candidateBytes);
+ modules['src/synthetic-39.mjs']='"; globalThis.candidateExecuted=true; throw Error("candidate code executed"); //';
+ const bytes=Buffer.from(JSON.stringify(modules));
+ const manifest={...h.args.manifest,candidate:{sha256:sha256(bytes),moduleCount:43,
+  modulesSha256:Object.fromEntries(Object.entries(modules).map(([p,s])=>[p,sha256(s)]))}};
+ const code=buildConnectedAcceptanceCode({...h.args,manifest,candidateBytes:bytes,expectedCandidateSha256:sha256(bytes)});
+ const result=await h.run(code);
+ assert.equal(result.status,'CONNECTED_PREFLIGHT_VERIFIED_NO_UPLOAD');
 });

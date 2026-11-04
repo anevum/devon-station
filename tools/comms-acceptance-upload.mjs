@@ -63,6 +63,10 @@ export function verifyAcceptanceSettings(settings){
   bindings.set(b.name,b);
  }
  if(knownNames.some(n=>!bindings.has(n)))refuse('required acceptance binding absent');
+ for(const name of knownNames.filter(n=>!['DB','MAIL_DB','MAIL_PAYLOAD_KEYS_JSON'].includes(n)))
+  if(bindings.get(name).type!=='plain_text')refuse('wrong plain-text configuration binding type');
+ for(const name of ['MAIL_DRAFTS_ENABLED','MAIL_ENABLED','MAIL_OUTBOX_ENABLED'])
+  if(!['true','false'].includes(bindings.get(name).text))refuse('invalid acceptance feature flag');
  for(const name of ['DB','MAIL_DB'])if(bindings.get(name).type!=='d1')
   refuse('wrong D1 binding type');
  if(bindings.get('MAIL_PAYLOAD_KEYS_JSON').type!=='secret_text')
@@ -97,6 +101,8 @@ function d1Binding(settings,name){
  const id=binding?.database_id??binding?.id;
  if(binding?.type!=='d1'||typeof id!=='string'||!UUID.test(id))
   refuse('missing or invalid D1 resource identity');
+ if(binding.id&&binding.database_id&&binding.id!==binding.database_id)
+  refuse('conflicting D1 resource identities');
  return id;
 }
 export function verifyDatabaseIsolation(acceptance,production,uploaded=null){
@@ -176,25 +182,46 @@ async function cloudflareCall(fetchImpl,token,path,{method='GET',body}={}){
 export async function uploadAcceptanceVersion({fetchImpl=fetch,token,accountId,sourceSha,modules}){
  if(typeof token!=='string'||token.length<12||!(/^[a-f0-9]{32}$/i.test(accountId))||
     !SHA.test(sourceSha)||!modules)refuse('missing exact upload authorization');
+ return uploadAcceptanceVersionWithRequest({
+  request:(path,options)=>cloudflareCall(fetchImpl,token,path,options),accountId,sourceSha,modules
+ });
+}
+
+// Shared orchestration: callers supply only a bounded API transport. The connected
+// executor uses its existing authorization; no credential is moved into this process.
+export async function preflightAcceptance(request,accountId){
+ if(typeof request!=='function'||!(/^[a-f0-9]{32}$/.test(accountId)))
+  refuse('invalid connected account or transport');
  const prefix='/accounts/'+accountId;
  const work=prefix+'/workers/scripts/'+WORKER;
- const settings=await cloudflareCall(fetchImpl,token,work+'/settings');
+ const settings=await request(work+'/settings');
  const checked=verifyAcceptanceSettings(settings);
- const app=await cloudflareCall(fetchImpl,token,prefix+'/access/apps/'+APP);
- const ps=await cloudflareCall(fetchImpl,token,prefix+'/access/apps/'+APP+'/policies');
+ const app=await request(prefix+'/access/apps/'+APP);
+ const ps=await request(prefix+'/access/apps/'+APP+'/policies');
  verifyOwnerAccess(app,Array.isArray(ps)?ps:ps.items||[],checked.owner,
   settings.bindings.find(b=>b.name==='ACCESS_AUD')?.text);
- const production=await cloudflareCall(fetchImpl,token,
+ const production=await request(
   prefix+'/workers/scripts/'+PRODUCTION_WORKER+'/settings');
  verifyDatabaseIsolation(settings,production);
- const before=await cloudflareCall(fetchImpl,token,work+'/deployments');
+ const before=await request(work+'/deployments');
  const liveId=before?.deployments?.[0]?.id;
  if(!UUID.test(liveId||''))refuse('could not anchor existing acceptance deployment');
+ const productionDeployment=await request(prefix+'/workers/scripts/'+PRODUCTION_WORKER+'/deployments');
+ const productionId=productionDeployment?.deployments?.[0]?.id;
+ if(!UUID.test(productionId||''))refuse('could not anchor production deployment');
+ const subdomain=await request(work+'/subdomain');
+ if(subdomain?.enabled!==true||subdomain.previews_enabled!==false)
+  refuse('acceptance preview URLs must remain disabled');
+ return {work,settings,production,checked,liveId,productionId};
+}
+export async function uploadAcceptanceVersionWithRequest({request,accountId,sourceSha,modules}){
+ if(!SHA.test(sourceSha)||!modules)refuse('missing exact upload inputs');
+ const {work,settings,production,checked,liveId,productionId}=await preflightAcceptance(request,accountId);
  const {form}=buildVersionForm(modules,sourceSha,checked.inherited);
- const uploaded=await cloudflareCall(fetchImpl,token,work+'/versions?bindings_inherit=strict',
+ const uploaded=await request(work+'/versions?bindings_inherit=strict',
   {method:'POST',body:form});
  if(!UUID.test(uploaded?.id||''))refuse('no immutable Cloudflare version ID returned');
- const version=await cloudflareCall(fetchImpl,token,work+'/versions/'+uploaded.id);
+ const version=await request(work+'/versions/'+uploaded.id);
  if(version.id!==uploaded.id||version?.annotations?.['workers/commit_sha']!==sourceSha)
   refuse('uploaded version provenance readback did not match');
  const resources=version?.resources;
@@ -210,7 +237,13 @@ export async function uploadAcceptanceVersion({fetchImpl=fetch,token,accountId,s
   refuse('uploaded version has changed owner authorization');
  verifyDatabaseIsolation(settings,production,resources);
  verifyBindingParity(settings,resources);
- const after=await cloudflareCall(fetchImpl,token,work+'/deployments');
+ const subdomain=await request(work+'/subdomain');
+ if(subdomain?.enabled!==true||subdomain.previews_enabled!==false)
+  refuse('acceptance preview configuration changed during upload');
+ const productionAfter=await request('/accounts/'+accountId+'/workers/scripts/'+PRODUCTION_WORKER+'/deployments');
+ if(productionAfter?.deployments?.[0]?.id!==productionId)
+  refuse('production deployment changed during upload; manual review required');
+ const after=await request(work+'/deployments');
  if(after?.deployments?.[0]?.id!==liveId)refuse('deployment changed during upload; manual review required');
  return {status:'VERSION_UPLOADED_NOT_DEPLOYED',versionId:uploaded.id,
   sourceCommit:sourceSha,existingDeploymentId:liveId,trafficUnchanged:true};
@@ -232,6 +265,85 @@ export function approvedSourceForMode({mode,checkoutSha,manifestSha,approvedSha,
   return approvedSha;
  }
  refuse('unknown acceptance execution mode');
+}
+
+// Produce reviewed connector code offline. Candidate modules are a JSON string,
+// never evaluated by the privileged executor. Both the whole bundle and every
+// module are hashed again there before the first provider request.
+export function buildConnectedAcceptanceCode({manifest,candidateBytes,expectedSha,
+ expectedCandidateSha256,accountId,operation='PREFLIGHT_ONLY'}){
+ if(!/^[a-f0-9]{32}$/.test(accountId)||
+    !/^[a-f0-9]{64}$/.test(expectedCandidateSha256)||
+    !['PREFLIGHT_ONLY','UPLOAD_VERSION_ONLY_NO_DEPLOY'].includes(operation))
+  refuse('invalid explicit connected execution inputs');
+ verifyReviewCandidate({manifest,candidateBytes,expectedSha});
+ const candidateText=Buffer.from(candidateBytes).toString('utf8');
+ if(sha256(candidateText)!==expectedCandidateSha256)
+  refuse('candidate differs from independently pinned artifact digest');
+ const constants={WORKER,PRODUCTION_WORKER,ORIGIN,APP,knownNames};
+ const declarations=Object.entries(constants).map(([k,v])=>'const '+k+'='+JSON.stringify(v)+';').join('\n');
+ const guards=[verifyAcceptanceSettings,d1Binding,verifyDatabaseIsolation,verifyBindingParity,
+  verifyOwnerAccess,buildVersionForm,preflightAcceptance,uploadAcceptanceVersionWithRequest]
+  .map(fn=>fn.toString()).join('\n');
+ return `async () => {
+ 'use strict';
+ ${declarations}
+ const SHA=/^[0-9a-f]{40}$/;
+ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+ const refuse=reason=>{throw new Error('DS011 acceptance refused: '+reason);};
+ ${guards}
+ const approvedAccount=${JSON.stringify(accountId)};
+ if(accountId!==approvedAccount)refuse('connected account differs from approved account');
+ const sourceSha=${JSON.stringify(expectedSha)};
+ const operation=${JSON.stringify(operation)};
+ const candidateText=${JSON.stringify(candidateText)};
+ const expectedDigest=${JSON.stringify(expectedCandidateSha256)};
+ const moduleDigests=${JSON.stringify(manifest.candidate.modulesSha256)};
+ const digest=async value=>Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(value))),
+  b=>b.toString(16).padStart(2,'0')).join('');
+ if(await digest(candidateText)!==expectedDigest)refuse('connected candidate checksum mismatch');
+ const modules=JSON.parse(candidateText);
+ if(Object.keys(modules).length!==43||Object.keys(moduleDigests).length!==43)
+  refuse('connected module inventory mismatch');
+ for(const [name,source] of Object.entries(modules))
+  if(typeof source!=='string'||await digest(source)!==moduleDigests[name])refuse('connected module checksum mismatch');
+ const prefix='/accounts/'+approvedAccount;
+ const work=prefix+'/workers/scripts/'+WORKER;
+ const production=prefix+'/workers/scripts/'+PRODUCTION_WORKER;
+ const app=prefix+'/access/apps/'+APP;
+ const reads=new Set([work+'/settings',work+'/deployments',work+'/subdomain',production+'/settings',production+'/deployments',app,app+'/policies']);
+ const request=async(path,{method='GET',body}={})=>{
+  let options;
+  if(method==='GET'&&(reads.has(path)||new RegExp('^'+work+'/versions/[a-f0-9-]{36}$').test(path)))
+   options={method,path};
+  else if(operation==='UPLOAD_VERSION_ONLY_NO_DEPLOY'&&method==='POST'&&path===work+'/versions?bindings_inherit=strict'){
+   if(!(body instanceof FormData))refuse('version body is not reviewed multipart');
+   const boundary='ds011-'+crypto.randomUUID();
+   const parts=[];
+   for(const [name,blob] of body.entries()){
+    if(!/^[a-z0-9./-]+$/.test(name)||!(blob instanceof Blob))refuse('invalid multipart part');
+    const value=await blob.text();
+    if(value.includes(boundary))refuse('multipart boundary collision');
+    parts.push('--'+boundary,'Content-Disposition: form-data; name="'+name+'"; filename="'+name+'"',
+     'Content-Type: '+blob.type,'',value);
+   }
+   parts.push('--'+boundary+'--','');
+   options={method:'POST',path:work+'/versions',query:{bindings_inherit:'strict'},
+    body:parts.join('\\r\\n'),contentType:'multipart/form-data; boundary='+boundary,rawBody:true};
+  }else refuse('connected API operation is outside the version-only allowlist');
+  let response;
+  try{response=await cloudflare.request(options);}catch{refuse('connected provider request failed; inspect versions before retry');}
+  if(response?.success!==true||!response.result)refuse('connected provider did not confirm success; inspect versions before retry');
+  return response.result;
+ };
+ if(operation==='PREFLIGHT_ONLY'){
+  const checked=await preflightAcceptance(request,approvedAccount);
+  return {status:'CONNECTED_PREFLIGHT_VERIFIED_NO_UPLOAD',sourceCommit:sourceSha,candidateSha256:expectedDigest,
+   moduleCount:43,existingDeploymentId:checked.liveId,productionDeploymentId:checked.productionId};
+ }
+ const result=await uploadAcceptanceVersionWithRequest({request,accountId:approvedAccount,sourceSha,modules});
+ return {...result,candidateSha256:expectedDigest};
+}`;
 }
 async function main(){
  const args=process.argv.slice(2);

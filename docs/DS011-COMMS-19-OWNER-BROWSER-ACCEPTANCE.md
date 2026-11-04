@@ -41,6 +41,43 @@ Only the Cloudflare **`POST /versions?bindings_inherit=strict`** endpoint is use
 
 The acceptance Worker still has `MAIL_ENABLED=false` and no `MAIL_IMAP_PASSWORD` binding. Even once a version is uploaded, real provider tests require separate secure IMAP-only credential provisioning, correct owner-only runtime authentication and an explicitly reviewed acceptance route. **Do not copy production SMTP credentials to acceptance**, flip production traffic, or promote a version to work around an unmet gate.
 
+### Connected Cloudflare execution before default-branch integration
+
+The existing authorized Cloudflare connection can execute the same version-only
+orchestration without GitHub dispatch or a new token. This path does not require
+merging any unaccepted prerequisite. `tools/prepare-comms-connected.mjs` is an
+**offline code generator**, not an uploader. From a clean, explicitly trusted
+checkout, provide `DS011_TRUSTED_UPLOADER_SHA`, `DS011_APPROVED_SOURCE_SHA`,
+`DS011_APPROVED_CANDIDATE_SHA256`, and the non-secret `CLOUDFLARE_ACCOUNT_ID`.
+The candidate SHA-256 must come independently from the exact-head CI artifact;
+compare its ZIP checksum, extracted `SHA256SUMS`, module digests and a clean
+rebuild before authorizing the handoff.
+
+Run `node tools/prepare-comms-connected.mjs --preflight`. Execute the generated
+ignored `release-review/connected-preflight.js` through the existing connected
+Cloudflare executor with the same explicit account. This makes only GET requests.
+The executor hashes the entire candidate and all 43 modules before contacting
+Cloudflare. Candidate source is parsed as data and never executed by the uploader.
+No Cloudflare token, IMAP/SMTP password, encryption key or browser session is
+retrieved, printed, copied or embedded in the generated code.
+
+After inspecting preflight, `--upload-version-only` prepares a separate generated
+operation explicitly restricted to `UPLOAD_VERSION_ONLY_NO_DEPLOY`. Execute it
+only within current owner authorization and after rechecking the current PR head
+and exact-head checks. The transport permits bounded configuration/Access reads
+and exactly one strict-inheritance POST to the existing acceptance `/versions`
+endpoint. It cannot deploy, change traffic or mutate secrets, policies, DNS or D1.
+Both production and acceptance deployment IDs are anchored and checked afterward.
+Preview URLs must remain disabled before and after upload. A failed or ambiguous
+POST is never retried automatically: inspect the versions list before any retry.
+
+The shared orchestration verifies version/source annotation, runtime, owner
+configuration and all inherited binding identities after upload. It cannot compare
+the contents of inherited secret values or prove provider credentials/key custody.
+An immutable uploaded version is **not an active acceptance deployment**. Separate
+approval, real signed owner/nonowner sessions, secure acceptance-only IMAP setup,
+schema/key recovery checks and physical-device acceptance remain required.
+
 ## Worker version identity and split-traffic acceptance
 
 The signed owner session, mail-status response, and cache-diagnostic response optionally include **\`workerVersionId\`**, sourced exclusively from Cloudflare's \`CF_VERSION_METADATA\` platform binding, validated as a UUID. The tag and other metadata are never exposed. The in-app checks compare all three responses and refuse inconsistent IDs; this matters when a candidate and legacy version have different percentages in the current deployment. When the binding is absent, the diagnostics state "not reported" and are **not** sufficient to establish release identity. For a production acceptance version, include \`{"type":"version_metadata","name":"CF_VERSION_METADATA"}\` in the uploaded Worker bindings, then independently compare the signed owner's reported UUID with the exact Cloudflare deployment/versions API record and its annotated source SHA. A self-reported version ID alone does not prove the source bytes or production readiness.
