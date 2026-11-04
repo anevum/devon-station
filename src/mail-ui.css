@@ -82,3 +82,15 @@ textarea.mail-draft-field{resize:vertical;min-height:180px}
 .mail-draft-delivery-status{display:block;font-size:11px;color:var(--muted);line-height:1.5;overflow-wrap:anywhere}
 .mail-draft-delivery-status[data-outbox-state="accepted"]{color:var(--accent)}
 .mail-draft-delivery-status[data-outbox-state="claimed"],.mail-draft-delivery-status[data-outbox-state="uncertain"]{color:var(--warn)}
+
+/* COMMS-19: in-app owner acceptance checks; read-only results and no sensitive payloads. */
+.mail-diagnostic{min-width:0;display:grid;gap:10px;padding:16px 18px;border:1px solid var(--line);border-radius:var(--radius);background:var(--panel2);overflow-wrap:anywhere}
+.mail-diagnostic-head{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+.mail-diagnostic-head strong{font-size:13px;font-weight:650}
+.mail-diagnostic-head button{min-height:44px;min-width:150px}
+.mail-diagnostic .mail-small{margin:0;line-height:1.5}
+.mail-diagnostic-status{margin:0;color:var(--muted);font-size:12px;line-height:1.5}
+.mail-diagnostic-status[data-check="checked"]{color:var(--accent)}
+.mail-diagnostic-status[data-check="blocked"]{color:var(--warn)}
+.mail-diagnostic-results{margin:0;padding:0 0 0 18px;display:grid;gap:5px;font-size:12px;line-height:1.5;color:var(--muted)}
+@media(max-width:450px){.mail-diagnostic{padding:14px}.mail-diagnostic-head button{width:100%;min-width:0}}
