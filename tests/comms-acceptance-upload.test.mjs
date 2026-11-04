@@ -1,6 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
+import {readFileSync} from 'node:fs';
 import {verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,verifyDatabaseIsolation,
  verifyBindingParity,approvedSourceForMode,buildVersionForm,uploadAcceptanceVersion} from '../tools/comms-acceptance-upload.mjs';
 
@@ -205,4 +206,28 @@ test('privileged upload runner must use a separately approved candidate SHA and 
  assert.throws(()=>approvedSourceForMode({...ok,trustedUploaderSha:current}),/trusted checkout/);
  assert.throws(()=>approvedSourceForMode({...ok,checkoutSha:'invalid'}),/invalid local checkout/);
  assert.throws(()=>approvedSourceForMode({...ok,mode:'--unsafe'}),/unknown acceptance execution mode/);
+});
+
+test('manual staging workflow never grants Cloudflare secrets to untrusted candidate build',()=>{
+ const file=readFileSync(new URL('../.github/workflows/mail-acceptance-version-only.yml',import.meta.url),'utf8');
+ const [review,upload]=file.split('  upload-version-only:');
+ assert(review&&upload,'both review and upload jobs must exist');
+ assert.match(review,/on:\s*\n  workflow_dispatch:/);
+ assert.doesNotMatch(file,/^\s+(push|pull_request|schedule):/m);
+ assert.match(file,/cancel-in-progress: false/);
+ assert.match(review,/github\.ref == 'refs\/heads\/main'/);
+ assert.match(review,/UPLOAD_VERSION_ONLY_NO_DEPLOY/);
+ assert.match(review,/ref: \$\{\{ inputs\.source_sha \}\}/);
+ assert.match(review,/node tools\/comms-acceptance-upload\.mjs --verify/);
+ assert.doesNotMatch(review,/secrets\./);
+ assert.match(upload,/environment:\s*\n\s+name: ds011-mail-acceptance/);
+ assert.match(upload,/ref: \$\{\{ github\.workflow_sha \}\}/);
+ assert.match(upload,/DS011_TRUSTED_UPLOADER_SHA: \$\{\{ github\.workflow_sha \}\}/);
+ assert.match(upload,/DS011_MAIL_ACCEPTANCE_STAGE_ENABLED/);
+ assert.match(upload,/DS011_CF_ACCEPTANCE_TOKEN/);
+ assert.match(upload,/DS011_CF_ACCOUNT_ID/);
+ assert.match(upload,/sha256sum -c SHA256SUMS/);
+ assert.match(upload,/gh api/);
+ assert.match(upload,/node tools\/comms-acceptance-upload\.mjs --upload/);
+ assert.doesNotMatch(upload,/npm ci|npm run build|node tools\/prepare-rb01-review/);
 });
