@@ -107,7 +107,7 @@ test('dry-run provider emulation proves only version upload, no deployment, secr
    assert(options.body instanceof FormData);
    result={id:version};
   }
-  else if(path.endsWith('/versions/'+version))result={id:version,metadata:{annotations:{'workers/commit_sha':sourceSha}}};
+  else if(path.endsWith('/versions/'+version))result={id:version,annotations:{'workers/commit_sha':sourceSha},resources:{bindings:[...settings().bindings,{name:'CF_VERSION_METADATA',type:'version_metadata'}],script_runtime:{compatibility_date:'2026-10-28',compatibility_flags:['nodejs_compat']}}};
   else throw Error('unexpected mock API '+path);
   return new Response(JSON.stringify({success:true,result}),{status:200,headers:{'content-type':'application/json'}});
  };
@@ -134,7 +134,7 @@ test('upload refuses missing authorization or mutated live deployment',async()=>
   else if(path.endsWith('/access/apps/'+appId+'/policies'))result=policies();
   else if(path.endsWith('/deployments'))result={deployments:[{id:++count===1?deployed:version}]};
   else if(path.endsWith('/versions?bindings_inherit=strict'))result={id:version};
-  else if(path.endsWith('/versions/'+version))result={id:version,metadata:{annotations:{'workers/commit_sha':sourceSha}}};
+  else if(path.endsWith('/versions/'+version))result={id:version,annotations:{'workers/commit_sha':sourceSha},resources:{bindings:[...settings().bindings,{name:'CF_VERSION_METADATA',type:'version_metadata'}],script_runtime:{compatibility_date:'2026-10-28',compatibility_flags:['nodejs_compat']}}};
   else throw Error('unexpected');
   return new Response(JSON.stringify({success:true,result}),{status:200});
  };
