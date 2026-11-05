@@ -1,4 +1,5 @@
 // Server-owned outbox adapter/dispatcher. No scheduler, HTTP send route or implicit retry.
+// Cap active/unresolved attempts, never the lifetime of permanent receipts.
 import {prepareOutgoingPlainText} from './mail-outbound-wire.mjs';
 import {createPurelymailSmtpTransport} from './mail-smtp-transport.mjs';
 import {validateDraftPayload} from './mail-drafts.mjs';
@@ -38,7 +39,7 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
    if(new TextEncoder().encode(plain).length>160*1024)fail('outbox_payload_limit');
    const text=await encode(deliveryId,payload);
    if(new TextEncoder().encode(text).length>230000)fail('outbox_payload_limit');
-   await db.prepare("INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at) SELECT ?,?,?,?,?, 'queued',NULL,?,? WHERE (SELECT count(*) FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=?)<100 ON CONFLICT DO NOTHING")
+   await db.prepare("INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at) SELECT ?,?,?,?,?, 'queued',NULL,?,? WHERE (SELECT count(*) FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND state IN ('queued','claimed','uncertain'))<100 ON CONFLICT DO NOTHING")
     .bind(...parts,deliveryId,text,at,at,...parts).run();
    const row=await get(deliveryId);if(!row)fail('outbox_limit');
    if(!await samePayload(row,payload))fail('outbox_conflict');return receipt(row);
@@ -67,7 +68,7 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
     "SELECT ?,?,?,?,?,'queued',NULL,?,?,?,? FROM comms_mail_drafts WHERE "+
     "installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=? AND revision=? "+
     "AND recipients_json=? AND subject=? AND body_text=? "+
-    "AND (SELECT COUNT(*) FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=?)<100")
+    "AND (SELECT COUNT(*) FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND state IN ('queued','claimed','uncertain'))<100")
     .bind(...parts,deliveryId,encoded,at,at,draftId,draftRevision,
      ...parts,draftId,draftRevision,...proof,...parts).run();
    const own=await get(deliveryId);
@@ -158,7 +159,13 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
    return row?receipt(row):null;
   },
   async read(deliveryId){const row=await get(deliveryId);return row?{...receipt(row),payload:await decode(row)}:null;},
-  async list(){const result=await db.prepare('SELECT delivery_id,state,created_at,updated_at,draft_id,draft_revision FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? ORDER BY created_at,delivery_id LIMIT 100').bind(...parts).all();return result.results.map(receipt);},
+  async list(){
+   // Prioritize all prepared and unresolved attempts ahead of terminal history,
+   // while keeping the status response bounded at 100 receipts.
+   const result=await db.prepare("SELECT delivery_id,state,created_at,updated_at,draft_id,draft_revision FROM comms_outbox WHERE installation_id=? AND mailbox_id=? AND owner_sub=? ORDER BY CASE state WHEN 'queued' THEN 0 WHEN 'claimed' THEN 1 WHEN 'uncertain' THEN 2 ELSE 3 END,created_at DESC,delivery_id DESC LIMIT 100").bind(...parts).all();
+   if(result?.success===false||!Array.isArray(result?.results))fail('outbox_history_unavailable');
+   return result.results.map(receipt);
+  },
   async claim(deliveryId,claimId){
    const row=await db.prepare("UPDATE comms_outbox SET state='claimed',claim_id=?,updated_at=? WHERE "+columns+" AND state='queued' RETURNING *")
     .bind(id(claimId),clock(),...parts,id(deliveryId)).first();

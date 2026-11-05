@@ -215,6 +215,43 @@ test('uncertain SMTP attempt remains nonarchived and nonretryable; owner scopes 
  await assert.rejects(f.other.readArchived(deliveryId),error=>error?.code==='outbox_archive_unavailable');
 });
 
+test('historical terminal receipts beyond 100 do not lock new mail or hide a pending draft',async t=>{
+ const f=fixture(t);
+ const insert=f.sqlite.prepare("INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at) VALUES (?,?,?,?,?,'accepted',NULL,?,?)");
+ for(let i=0;i<105;i++){
+  const key='a0000000-0000-4000-8000-'+String(i+200).padStart(12,'0');
+  insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,key,'null',
+   '2025-12-01T00:00:00.000Z','2025-12-01T00:00:00.000Z');
+ }
+ assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM comms_outbox WHERE state='accepted'").get().n,105);
+ await f.seed();
+ assert.equal((await f.outbox.readReceipt(deliveryId)).state,'queued');
+ const visible=await f.outbox.list();
+ assert.equal(visible.length,100);
+ assert.equal(visible[0].deliveryId,deliveryId,'old terminal receipts cannot hide a new draft');
+ assert.equal(visible[0].state,'queued');
+ await f.outbox.claim(deliveryId,claimId);
+ await f.outbox.finish(deliveryId,claimId,'accepted');
+ assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
+ assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM comms_outbox WHERE state='accepted'").get().n,106);
+ assert.equal((await f.outbox.listArchived()).entries.length,1);
+});
+test('the 100-attempt unresolved capacity limit still blocks new prepared mail',async t=>{
+ const f=fixture(t);
+ const insert=f.sqlite.prepare("INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at) VALUES (?,?,?,?,?,?,NULL,?,?)");
+ for(let i=0;i<100;i++){
+  const key='a0000000-0000-4000-8000-'+String(i+500).padStart(12,'0');
+  insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,key,'null',
+   i%3===0?'queued':i%3===1?'claimed':'uncertain',
+   '2025-12-01T00:00:00.000Z','2025-12-01T00:00:00.000Z');
+ }
+ await assert.rejects(f.seed(),error=>error?.code==='outbox_limit');
+ assert.equal(await f.outbox.readReceipt(deliveryId),null);
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM comms_outbox').get().n,100);
+ const list=await f.outbox.list();
+ assert.equal(list.length,100);
+ assert(list.every(x=>['queued','claimed','uncertain'].includes(x.state)));
+});
 test('archive constraint failure rolls back accepted-state write without authorizing an SMTP retry',async t=>{
  const f=fixture(t);await f.seed();await f.outbox.claim(deliveryId,claimId);
  const source=f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json;
