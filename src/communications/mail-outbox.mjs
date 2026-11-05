@@ -1,6 +1,7 @@
 // Server-owned outbox adapter/dispatcher. No scheduler, HTTP send route or implicit retry.
 import {prepareOutgoingPlainText} from './mail-outbound-wire.mjs';
 import {createPurelymailSmtpTransport} from './mail-smtp-transport.mjs';
+import {validateDraftPayload} from './mail-drafts.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ID=/^[a-z][a-z0-9-]{0,62}$/;
 const fail=code=>{throw Object.assign(new Error(code),{code});};
@@ -86,6 +87,55 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
     current.subject!==proof[1]||current.body_text!==proof[2])
     fail('outbox_draft_stale');
    fail('outbox_limit');
+  },
+  // COMMS-39: read-only encrypted Sent archive. A SQLite trigger captures the
+  // original outbox AES-GCM envelope in the accepted-state transaction.
+  // No provider access, autonomous send, or mailbox mutation occurs here.
+  async listArchived(){
+   if(!cipher)fail('outbox_archive_unavailable');
+   let result;
+   try{result=await db.prepare(
+    'SELECT delivery_id,draft_id,draft_revision,accepted_at FROM comms_sent_archive WHERE installation_id=? AND mailbox_id=? AND owner_sub=? ORDER BY accepted_at DESC,delivery_id DESC LIMIT 101'
+   ).bind(...parts).all();}
+   catch{fail('outbox_archive_unavailable');}
+   if(result?.success===false||!Array.isArray(result?.results)||result.results.length>101)
+    fail('outbox_archive_unavailable');
+   const entries=result.results.slice(0,100).map(row=>{
+    if(!UUID.test(row.delivery_id)||!UUID.test(row.draft_id)||
+       !Number.isSafeInteger(row.draft_revision)||row.draft_revision<1||
+       typeof row.accepted_at!=='string'||!Number.isFinite(Date.parse(row.accepted_at)))
+      fail('outbox_archive_unavailable');
+    return {deliveryId:row.delivery_id,draftId:row.draft_id,
+     draftRevision:row.draft_revision,acceptedAt:row.accepted_at,state:'accepted'};
+   });
+   return {entries,hasMore:result.results.length>100};
+  },
+  async readArchived(deliveryId){
+   if(!cipher)fail('outbox_archive_unavailable');
+   const key=id(deliveryId);
+   let row;
+   try{row=await db.prepare(
+    'SELECT delivery_id,draft_id,draft_revision,payload_json,accepted_at FROM comms_sent_archive WHERE '+columns
+   ).bind(...parts,key).first();}
+   catch{fail('outbox_archive_unavailable');}
+   if(!row)return null;
+   try{
+    if(row.delivery_id!==key||!UUID.test(row.draft_id)||
+       !Number.isSafeInteger(row.draft_revision)||row.draft_revision<1||
+       typeof row.accepted_at!=='string'||!Number.isFinite(Date.parse(row.accepted_at)))
+      fail('outbox_archive_unavailable');
+    // The same authenticated context as the original encrypted outbox record.
+    // Cross-owner/installation/mailbox/delivery ciphertext fails decryption.
+    const payload=await cipher.open(row.payload_json,context(key));
+    if(!payload||payload.from!=='hello@devonakins.com'||
+       typeof payload.date!=='string'||!Number.isFinite(Date.parse(payload.date)))
+      fail('outbox_archive_unavailable');
+    const draft=validateDraftPayload(payload.draft);
+    return {deliveryId:key,draftId:row.draft_id,draftRevision:row.draft_revision,
+     acceptedAt:row.accepted_at,from:payload.from,to:draft.to,subject:draft.subject,
+     body:draft.body,messageId:'<'+key+'@devonakins.com>',
+     state:'accepted',providerCopyConfirmed:false,recipientDeliveryConfirmed:false};
+   }catch{fail('outbox_archive_unavailable');}
   },
   async readReceipt(deliveryId){
    const row=await db.prepare('SELECT delivery_id,state,created_at,updated_at,draft_id,draft_revision FROM comms_outbox WHERE '+columns).bind(...parts,id(deliveryId)).first();
