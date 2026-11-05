@@ -63,7 +63,7 @@ test('D1 encrypted outbox survives independent backup/restore with replay and cl
  assert.equal(await recovered.claim(id(1),id(13)),null);
  const peer=createD1Outbox(binding(restored),{...scope,ownerSub:'other'},{cipher:cipher()});assert.equal(await peer.read(id(1)),null);
 });
-test('terminal expiry clears only old final payloads, preserving receipts and unresolved delivery evidence',async t=>{
+test('terminal retention without archive schema fails closed and preserves all receipts and encrypted payloads',async t=>{
  const f=fixture(t),states=['accepted','failed','rejected','uncertain','claimed','queued'];
  for(let i=0;i<states.length;i++){
   await f.store.offer(id(i+1),sample);
@@ -71,11 +71,20 @@ test('terminal expiry clears only old final payloads, preserving receipts and un
  }
  f.clock.at='2026-03-01T12:00:00.000Z';
  await assert.rejects(f.store.expireTerminalPayloads({before:'2026-03-01T00:00:00Z'}),/invalid_retention/);
- assert.deepEqual(await f.store.expireTerminalPayloads({before:'2026-01-30T00:00:00Z'}),{expired:3});
- for(let i=0;i<3;i++){const row=await f.store.read(id(i+1));assert.equal(row.payload,null);assert.equal(row.state,states[i]);assert.equal(await f.store.claim(id(i+1),id(99)),null);}
- for(let i=3;i<6;i++)assert.deepEqual((await f.store.read(id(i+1))).payload,sample);
- assert.equal((await f.store.list()).length,6);assert.deepEqual(await f.store.expireTerminalPayloads({before:'2026-01-30T00:00:00Z'}),{expired:0});
- await assert.rejects(f.store.offer(id(1),sample),/outbox_conflict/);
+ await assert.rejects(f.store.expireTerminalPayloads({before:'2026-01-30T00:00:00Z'}),
+  e=>e?.code==='outbox_retention_failed',
+  'archive migration absent: no accepted ciphertext can be erased, even partly');
+ for(let i=0;i<states.length;i++){
+  const row=await f.store.read(id(i+1));
+  assert.deepEqual(row.payload,sample,'retention failure must preserve every encrypted payload');
+  assert.equal(row.state,states[i]);
+  if(i<3)assert.equal(await f.store.claim(id(i+1),id(99)),null);
+ }
+ assert.equal((await f.store.list()).length,6);
+ assert.equal(f.db.prepare("SELECT count(*) AS n FROM comms_outbox WHERE payload_json='null'").get().n,0);
+ const prior=await f.store.offer(id(1),sample);
+ assert.equal(prior.state,'accepted','same delivery ID remains idempotent, not retryable');
+ assert.equal(f.db.prepare('SELECT count(*) AS n FROM comms_outbox').get().n,6);
 });
 test('encrypted store refuses legacy plaintext and ciphertext moved between delivery IDs',async t=>{
  const f=fixture(t);await f.store.offer(id(1),sample);await f.store.offer(id(2),sample);
