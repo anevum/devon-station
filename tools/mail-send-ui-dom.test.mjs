@@ -188,7 +188,11 @@ test('linked delivery receipt shows expected Message-ID without asserting delive
   const history=await refresh();
   assert(history.textContent.includes('Expected Message-ID <'+deliveryId+'@devonakins.com>'));
   assert(history.textContent.includes('not proof of delivery'));
-  assert.equal(history.querySelectorAll('a[href],button,script,img,iframe').length,0);
+  assert.equal(history.querySelectorAll('a[href],script,img,iframe').length,0);
+  const checks=history.querySelectorAll('button');
+  assert.equal(checks.length,1,'only explicit read-only Sent lookup may be offered');
+  assert.equal(checks[0].dataset.mailDraftAction,'sent-check');
+  assert.equal(count(x,'/api/mail/outbox/sent-check'),0,'must not call provider without owner click');
  }
  x.outbox[0]={...row,state:'queued'};
  assert(!(await refresh()).textContent.includes('Expected Message-ID'));
