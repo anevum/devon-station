@@ -105,7 +105,9 @@ test('synthetic pre-migration D1 backup independently restores and migrates with
  source.sqlite.prepare('VACUUM INTO ?').run(snapshotPath);
  const restored=new DatabaseSync(snapshotPath);
  t.after(()=>restored.close());
- assert.deepEqual(restored.prepare('PRAGMA integrity_check').all(),[{integrity_check:'ok'}]);
+ const integrity=restored.prepare('PRAGMA integrity_check').all();
+ assert.equal(integrity.length,1);
+ assert.equal(integrity[0].integrity_check,'ok');
  assert.equal(digest(restored.prepare('SELECT * FROM comms_outbox ORDER BY delivery_id').all()),baseline.outbox);
  assert.equal(digest(restored.prepare('SELECT * FROM comms_mail_drafts ORDER BY draft_id').all()),baseline.drafts);
  assert.equal(restored.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='comms_sent_archive'").get().n,0);
