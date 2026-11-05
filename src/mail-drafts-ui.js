@@ -640,7 +640,14 @@ globalThis.StationDrafts=Object.freeze({
 document.addEventListener('visibilitychange',()=>{
  if(document.visibilityState==='hidden'){state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();}
 });
-globalThis.addEventListener?.('pagehide',()=>{state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;});
+globalThis.addEventListener?.('pagehide',()=>{
+ state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();
+});
+globalThis.addEventListener?.('hashchange',()=>{
+ if(globalThis.location?.hash!=='#mail'){
+  state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();
+ }
+});
 const initial=host();
 if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true',initial.dataset.outgoingEnabled==='true',initial.dataset.outboxEnabled==='true');
 })();

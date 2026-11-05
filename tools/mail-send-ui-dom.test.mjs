@@ -281,6 +281,20 @@ test('owner can browse encrypted Sent metadata independently from outbox history
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });
+test('leaving Mail clears an already decrypted Sent copy without contacting a provider',async()=>{
+ const x=setup({outgoing:false});
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ x.doc.querySelector('[data-mail-draft-action="archive-open"]').click();await wait();
+ assert(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'));
+ x.dom.window.location.hash='#settings';
+ await wait();
+ assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
+ assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.dom.window.close();
+});
 test('hidden mobile tab discards archive body even when in-flight response arrives later',async()=>{
  const x=setup({outgoing:false,archiveDeferred:true});
  x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
