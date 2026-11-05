@@ -125,6 +125,51 @@ test('synthetic pre-migration D1 backup independently restores and migrates with
  assert.equal(source.sqlite.prepare('SELECT COUNT(*) AS n FROM comms_outbox').get().n,1);
 });
 
+test('Sent archive metadata keyset pages beyond 100 with identical timestamps and no duplicate entries',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const existing=f.sqlite.prepare('SELECT * FROM comms_sent_archive').get();
+ const insert=f.sqlite.prepare('INSERT INTO comms_sent_archive (installation_id,mailbox_id,owner_sub,delivery_id,draft_id,draft_revision,payload_json,accepted_at) VALUES (?,?,?,?,?,?,?,?)');
+ for(let i=0;i<105;i++){
+  const next='a0000000-0000-4000-8000-'+String(i+10).padStart(12,'0');
+  insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,next,draftId,2,existing.payload_json,existing.accepted_at);
+ }
+ const first=await f.outbox.listArchived();
+ assert.equal(first.entries.length,100);assert.equal(first.hasMore,true);
+ const edge=first.entries.at(-1);
+ const last=await f.outbox.listArchived({acceptedAt:edge.acceptedAt,deliveryId:edge.deliveryId});
+ assert.equal(last.entries.length,6);assert.equal(last.hasMore,false);
+ const ids=[...first.entries,...last.entries].map(x=>x.deliveryId);
+ assert.equal(ids.length,106);assert.equal(new Set(ids).size,106);
+ assert.deepEqual(ids,[...ids].sort((a,b)=>b.localeCompare(a)));
+ assert.deepEqual((await f.other.listArchived()).entries,[]);
+ for(const bad of [{acceptedAt:edge.acceptedAt,deliveryId:'bad'},
+  {acceptedAt:edge.acceptedAt,deliveryId:edge.deliveryId,ownerSub:'other'},
+  {acceptedAt:'invalid',deliveryId:edge.deliveryId}])
+  await assert.rejects(f.outbox.listArchived(bad),e=>e?.code==='outbox_invalid_archive_cursor');
+});
+test('archive pagination API requires signed owner and strict cursor without provider calls',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const url=new URL('https://station.example/api/mail/outbox/archive/page');
+ const before={acceptedAt:'2026-01-02T00:00:00.000Z',deliveryId};
+ const env={MAIL_OWNER_SUB:owner.ownerSub,MAIL_OUTBOX_ENABLED:'true',MAIL_DB:f.db,
+  MAIL_PAYLOAD_KEY_ID:'one',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({one:key}),
+  MAIL_SEND_ENABLED:'false',MAIL_SENDER_VERIFIED:'false'};
+ let remote=0;
+ const args={request:new Request(url,{method:'POST'}),url,env,user:{subject:owner.ownerSub},
+  readBody:async()=>({before}),connect:()=>{remote++;throw Error('provider I/O forbidden');},registry:{}};
+ const result=await handleMailOutboxApi(args);
+ assert.equal(result.status,200);assert.equal(result.body.providerIndependent,true);
+ assert.equal(result.body.entries.length,1);assert.equal(result.body.hasMore,false);
+ assert.equal(remote,0);
+ assert.deepEqual(await handleMailOutboxApi({...args,user:{subject:peer.ownerSub}}),
+  {status:403,body:{error:'mail_owner_not_authorized'}});
+ for(const bad of [{...before,extra:'bad'},{...before,acceptedAt:'invalid'}])
+  assert.deepEqual(await handleMailOutboxApi({...args,readBody:async()=>({before:bad})}),
+   {status:400,body:{error:'invalid_mail_archive_request'}});
+ assert.deepEqual(await handleMailOutboxApi({...args,request:new Request(url,{method:'GET'})}),
+  {status:405,body:{error:'method_not_allowed'}});
+ assert.equal(remote,0);
+});
 test('uncertain SMTP attempt remains nonarchived and nonretryable; owner scopes cannot see each other',async t=>{
  const f=fixture(t);await f.seed();
  assert.equal(await f.outbox.readArchived(deliveryId),null);

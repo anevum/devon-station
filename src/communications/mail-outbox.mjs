@@ -91,12 +91,20 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
   // COMMS-39: read-only encrypted Sent archive. A SQLite trigger captures the
   // original outbox AES-GCM envelope in the accepted-state transaction.
   // No provider access, autonomous send, or mailbox mutation occurs here.
-  async listArchived(){
+  async listArchived(before=null){
    if(!cipher)fail('outbox_archive_unavailable');
+   // Keyset cursor: stable descending acceptance time and immutable delivery ID.
+   if(before!==null&&(!before||typeof before!=='object'||Array.isArray(before)||
+      Object.keys(before).length!==2||typeof before.acceptedAt!=='string'||
+      before.acceptedAt.length>40||!Number.isFinite(Date.parse(before.acceptedAt))||
+      typeof before.deliveryId!=='string'||!UUID.test(before.deliveryId)))
+    fail('outbox_invalid_archive_cursor');
+   const sql='SELECT delivery_id,draft_id,draft_revision,accepted_at FROM comms_sent_archive WHERE installation_id=? AND mailbox_id=? AND owner_sub=?'+
+    (before?' AND (accepted_at<? OR (accepted_at=? AND delivery_id<?))':'')+
+    ' ORDER BY accepted_at DESC,delivery_id DESC LIMIT 101';
    let result;
-   try{result=await db.prepare(
-    'SELECT delivery_id,draft_id,draft_revision,accepted_at FROM comms_sent_archive WHERE installation_id=? AND mailbox_id=? AND owner_sub=? ORDER BY accepted_at DESC,delivery_id DESC LIMIT 101'
-   ).bind(...parts).all();}
+   try{result=await db.prepare(sql).bind(...parts,...(before?[
+    before.acceptedAt,before.acceptedAt,before.deliveryId]:[])).all();}
    catch{fail('outbox_archive_unavailable');}
    if(result?.success===false||!Array.isArray(result?.results)||result.results.length>101)
     fail('outbox_archive_unavailable');

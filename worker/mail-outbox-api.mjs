@@ -50,6 +50,24 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
      response('mail_sent_archive_not_found',404);
    }catch{return response('mail_sent_archive_unavailable',503);}
   }
+  // Explicit owner-authorized read of older encrypted Sent metadata, no
+  // provider I/O and no decrypted message contents.
+  if(url.pathname==='/api/mail/outbox/archive/page'&&request.method==='POST'){
+   if(url.search)return response('invalid_mail_archive_request',400);
+   if(!cipher)return response('mail_sent_archive_unavailable',503);
+   const input=await readBody(request,320);
+   const before=input?.before;
+   if(!input||Object.keys(input).length!==1||
+      !before||typeof before!=='object'||Array.isArray(before)||
+      Object.keys(before).length!==2||
+      typeof before.acceptedAt!=='string'||before.acceptedAt.length>40||
+      !Number.isFinite(Date.parse(before.acceptedAt))||
+      typeof before.deliveryId!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(before.deliveryId))
+    return response('invalid_mail_archive_request',400);
+   try{return {status:200,body:{...await store.listArchived(before),providerIndependent:true}};}
+   catch{return response('mail_sent_archive_unavailable',503);}
+  }
   // The probe cannot transmit, append, change flags or read MIME bodies. It
   // requires a matching signed-owner, saved-draft-linked attempted receipt.
   if(url.pathname==='/api/mail/outbox/sent-check'&&request.method==='POST'){
@@ -104,7 +122,7 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
    const receipt=await service().submit({deliveryId:input.deliveryId,signal});
    return {status:200,body:{receipt,deliveryConfirmed:false,automaticRetry:false}};
   }
-  if(['/api/mail/outbox','/api/mail/outbox/prepare','/api/mail/outbox/submit','/api/mail/outbox/sent-check','/api/mail/outbox/archive','/api/mail/outbox/archive/view'].includes(url.pathname))
+  if(['/api/mail/outbox','/api/mail/outbox/prepare','/api/mail/outbox/submit','/api/mail/outbox/sent-check','/api/mail/outbox/archive','/api/mail/outbox/archive/view','/api/mail/outbox/archive/page'].includes(url.pathname))
    return response('method_not_allowed',405);
   return response('not_found',404);
  }catch(error){
