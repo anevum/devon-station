@@ -177,8 +177,26 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
    const cutoff=Date.parse(before),current=Date.parse(clock());
    if(typeof before!=='string'||!Number.isFinite(cutoff)||cutoff>current-30*86400000)
     fail('outbox_invalid_retention_cutoff');
-   const result=await db.prepare("UPDATE comms_outbox SET payload_json='null' WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND state IN ('accepted','rejected','failed') AND julianday(updated_at)<julianday(?) AND payload_json!='null'")
-    .bind(...parts,before).run();
+   // Never scrub the accepted delivery's only encrypted copy. Require a
+   // byte-for-byte matching, owner-scoped archive with the same saved-draft
+   // lineage and accepted timestamp. A missing 0009 migration, SQL failure,
+   // partial/forged archive, or changed outbox ciphertext fails closed.
+   // Rejected/failed terminal payloads still follow their existing policy.
+   // All cases are evaluated in ONE atomic statement, including the archive
+   // correlation, so no partial retention is possible on a schema error.
+   let result;
+   try{
+    result=await db.prepare(
+     "UPDATE comms_outbox SET payload_json='null' WHERE installation_id=? AND mailbox_id=? AND owner_sub=? "+
+     "AND state IN ('accepted','rejected','failed') AND julianday(updated_at)<julianday(?) AND payload_json!='null' "+
+     "AND (state IN ('rejected','failed') OR (state='accepted' AND draft_id IS NOT NULL "+
+     "AND draft_revision IS NOT NULL AND EXISTS (SELECT 1 FROM comms_sent_archive AS a WHERE "+
+     "a.installation_id=comms_outbox.installation_id AND a.mailbox_id=comms_outbox.mailbox_id "+
+     "AND a.owner_sub=comms_outbox.owner_sub AND a.delivery_id=comms_outbox.delivery_id "+
+     "AND a.draft_id=comms_outbox.draft_id AND a.draft_revision=comms_outbox.draft_revision "+
+     "AND a.accepted_at=comms_outbox.updated_at AND a.payload_json=comms_outbox.payload_json)))"
+    ).bind(...parts,before).run();
+   }catch{fail('outbox_retention_failed');}
    if(result?.success===false||!Number.isSafeInteger(result?.meta?.changes))fail('outbox_retention_failed');
    return {expired:result.meta.changes};
   },

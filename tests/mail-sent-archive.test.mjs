@@ -80,6 +80,49 @@ test('accepted linked draft is captured atomically as AES-GCM ciphertext; draft 
  assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
 });
 
+test('accepted retention requires exact encrypted archived snapshot while rejected/failed still expire',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const insert=f.sqlite.prepare('INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at) VALUES (?,?,?,?,?,?,NULL,?,?)');
+ const old='2026-01-01T00:00:00.000Z';
+ const unarchivedId='a0000000-0000-4000-8000-000000000071';
+ const rejectedId='a0000000-0000-4000-8000-000000000072';
+ const failedId='a0000000-0000-4000-8000-000000000073';
+ const archivedEnvelope=f.sqlite.prepare('SELECT payload_json FROM comms_sent_archive WHERE delivery_id=?').get(deliveryId).payload_json;
+ insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,unarchivedId,archivedEnvelope,'accepted',old,old);
+ insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,rejectedId,archivedEnvelope,'rejected',old,old);
+ insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,failedId,archivedEnvelope,'failed',old,old);
+ f.setClock('2026-03-10T00:00:00.000Z');
+ assert.deepEqual(await f.outbox.expireTerminalPayloads({before:'2026-02-05T00:00:00.000Z'}),{expired:3});
+ const check=f.sqlite.prepare('SELECT payload_json FROM comms_outbox WHERE delivery_id=?');
+ assert.equal(check.get(deliveryId).payload_json,'null','archived accepted ciphertext can expire');
+ assert.equal(check.get(unarchivedId).payload_json,archivedEnvelope,'unarchived accepted ciphertext is preserved');
+ assert.equal(check.get(rejectedId).payload_json,'null','rejected retention policy unchanged');
+ assert.equal(check.get(failedId).payload_json,'null','failed retention policy unchanged');
+ assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM comms_sent_archive').get().n,1);
+});
+test('accepted retention refuses ciphertext/lineage mismatch without disturbing archived copy',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const original=f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json;
+ const modified=await f.cipher.seal({from,draft:{...sample,body:'changed after SMTP'},date:'2026-01-01T00:00:00.000Z'},
+  ['outbox',owner.installationId,owner.mailboxId,owner.ownerSub,deliveryId]);
+ f.sqlite.prepare('UPDATE comms_outbox SET payload_json=?').run(modified);
+ f.setClock('2026-03-10T00:00:00.000Z');
+ assert.deepEqual(await f.outbox.expireTerminalPayloads({before:'2026-02-05T00:00:00.000Z'}),{expired:0});
+ assert.equal(f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json,modified);
+ assert.equal(f.sqlite.prepare('SELECT payload_json FROM comms_sent_archive').get().payload_json,original);
+ assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
+});
+test('retention fails closed when migration 0009 is missing; historical accepted ciphertext remains intact',async t=>{
+ const f=fixture(t,{migrate:false});await f.seed();await f.accept();
+ const before=f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json;
+ f.setClock('2026-03-10T00:00:00.000Z');
+ await assert.rejects(
+  f.outbox.expireTerminalPayloads({before:'2026-02-05T00:00:00.000Z'}),
+  error=>error?.code==='outbox_retention_failed');
+ assert.equal(f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json,before);
+ assert.notEqual(before,'null');
+});
 test('Sent archive is append-only against ordinary SQL UPDATE and DELETE, with keyset index present',async t=>{
  const f=fixture(t);await f.seed();await f.accept();
  const before=f.sqlite.prepare('SELECT * FROM comms_sent_archive').get();
