@@ -2,6 +2,18 @@
 
 **Status: IMPLEMENTED IN PR #36, SOURCE ONLY; migration not applied; release NO-GO.**
 
+## November 5, 2026 — real acceptance logical restore checkpoint (COMMS-41)
+
+**VERIFIED: owner-authorized, private, independent D1 application-data copy. NOT a downloaded SQL export, external backup, encryption-key recovery test, or applied migration.**
+
+- The original dedicated acceptance database remains unchanged. A separate, unbound, nonreplicated D1 database named `devon-station-mail-acceptance-restore-20261105` now retains its complete **application** schema and records. Provider-managed `_cf_KV` is intentionally excluded.
+- Compared all **5 application tables**, **4 explicit indexes**, and **14 application rows** against the source: table/index SQL text matched exactly and independent SHA-256 digests of every table's canonical row data matched. SQLite `PRAGMA foreign_key_check` returned zero violations. Source rows were re-read and rehashed after copying to rule out a concurrent data change during the operation.
+- The backup has **one** linked, encrypted SMTP-accepted outbox record, matching the source's eligibility count. No raw email, subject, body, encryption key, signed export link, or other private row was written to GitHub/Notion/chat output. Treat the retained backup database as sensitive private data even if payloads are encrypted.
+- Cloudflare's official SQL export job reached completion, but downloading its short-lived signed URL through this connection returned **HTTP 403**. The alternative used a provider-internal logical copy with bound SQL values. It is not byte-for-byte SQLite/physical export and is not an off-provider disaster-recovery backup.
+- Cloudflare D1 disallows `PRAGMA integrity_check` through the connected API (`SQLITE_AUTH`). Verification used exact schema/text, row-hash, and foreign-key comparisons instead. This limitation must not be reported as a passing physical integrity test.
+- The new backup is not bound to a Worker. Both outbound flags remained `false`, the existing acceptance Worker deployment is unchanged, and production remains untouched. **Migration 0009 has NOT been applied** to either source or backup.
+- **Still required before live migration:** confirm off-provider/key custody and whether this logical restore meets the owner's formal recovery requirement; preserve the private backup until explicitly authorized cleanup, verify a safe recovery path, then obtain **separate authorization** to migrate the real acceptance database. Do not treat a generic backup success as approval to change its schema.
+
 ## Why this exists
 
 The single approved acceptance email was received by Gmail (in Spam), while the owner-triggered Purelymail `Sent` folder search found zero candidates. SMTP acceptance is independent of a remote Sent-folder copy. Do not resend to fix missing provider Sent history.
