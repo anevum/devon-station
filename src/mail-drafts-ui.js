@@ -6,7 +6,8 @@
 const path='/api/mail/drafts';
 const state={enabled:false,loaded:false,busy:false,items:[],selected:null,working:null,
  dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null,
- outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null,archiveCopy:null,archiveErrorId:null,archiveEpoch:0};
+ outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null,archiveCopy:null,archiveErrorId:null,archiveEpoch:0,
+ archiveEntries:[],archiveLoaded:false,archiveHasMore:false,archiveError:null};
 const element=(tag,kind,text)=>{
  const el=document.createElement(tag);
  if(kind)el.className=kind;
@@ -89,7 +90,8 @@ function render(){
  controls.append(refresh,create);
  if(state.outboxEnabled){
   const inspect=action(state.outboxLoaded?'Refresh Outbox History':'Inspect Outbox History','outbox-refresh');
-  inspect.disabled=state.busy;controls.append(inspect);
+  const sent=action(state.archiveLoaded?'Refresh encrypted Sent history':'Inspect encrypted Sent history','archive-refresh');
+  inspect.disabled=sent.disabled=state.busy;controls.append(inspect,sent);
  }
  bar.append(controls);root.append(bar);
  const info=element('p','mail-draft-live',state.busy?'Saving drafts…':
@@ -159,6 +161,52 @@ function render(){
   }
   root.append(history);
  }
+ const sentHistory=element('section','mail-outbox-history');
+ sentHistory.setAttribute('aria-label','Encrypted Sent history');
+ sentHistory.append(element('h3','mail-draft-heading','Sent history · Encrypted private copies'));
+ sentHistory.append(element('p','mail-draft-notice',
+  'Saved on SMTP acceptance, independent of the provider Sent folder. Content stays encrypted until you open a copy.'));
+ if(state.archiveError)sentHistory.append(element('p','mail-draft-live',state.archiveError));
+ if(!state.archiveLoaded)sentHistory.append(element('p','mail-draft-empty','Select Inspect encrypted Sent history to load archived messages.'));
+ else if(!state.archiveEntries.length)sentHistory.append(element('p','mail-draft-empty','No encrypted Sent records available.'));
+ else{
+  const list=element('ol','mail-outbox-list');
+  for(const entry of state.archiveEntries){
+   const item=element('li','mail-outbox-item');item.dataset.outboxState='accepted';
+   item.append(element('strong','','SMTP accepted · Encrypted copy'));
+   item.append(element('time','mail-draft-notice','Accepted '+new Date(entry.acceptedAt).toLocaleString()));
+   item.append(element('span','mail-draft-notice','Delivery '+entry.deliveryId));
+   const view=action('View encrypted Sent copy','archive-open');
+   view.dataset.deliveryId=entry.deliveryId;view.disabled=state.busy;item.append(view);
+   // Outbox and Sent archive may show the same entry; render the plaintext
+   // only once when the original outbox receipt is already visible above.
+   const outboxShows=state.outboxLoaded&&
+    state.outboxItems.some(row=>row.deliveryId===entry.deliveryId&&row.state==='accepted');
+   if(state.archiveCopy?.deliveryId===entry.deliveryId&&!outboxShows){
+    const copy=state.archiveCopy;
+    const panel=element('section','mail-outbox-review');
+    panel.setAttribute('aria-label','Decrypted Sent copy — owner only');
+    panel.append(element('h4','mail-draft-heading','Encrypted archive · SMTP accepted'));
+    panel.append(element('p','mail-draft-notice','Recipient delivery and provider Sent copy are not confirmed.'));
+    const details=element('dl','mail-details');
+    for(const [label,value] of [['From',copy.from],['To',copy.to.join(', ')],['Subject',copy.subject],
+      ['Accepted',new Date(copy.acceptedAt).toLocaleString()]])
+      details.append(element('dt','',label),element('dd','',value));
+    panel.append(details);
+    const body=element('pre','mail-outbox-text',copy.body);
+    body.style.whiteSpace='pre-wrap';body.style.overflowWrap='anywhere';
+    panel.append(body,action('Close Sent copy','archive-close'));
+    item.append(panel);
+   }
+   if(state.archiveErrorId===entry.deliveryId&&!outboxShows)
+    item.append(element('p','mail-draft-notice','Encrypted copy unavailable. No message was sent.'));
+   list.append(item);
+  }
+  sentHistory.append(list);
+  if(state.archiveHasMore)sentHistory.append(element('p','mail-draft-notice',
+   'Additional older copies exist beyond this 100-item view. No records have been deleted.'));
+ }
+ root.append(sentHistory);
  if(!state.loaded){root.append(element('p','mail-draft-empty','Loading protected drafts…'));return;}
  if(state.items.length){
   const listing=element('div','mail-draft-list');
@@ -455,10 +503,40 @@ async function fetchValidatedOutbox(){
  });
  return list.reverse();
 }
+async function loadArchivedHistory(){
+ if(state.busy||!state.outboxEnabled)return;
+ state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;state.archiveError=null;
+ const epoch=++state.archiveEpoch;render();
+ try{
+  const result=await api('/api/mail/outbox/archive');
+  if(result?.providerIndependent!==true||!Array.isArray(result.entries)||
+     result.entries.length>100||typeof result.hasMore!=='boolean')
+   throw Error('invalid_archive_history');
+  const seen=new Set();
+  const rows=result.entries.map(entry=>{
+   if(!entry||!deliveryIdValid(entry.deliveryId)||!deliveryIdValid(entry.draftId)||
+      !Number.isSafeInteger(entry.draftRevision)||entry.draftRevision<1||
+      entry.draftRevision>1000000000||entry.state!=='accepted'||
+      typeof entry.acceptedAt!=='string'||!Number.isFinite(Date.parse(entry.acceptedAt))||
+      seen.has(entry.deliveryId))throw Error('invalid_archive_history');
+   seen.add(entry.deliveryId);
+   return {deliveryId:entry.deliveryId,draftId:entry.draftId,
+    draftRevision:entry.draftRevision,acceptedAt:entry.acceptedAt,state:'accepted'};
+  });
+  if(epoch!==state.archiveEpoch||document.visibilityState==='hidden'||!state.enabled)return;
+  state.archiveEntries=rows;state.archiveLoaded=true;state.archiveHasMore=result.hasMore;
+ }catch{
+  if(epoch===state.archiveEpoch){
+   state.archiveEntries=[];state.archiveLoaded=false;state.archiveHasMore=false;
+   state.archiveError='Encrypted Sent history unavailable. Delivery receipts remain unchanged.';
+  }
+ }finally{state.busy=false;render();}
+}
 async function openArchivedCopy(deliveryId){
- if(state.busy||!state.outboxLoaded||!deliveryIdValid(deliveryId))return;
- const receipt=state.outboxItems.find(x=>x.deliveryId===deliveryId);
- if(!receipt?.draftId||receipt.state!=='accepted')return;
+ if(state.busy||!state.outboxEnabled||!deliveryIdValid(deliveryId))return;
+ const receipt=state.outboxItems.find(x=>x.deliveryId===deliveryId&&x.state==='accepted')||
+   state.archiveEntries.find(x=>x.deliveryId===deliveryId&&x.state==='accepted');
+ if(!receipt?.draftId)return;
  state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;
  const epoch=++state.archiveEpoch;render();
  try{
@@ -519,6 +597,7 @@ document.addEventListener('click',e=>{
  if(!clicked||!host()?.contains(clicked))return;
  const a=clicked.dataset.mailDraftAction;
  if(a==='outbox-refresh'){void loadOutboxHistory();return;}
+ if(a==='archive-refresh'){void loadArchivedHistory();return;}
  if(a==='sent-check'){void checkSentCopy(clicked.dataset.deliveryId);return;}
  if(a==='archive-open'){void openArchivedCopy(clicked.dataset.deliveryId);return;}
  if(a==='archive-close'){state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();return;}

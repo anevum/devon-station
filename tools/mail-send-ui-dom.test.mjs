@@ -66,6 +66,13 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
    return reply({receipt:{deliveryId:body.deliveryId,state:'accepted'},
     deliveryConfirmed:false,automaticRetry:false});
   }
+  if(path==='/api/mail/outbox/archive'){
+   assert.equal(options.method,'GET');
+   return reply({entries:outbox.filter(x=>x.state==='accepted'&&x.draftId).map(x=>({
+    deliveryId:x.deliveryId,draftId:x.draftId,draftRevision:x.draftRevision,
+    acceptedAt:x.updatedAt,state:'accepted'})),
+    hasMore:false,providerIndependent:true});
+  }
   if(path==='/api/mail/outbox/archive/view'){
    if(archiveDeferred)await new Promise(resolve=>{resolveArchive=resolve;});
    assert.equal(options.method,'POST');assert.deepEqual(Object.keys(body),['deliveryId']);
@@ -251,6 +258,27 @@ test('accepted receipt renders encrypted archive only on click, not as executabl
   assert.equal(count(x,path),0);
  x.doc.querySelector('[data-mail-draft-action="archive-close"]').click();await wait();
  assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
+ x.dom.window.close();
+});
+test('owner can browse encrypted Sent metadata independently from outbox history',async()=>{
+ const x=setup({outgoing:false});
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();
+ assert.equal(count(x,'/api/mail/outbox/archive'),0);
+ x.doc.querySelector('[data-mail-draft-action="archive-refresh"]').click();await wait();
+ const section=x.doc.querySelector('[aria-label="Encrypted Sent history"]');
+ assert(section);assert(section.textContent.includes(deliveryId));
+ assert(!section.textContent.includes('pixel.example.test'),'listing must exclude private message body');
+ assert.equal(count(x,'/api/mail/outbox/archive'),1);
+ assert.equal(count(x,'/api/mail/outbox/archive/view'),0,'archive body must remain on-demand');
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.doc.querySelector('[data-mail-draft-action="archive-open"]').click();await wait();
+ const opened=x.doc.querySelector('[aria-label="Encrypted Sent history"] [aria-label="Decrypted Sent copy — owner only"]');
+ assert(opened);assert(opened.textContent.includes('pixel.example.test'));
+ assert.equal(opened.querySelectorAll('img,script,iframe,a[href]').length,0);
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });
 test('hidden mobile tab discards archive body even when in-flight response arrives later',async()=>{
