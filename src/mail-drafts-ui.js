@@ -6,7 +6,7 @@
 const path='/api/mail/drafts';
 const state={enabled:false,loaded:false,busy:false,items:[],selected:null,working:null,
  dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null,
- outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null};
+ outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null,archiveCopy:null,archiveErrorId:null};
 const element=(tag,kind,text)=>{
  const el=document.createElement(tag);
  if(kind)el.className=kind;
@@ -118,6 +118,28 @@ function render(){
       'Expected Message-ID <'+entry.deliveryId+'@devonakins.com> · Correlation only; not proof of delivery.'));
     item.append(element('time','mail-draft-notice','Updated '+new Date(entry.updatedAt).toLocaleString()));
     item.append(element('p','mail-draft-notice',outboxStateAdvice(entry.state)));
+    if(entry.draftId&&entry.state==='accepted'){
+     const view=action('View encrypted Sent copy','archive-open');
+     view.dataset.deliveryId=entry.deliveryId;view.disabled=state.busy;item.append(view);
+     const copy=state.archiveCopy;
+     if(copy?.deliveryId===entry.deliveryId){
+      const panel=element('section','mail-outbox-review');
+      panel.setAttribute('aria-label','Decrypted Sent copy — owner only');
+      panel.append(element('h4','mail-draft-heading','Encrypted archive · SMTP accepted'));
+      panel.append(element('p','mail-draft-notice','Recipient delivery and provider Sent copy are not confirmed.'));
+      const details=element('dl','mail-details');
+      for(const [label,value] of [['From',copy.from],['To',copy.to.join(', ')],['Subject',copy.subject],
+       ['Accepted',new Date(copy.acceptedAt).toLocaleString()]])
+       details.append(element('dt','',label),element('dd','',value));
+      panel.append(details);
+      const body=element('pre','mail-outbox-text',copy.body);
+      body.style.whiteSpace='pre-wrap';body.style.overflowWrap='anywhere';
+      panel.append(body,action('Close Sent copy','archive-close'));item.append(panel);
+     }
+     if(state.archiveErrorId===entry.deliveryId)
+      item.append(element('p','mail-draft-notice',
+       'Encrypted copy unavailable. SMTP receipt unchanged; do not resend.'));
+    }
     if(entry.draftId&&['claimed','accepted','uncertain'].includes(entry.state)){
      const check=action('Check provider Sent copy','sent-check');
      check.dataset.deliveryId=entry.deliveryId;check.disabled=state.busy;item.append(check);
@@ -433,6 +455,30 @@ async function fetchValidatedOutbox(){
  });
  return list.reverse();
 }
+async function openArchivedCopy(deliveryId){
+ if(state.busy||!state.outboxLoaded||!deliveryIdValid(deliveryId))return;
+ const receipt=state.outboxItems.find(x=>x.deliveryId===deliveryId);
+ if(!receipt?.draftId||receipt.state!=='accepted')return;
+ state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;render();
+ try{
+  const response=await api('/api/mail/outbox/archive/view',{deliveryId});
+  const c=response?.archive;
+  if(response?.providerIndependent!==true||!c||
+     c.deliveryId!==deliveryId||c.draftId!==receipt.draftId||
+     c.draftRevision!==receipt.draftRevision||c.state!=='accepted'||
+     c.messageId!=='<'+deliveryId+'@devonakins.com>'||
+     c.from!=='hello@devonakins.com'||!Array.isArray(c.to)||c.to.length>20||
+     !c.to.every(a=>typeof a==='string'&&a.length<=254)||
+     typeof c.subject!=='string'||c.subject.length>512||
+     typeof c.body!=='string'||c.body.length>32768||
+     typeof c.acceptedAt!=='string'||!Number.isFinite(Date.parse(c.acceptedAt))||
+     c.providerCopyConfirmed!==false||c.recipientDeliveryConfirmed!==false)
+   throw Error('archive_invalid');
+  state.archiveCopy={deliveryId,from:c.from,to:c.to.slice(),subject:c.subject,
+   body:c.body,acceptedAt:c.acceptedAt};
+ }catch{state.archiveErrorId=deliveryId;}
+ finally{state.busy=false;render();}
+}
 async function checkSentCopy(deliveryId){
  if(state.busy||!state.outboxLoaded||!state.outboxEnabled||!deliveryIdValid(deliveryId))return;
  const row=state.outboxItems.find(item=>item.deliveryId===deliveryId);
@@ -452,7 +498,8 @@ async function checkSentCopy(deliveryId){
 }
 async function loadOutboxHistory(){
  if(state.busy||!state.outboxEnabled)return;
- state.busy=true;state.outboxError=null;state.sentEvidence=null;state.sentEvidenceErrorId=null;render();
+ state.busy=true;state.outboxError=null;state.sentEvidence=null;state.sentEvidenceErrorId=null;
+  state.archiveCopy=null;state.archiveErrorId=null;render();
  try{
   state.outboxItems=await fetchValidatedOutbox();state.outboxLoaded=true;
  }catch(e){
@@ -469,6 +516,8 @@ document.addEventListener('click',e=>{
  const a=clicked.dataset.mailDraftAction;
  if(a==='outbox-refresh'){void loadOutboxHistory();return;}
  if(a==='sent-check'){void checkSentCopy(clicked.dataset.deliveryId);return;}
+ if(a==='archive-open'){void openArchivedCopy(clicked.dataset.deliveryId);return;}
+ if(a==='archive-close'){state.archiveCopy=null;state.archiveErrorId=null;render();return;}
  if(a==='send-prepare'){void prepareSend();return;}
  if(a==='send-submit'){void submitSend();return;}
  if(a==='send-status'){void checkSendStatus();return;}
@@ -500,11 +549,15 @@ globalThis.StationDrafts=Object.freeze({
   state.enabled=enabled===true;
   state.outgoingEnabled=state.enabled&&outgoingEnabled===true;
   state.outboxEnabled=state.enabled&&outboxEnabled===true;
-  if(!state.enabled)return;
+  if(!state.enabled){state.archiveCopy=null;state.archiveErrorId=null;return;}
   if(!state.loaded&&!state.busy)void reload();
   else render();
  }
 });
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='hidden'){state.archiveCopy=null;state.archiveErrorId=null;render();}
+});
+globalThis.addEventListener?.('pagehide',()=>{state.archiveCopy=null;state.archiveErrorId=null;});
 const initial=host();
 if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true',initial.dataset.outgoingEnabled==='true',initial.dataset.outboxEnabled==='true');
 })();

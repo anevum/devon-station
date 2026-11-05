@@ -66,6 +66,17 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
    return reply({receipt:{deliveryId:body.deliveryId,state:'accepted'},
     deliveryConfirmed:false,automaticRetry:false});
   }
+  if(path==='/api/mail/outbox/archive/view'){
+   assert.equal(options.method,'POST');assert.deepEqual(Object.keys(body),['deliveryId']);
+   const row=outbox.find(x=>x.deliveryId===body.deliveryId&&x.state==='accepted'&&x.draftId);
+   if(!row)return reply({error:'mail_sent_archive_not_found'},404);
+   return reply({archive:{deliveryId:row.deliveryId,draftId:row.draftId,
+    draftRevision:row.draftRevision,state:'accepted',from:'hello@devonakins.com',
+    to:['friend@example.test'],subject:'<script>alert(1)</script>',
+    body:'<img src="https://pixel.example.test"> inert text',messageId:'<'+row.deliveryId+'@devonakins.com>',
+    acceptedAt:row.updatedAt,providerCopyConfirmed:false,
+    recipientDeliveryConfirmed:false},providerIndependent:true});
+  }
   if(path==='/api/mail/outbox/sent-check'){
    assert.equal(options.method,'POST');assert.deepEqual(Object.keys(body),['deliveryId']);
    assert(outbox.some(row=>row.deliveryId===body.deliveryId&&row.draftId));
@@ -190,8 +201,9 @@ test('linked delivery receipt shows expected Message-ID without asserting delive
   assert(history.textContent.includes('not proof of delivery'));
   assert.equal(history.querySelectorAll('a[href],script,img,iframe').length,0);
   const checks=history.querySelectorAll('button');
-  assert.equal(checks.length,1,'only explicit read-only Sent lookup may be offered');
-  assert.equal(checks[0].dataset.mailDraftAction,'sent-check');
+  assert.deepEqual([...checks].map(x=>x.dataset.mailDraftAction).sort(),
+   state==='accepted'?['archive-open','sent-check']:['sent-check']);
+  assert.equal(count(x,'/api/mail/outbox/archive/view'),0,'archive is never fetched automatically');
   assert.equal(count(x,'/api/mail/outbox/sent-check'),0,'must not call provider without owner click');
  }
  x.outbox[0]={...row,state:'queued'};
@@ -218,6 +230,25 @@ test('owner-triggered Sent-copy inspection with SMTP disabled is informational a
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  assert.equal(count(x,'/api/mail/outbox/prepare'),0);
  assert.equal(history.querySelectorAll('script,img,iframe,a[href]').length,0);
+ x.dom.window.close();
+});
+test('accepted receipt renders encrypted archive only on click, not as executable HTML or a resend',async()=>{
+ const x=setup({outgoing:false});
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ assert.equal(count(x,'/api/mail/outbox/archive/view'),0);
+ x.doc.querySelector('[data-mail-draft-action="archive-open"]').click();await wait();
+ const panel=x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]');
+ assert(panel);assert(panel.textContent.includes('<img src="https://pixel.example.test">'));
+ assert(panel.textContent.includes('<script>alert(1)</script>'));
+ assert.equal(panel.querySelectorAll('img,iframe,script,a[href]').length,0);
+ assert(panel.textContent.includes('not confirmed'));
+ assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ for(const path of ['/api/mail/outbox/sent-check','/api/mail/outbox/prepare','/api/mail/outbox/submit'])
+  assert.equal(count(x,path),0);
+ x.doc.querySelector('[data-mail-draft-action="archive-close"]').click();await wait();
+ assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
  x.dom.window.close();
 });
 test('malformed Sent probe results fail closed without implying delivery state',async()=>{
