@@ -201,10 +201,22 @@ test('Sent archive metadata keyset pages beyond 100 with identical timestamps an
  const f=fixture(t);await f.seed();await f.accept();
  const existing=f.sqlite.prepare('SELECT * FROM comms_sent_archive').get();
  const insert=f.sqlite.prepare('INSERT INTO comms_sent_archive (installation_id,mailbox_id,owner_sub,delivery_id,draft_id,draft_revision,payload_json,accepted_at) VALUES (?,?,?,?,?,?,?,?)');
+ const outbox=f.sqlite.prepare("INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,claim_id,created_at,updated_at,draft_id,draft_revision) VALUES (?,?,?,?,?,'accepted',NULL,?,?,?,?)");
  for(let i=0;i<105;i++){
   const next='a0000000-0000-4000-8000-'+String(i+10).padStart(12,'0');
-  insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,next,draftId,2,existing.payload_json,existing.accepted_at);
+  const linked='b0000000-0000-4000-8000-'+String(i+10).padStart(12,'0');
+  const encrypted=await f.cipher.seal({from,draft:sample,date:existing.accepted_at},
+   ['outbox',owner.installationId,owner.mailboxId,owner.ownerSub,next]);
+  outbox.run(owner.installationId,owner.mailboxId,owner.ownerSub,next,encrypted,
+   existing.accepted_at,existing.accepted_at,linked,2);
+  insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,next,linked,2,encrypted,existing.accepted_at);
  }
+ // Insert 105 bogus rows sorting ahead of the real messages. The archive
+ // listing must ignore them before computing its 100-row lookahead.
+ for(let i=0;i<105;i++)insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,
+  'f0000000-0000-4000-8000-'+String(i+10).padStart(12,'0'),
+  'b0000000-0000-4000-8000-'+String(i+300).padStart(12,'0'),
+  2,existing.payload_json,existing.accepted_at);
  const first=await f.outbox.listArchived();
  assert.equal(first.entries.length,100);assert.equal(first.hasMore,true);
  const edge=first.entries.at(-1);
@@ -212,12 +224,31 @@ test('Sent archive metadata keyset pages beyond 100 with identical timestamps an
  assert.equal(last.entries.length,6);assert.equal(last.hasMore,false);
  const ids=[...first.entries,...last.entries].map(x=>x.deliveryId);
  assert.equal(ids.length,106);assert.equal(new Set(ids).size,106);
+ assert(ids.every(x=>!x.startsWith('f')),'orphan entries cannot masquerade as Sent');
  assert.deepEqual(ids,[...ids].sort((a,b)=>b.localeCompare(a)));
+ assert.equal((await f.outbox.readArchived(ids[0])).body,sample.body);
  assert.deepEqual((await f.other.listArchived()).entries,[]);
  for(const bad of [{acceptedAt:edge.acceptedAt,deliveryId:'bad'},
   {acceptedAt:edge.acceptedAt,deliveryId:edge.deliveryId,ownerSub:'other'},
   {acceptedAt:'invalid',deliveryId:edge.deliveryId}])
   await assert.rejects(f.outbox.listArchived(bad),e=>e?.code==='outbox_invalid_archive_cursor');
+});
+test('Sent list excludes nonaccepted, altered and missing outbox receipts',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const valid=async()=>{const result=await f.outbox.listArchived();assert.equal(result.entries.length,1);
+  assert.equal(result.entries[0].deliveryId,deliveryId);};
+ const empty=async()=>assert.deepEqual(await f.outbox.listArchived(),{entries:[],hasMore:false});
+ await valid();
+ const prior=f.sqlite.prepare('SELECT draft_id,draft_revision,updated_at FROM comms_outbox').get();
+ f.sqlite.prepare("UPDATE comms_outbox SET state='uncertain'").run();await empty();
+ f.sqlite.prepare("UPDATE comms_outbox SET state='accepted',draft_revision=?").run(prior.draft_revision+1);await empty();
+ f.sqlite.prepare('UPDATE comms_outbox SET draft_revision=?,draft_id=?')
+  .run(prior.draft_revision,'b0000000-0000-4000-8000-000000000900');await empty();
+ f.sqlite.prepare('UPDATE comms_outbox SET draft_id=?,updated_at=?')
+  .run(prior.draft_id,'2026-01-01T12:00:00.000Z');await empty();
+ f.sqlite.prepare('UPDATE comms_outbox SET updated_at=?').run(prior.updated_at);await valid();
+ f.sqlite.prepare('DELETE FROM comms_outbox').run();await empty();
+ assert.equal(f.sqlite.prepare('SELECT count(*) AS n FROM comms_sent_archive').get().n,1);
 });
 test('archive pagination API requires signed owner and strict cursor without provider calls',async t=>{
  const f=fixture(t);await f.seed();await f.accept();

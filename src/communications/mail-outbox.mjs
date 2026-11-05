@@ -100,9 +100,17 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
       before.acceptedAt.length>40||!Number.isFinite(Date.parse(before.acceptedAt))||
       typeof before.deliveryId!=='string'||!UUID.test(before.deliveryId)))
     fail('outbox_invalid_archive_cursor');
-   const sql='SELECT delivery_id,draft_id,draft_revision,accepted_at FROM comms_sent_archive WHERE installation_id=? AND mailbox_id=? AND owner_sub=?'+
-    (before?' AND (accepted_at<? OR (accepted_at=? AND delivery_id<?))':'')+
-    ' ORDER BY accepted_at DESC,delivery_id DESC LIMIT 101';
+   // Match the permanent owner-scoped accepted receipt before listing metadata.
+   // Filter before LIMIT so orphaned records cannot displace legitimate pages.
+   const sql="SELECT a.delivery_id,a.draft_id,a.draft_revision,a.accepted_at "+
+    "FROM comms_sent_archive AS a INNER JOIN comms_outbox AS o "+
+    "ON o.installation_id=a.installation_id AND o.mailbox_id=a.mailbox_id "+
+    "AND o.owner_sub=a.owner_sub AND o.delivery_id=a.delivery_id "+
+    "AND o.state='accepted' AND o.draft_id=a.draft_id "+
+    "AND o.draft_revision=a.draft_revision AND o.updated_at=a.accepted_at "+
+    "WHERE a.installation_id=? AND a.mailbox_id=? AND a.owner_sub=?"+
+    (before?' AND (a.accepted_at<? OR (a.accepted_at=? AND a.delivery_id<?))':'')+
+    ' ORDER BY a.accepted_at DESC,a.delivery_id DESC LIMIT 101';
    let result;
    try{result=await db.prepare(sql).bind(...parts,...(before?[
     before.acceptedAt,before.acceptedAt,before.deliveryId]:[])).all();}
