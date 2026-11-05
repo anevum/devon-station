@@ -80,6 +80,35 @@ test('accepted linked draft is captured atomically as AES-GCM ciphertext; draft 
  assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
 });
 
+test('Sent archive is append-only against ordinary SQL UPDATE and DELETE, with keyset index present',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const before=f.sqlite.prepare('SELECT * FROM comms_sent_archive').get();
+ const index=f.sqlite.prepare("SELECT name FROM sqlite_master WHERE type='index' AND name='comms_sent_archive_owner_time'").get();
+ assert.equal(index.name,'comms_sent_archive_owner_time');
+ const guardNames=f.sqlite.prepare("SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'comms_sent_archive_immutable_%' ORDER BY name").all().map(x=>x.name);
+ assert.deepEqual(guardNames,['comms_sent_archive_immutable_delete','comms_sent_archive_immutable_update']);
+ assert.throws(()=>f.sqlite.prepare("UPDATE comms_sent_archive SET accepted_at='2099-01-01T00:00:00Z'").run(),/sent_archive_immutable/);
+ assert.throws(()=>f.sqlite.prepare('DELETE FROM comms_sent_archive').run(),/sent_archive_immutable/);
+ assert.deepEqual(f.sqlite.prepare('SELECT * FROM comms_sent_archive').get(),before);
+ assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
+});
+test('archive content is refused if permanent accepted receipt is absent or its metadata disagrees',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
+ const recorded=f.sqlite.prepare('SELECT draft_revision,state,updated_at FROM comms_outbox').get();
+ const edit=f.sqlite.prepare('UPDATE comms_outbox SET draft_revision=?');
+ edit.run(recorded.draft_revision+1);
+ await assert.rejects(f.outbox.readArchived(deliveryId),e=>e?.code==='outbox_archive_unavailable');
+ edit.run(recorded.draft_revision);
+ f.sqlite.prepare("UPDATE comms_outbox SET state='uncertain'").run();
+ await assert.rejects(f.outbox.readArchived(deliveryId),e=>e?.code==='outbox_archive_unavailable');
+ f.sqlite.prepare("UPDATE comms_outbox SET state='accepted',updated_at=?").run(recorded.updated_at);
+ assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
+ f.sqlite.prepare('DELETE FROM comms_outbox').run();
+ await assert.rejects(f.outbox.readArchived(deliveryId),e=>e?.code==='outbox_archive_unavailable');
+ assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM comms_sent_archive').get().n,1,
+  'archive remains intact even if an administrative outbox deletion corrupts receipt linkage');
+});
 test('source-only migration backfills previously accepted encrypted snapshots once and ignores nonaccepted rows',async t=>{
  const f=fixture(t,{migrate:false});await f.seed();await f.accept();
  f.migrate();f.migrate();

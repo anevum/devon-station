@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS comms_sent_archive (
  accepted_at TEXT NOT NULL,
  PRIMARY KEY(installation_id,mailbox_id,owner_sub,delivery_id)
 );
+-- Keep owner-scoped keyset paging efficient as the archive grows.
+CREATE INDEX IF NOT EXISTS comms_sent_archive_owner_time
+ ON comms_sent_archive(installation_id,mailbox_id,owner_sub,accepted_at DESC,delivery_id DESC);
 -- SQLite triggers are atomic with the UPDATE that marks SMTP acceptance.
 -- If archival fails, the receipt cannot silently become accepted. Never
 -- retry SMTP after that failure: it may already have delivered.
@@ -39,3 +42,17 @@ INSERT OR IGNORE INTO comms_sent_archive
   AND payload_json!='null' AND json_valid(payload_json)
   AND json_extract(payload_json,'$.v')=1
   AND json_extract(payload_json,'$.alg')='A256GCM';
+-- Reject ordinary application UPDATE/DELETE, preserving an append-only Sent
+-- history. Administrators able to DROP these triggers can still destroy data;
+-- this is a defense against accidental/application mutations, not WORM storage.
+-- Deliberate future key re-encryption needs a separate reviewed migration.
+CREATE TRIGGER IF NOT EXISTS comms_sent_archive_immutable_update
+ BEFORE UPDATE ON comms_sent_archive
+ BEGIN
+  SELECT RAISE(ABORT,'sent_archive_immutable');
+ END;
+CREATE TRIGGER IF NOT EXISTS comms_sent_archive_immutable_delete
+ BEFORE DELETE ON comms_sent_archive
+ BEGIN
+  SELECT RAISE(ABORT,'sent_archive_immutable');
+ END;

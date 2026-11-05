@@ -132,6 +132,14 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
        !Number.isSafeInteger(row.draft_revision)||row.draft_revision<1||
        typeof row.accepted_at!=='string'||!Number.isFinite(Date.parse(row.accepted_at)))
       fail('outbox_archive_unavailable');
+    // The permanent, owner-scoped outbox receipt survives payload scrubbing.
+    // An orphaned or metadata-forged archive must never be shown as Sent.
+    const source=await db.prepare(
+     'SELECT state,draft_id,draft_revision,updated_at FROM comms_outbox WHERE '+columns
+    ).bind(...parts,key).first();
+    if(!source||source.state!=='accepted'||source.draft_id!==row.draft_id||
+       source.draft_revision!==row.draft_revision||source.updated_at!==row.accepted_at)
+      fail('outbox_archive_unavailable');
     // The same authenticated context as the original encrypted outbox record.
     // Cross-owner/installation/mailbox/delivery ciphertext fails decryption.
     const payload=await cipher.open(row.payload_json,context(key));
