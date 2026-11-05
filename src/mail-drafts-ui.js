@@ -6,7 +6,7 @@
 const path='/api/mail/drafts';
 const state={enabled:false,loaded:false,busy:false,items:[],selected:null,working:null,
  dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null,
- outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null,archiveCopy:null,archiveErrorId:null};
+ outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null,archiveCopy:null,archiveErrorId:null,archiveEpoch:0};
 const element=(tag,kind,text)=>{
  const el=document.createElement(tag);
  if(kind)el.className=kind;
@@ -459,7 +459,8 @@ async function openArchivedCopy(deliveryId){
  if(state.busy||!state.outboxLoaded||!deliveryIdValid(deliveryId))return;
  const receipt=state.outboxItems.find(x=>x.deliveryId===deliveryId);
  if(!receipt?.draftId||receipt.state!=='accepted')return;
- state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;render();
+ state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;
+ const epoch=++state.archiveEpoch;render();
  try{
   const response=await api('/api/mail/outbox/archive/view',{deliveryId});
   const c=response?.archive;
@@ -474,9 +475,12 @@ async function openArchivedCopy(deliveryId){
      typeof c.acceptedAt!=='string'||!Number.isFinite(Date.parse(c.acceptedAt))||
      c.providerCopyConfirmed!==false||c.recipientDeliveryConfirmed!==false)
    throw Error('archive_invalid');
+  // Owner may have hidden Safari, closed the page, or changed the session
+  // while the encrypted copy was in flight. Never display a stale response.
+  if(epoch!==state.archiveEpoch||document.visibilityState==='hidden'||!state.enabled)return;
   state.archiveCopy={deliveryId,from:c.from,to:c.to.slice(),subject:c.subject,
    body:c.body,acceptedAt:c.acceptedAt};
- }catch{state.archiveErrorId=deliveryId;}
+ }catch{if(epoch===state.archiveEpoch&&document.visibilityState!=='hidden')state.archiveErrorId=deliveryId;}
  finally{state.busy=false;render();}
 }
 async function checkSentCopy(deliveryId){
@@ -517,7 +521,7 @@ document.addEventListener('click',e=>{
  if(a==='outbox-refresh'){void loadOutboxHistory();return;}
  if(a==='sent-check'){void checkSentCopy(clicked.dataset.deliveryId);return;}
  if(a==='archive-open'){void openArchivedCopy(clicked.dataset.deliveryId);return;}
- if(a==='archive-close'){state.archiveCopy=null;state.archiveErrorId=null;render();return;}
+ if(a==='archive-close'){state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();return;}
  if(a==='send-prepare'){void prepareSend();return;}
  if(a==='send-submit'){void submitSend();return;}
  if(a==='send-status'){void checkSendStatus();return;}
@@ -549,15 +553,15 @@ globalThis.StationDrafts=Object.freeze({
   state.enabled=enabled===true;
   state.outgoingEnabled=state.enabled&&outgoingEnabled===true;
   state.outboxEnabled=state.enabled&&outboxEnabled===true;
-  if(!state.enabled){state.archiveCopy=null;state.archiveErrorId=null;return;}
+  if(!state.enabled){state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;return;}
   if(!state.loaded&&!state.busy)void reload();
   else render();
  }
 });
 document.addEventListener('visibilitychange',()=>{
- if(document.visibilityState==='hidden'){state.archiveCopy=null;state.archiveErrorId=null;render();}
+ if(document.visibilityState==='hidden'){state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();}
 });
-globalThis.addEventListener?.('pagehide',()=>{state.archiveCopy=null;state.archiveErrorId=null;});
+globalThis.addEventListener?.('pagehide',()=>{state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;});
 const initial=host();
 if(initial)globalThis.StationDrafts.mount(initial,initial.dataset.draftsEnabled==='true',initial.dataset.outgoingEnabled==='true',initial.dataset.outboxEnabled==='true');
 })();

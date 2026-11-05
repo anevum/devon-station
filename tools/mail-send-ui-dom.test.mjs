@@ -10,13 +10,13 @@ const operationId='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const deliveryId='123e4567-e89b-42d3-a456-426614174016';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
 const copy=d=>({...d,to:d.to.slice()});
-function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false,saveLocked=false,sentProbeMalformed=false}={}){
+function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false,saveLocked=false,sentProbeMalformed=false,archiveDeferred=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{
   url:'https://station.example/#mail',runScripts:'outside-only'
  });
  const ids=[savedId,operationId,deliveryId];let cursor=0;
  Object.defineProperty(dom.window.crypto,'randomUUID',{value:()=>ids[cursor++],configurable:true});
- const calls=[],records=[],outbox=[],prompts=[];
+ const calls=[],records=[],outbox=[],prompts=[];let resolveArchive=()=>{};
  let confirmation=false;
  dom.window.confirm=message=>{prompts.push(message);return confirmation;};
  const reply=(value,status=200)=>({
@@ -67,6 +67,7 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
     deliveryConfirmed:false,automaticRetry:false});
   }
   if(path==='/api/mail/outbox/archive/view'){
+   if(archiveDeferred)await new Promise(resolve=>{resolveArchive=resolve;});
    assert.equal(options.method,'POST');assert.deepEqual(Object.keys(body),['deliveryId']);
    const row=outbox.find(x=>x.deliveryId===body.deliveryId&&x.state==='accepted'&&x.draftId);
    if(!row)return reply({error:'mail_sent_archive_not_found'},404);
@@ -88,7 +89,8 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
   throw Error('Unexpected external URL '+path);
  };
  dom.window.eval(mail);dom.window.eval(drafts);
- return {dom,calls,records,outbox,prompts,doc:dom.window.document,setConfirm:x=>{confirmation=x;}};
+ return {dom,calls,records,outbox,prompts,doc:dom.window.document,
+  resolveArchive:()=>resolveArchive(),setConfirm:x=>{confirmation=x;}};
 }
 const count=(x,path)=>x.calls.filter(call=>call.path===path).length;
 function update(x,name,text){
@@ -249,6 +251,20 @@ test('accepted receipt renders encrypted archive only on click, not as executabl
   assert.equal(count(x,path),0);
  x.doc.querySelector('[data-mail-draft-action="archive-close"]').click();await wait();
  assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
+ x.dom.window.close();
+});
+test('hidden mobile tab discards archive body even when in-flight response arrives later',async()=>{
+ const x=setup({outgoing:false,archiveDeferred:true});
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ x.doc.querySelector('[data-mail-draft-action="archive-open"]').click();await wait();
+ Object.defineProperty(x.doc,'visibilityState',{configurable:true,value:'hidden'});
+ x.doc.dispatchEvent(new x.dom.window.Event('visibilitychange'));
+ x.resolveArchive();await wait();
+ assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
+ assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });
 test('malformed Sent probe results fail closed without implying delivery state',async()=>{
