@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {readFileSync} from 'node:fs';
+import {readFileSync,mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createHash} from 'node:crypto';
 import {DatabaseSync} from 'node:sqlite';
 import {createMailPayloadCipher} from '../src/communications/mail-payload-crypto.mjs';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
@@ -83,6 +86,41 @@ test('source-only migration backfills previously accepted encrypted snapshots on
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM comms_sent_archive').get().n,1);
  assert.equal((await f.outbox.readArchived(deliveryId)).body,sample.body);
  assert.equal(f.sqlite.prepare('SELECT COUNT(*) AS n FROM comms_outbox').get().n,1);
+});
+
+
+test('synthetic pre-migration D1 backup independently restores and migrates with encrypted contents and receipts preserved',async t=>{
+ const source=fixture(t,{migrate:false});
+ await source.seed();
+ await source.accept();
+ const beforeRows=source.sqlite.prepare('SELECT * FROM comms_outbox ORDER BY delivery_id').all();
+ const beforeDrafts=source.sqlite.prepare('SELECT * FROM comms_mail_drafts ORDER BY draft_id').all();
+ const digest=x=>createHash('sha256').update(JSON.stringify(x)).digest('hex');
+ const baseline={outbox:digest(beforeRows),drafts:digest(beforeDrafts)};
+ const directory=mkdtempSync(join(tmpdir(),'ds011-comms39-'));
+ t.after(()=>rmSync(directory,{force:true,recursive:true}));
+ const snapshotPath=join(directory,'synthetic-pre-migration.sqlite');
+ // SQLite VACUUM INTO writes a transactionally consistent independent copy.
+ // No live Cloudflare data, secrets or customer messages are ever downloaded.
+ source.sqlite.prepare('VACUUM INTO ?').run(snapshotPath);
+ const restored=new DatabaseSync(snapshotPath);
+ t.after(()=>restored.close());
+ assert.deepEqual(restored.prepare('PRAGMA integrity_check').all(),[{integrity_check:'ok'}]);
+ assert.equal(digest(restored.prepare('SELECT * FROM comms_outbox ORDER BY delivery_id').all()),baseline.outbox);
+ assert.equal(digest(restored.prepare('SELECT * FROM comms_mail_drafts ORDER BY draft_id').all()),baseline.drafts);
+ assert.equal(restored.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='comms_sent_archive'").get().n,0);
+ restored.exec(migration('0009-comms-sent-archive.sql'));
+ assert.equal(restored.prepare('SELECT count(*) AS n FROM comms_sent_archive').get().n,1);
+ const record=restored.prepare('SELECT payload_json FROM comms_sent_archive').get();
+ assert(!record.payload_json.includes(sample.body));
+ const restoredPayload=await source.cipher.open(record.payload_json,
+  ['outbox',owner.installationId,owner.mailboxId,owner.ownerSub,deliveryId]);
+ assert.deepEqual(restoredPayload.draft,sample);
+ assert.equal(digest(restored.prepare('SELECT * FROM comms_outbox ORDER BY delivery_id').all()),baseline.outbox);
+ assert.equal(digest(restored.prepare('SELECT * FROM comms_mail_drafts ORDER BY draft_id').all()),baseline.drafts);
+ assert.equal(source.sqlite.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='comms_sent_archive'").get().n,0,
+  'restored migration must not mutate the original synthetic database');
+ assert.equal(source.sqlite.prepare('SELECT COUNT(*) AS n FROM comms_outbox').get().n,1);
 });
 
 test('uncertain SMTP attempt remains nonarchived and nonretryable; owner scopes cannot see each other',async t=>{
