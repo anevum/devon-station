@@ -2,8 +2,11 @@
 // The existing signed-Access gate and same-origin JSON gate must run first.
 import {createD1Outbox,createOutboxDispatcher} from '../src/communications/mail-outbox.mjs';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
+import {probePurelymailSent} from '../src/communications/mail-sent-evidence.mjs';
 const MAILBOX='hello@devonakins.com';
 const response=(error,status)=>({status,body:{error}});
+const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
 
 // Independent send flag: enabling the outbox and sender registry cannot start SMTP.
 export function mailSendingEnabled(env,connect){
@@ -12,20 +15,85 @@ export function mailSendingEnabled(env,connect){
   typeof env.MAIL_OWNER_SUB==='string' && env.MAIL_OWNER_SUB.length>0 &&
   typeof env.MAIL_SMTP_PASSWORD==='string' && env.MAIL_SMTP_PASSWORD.length<=256 &&
   /^[\x21-\x7e]+$/.test(env.MAIL_SMTP_PASSWORD) &&
-  typeof env.MAIL_DB?.prepare==='function' && typeof connect==='function';
+  typeof env.MAIL_DB?.prepare==='function' && typeof connect==='function' && !!payloadCipher(env);
 }
 export async function handleMailOutboxApi({request,url,user,env,readBody,registry,connect}){
  if(!user?.subject||user.subject!==env?.MAIL_OWNER_SUB)return response('mail_owner_not_authorized',403);
  if(env.MAIL_OUTBOX_ENABLED!=='true'||!env.MAIL_DB)return response('mail_outbox_not_configured',503);
- const store=createD1Outbox(env.MAIL_DB,{installationId:'personal',mailboxId:'hello',ownerSub:user.subject});
- const service=()=>createOutboxDispatcher({store,draftStore:createD1DraftStore(env.MAIL_DB),ownerSub:user.subject,
+ const cipher=payloadCipher(env);
+ const store=createD1Outbox(env.MAIL_DB,{installationId:'personal',mailboxId:'hello',ownerSub:user.subject},{cipher});
+ const service=()=>createOutboxDispatcher({store,draftStore:createD1DraftStore(env.MAIL_DB,{cipher}),ownerSub:user.subject,
   registry,context:{installationId:'personal',principalId:'owner'},
   mailboxId:'hello',from:MAILBOX,connect,credentials:async address=>address===MAILBOX?env.MAIL_SMTP_PASSWORD:undefined});
  let submitAttempted=false;
  try{
   if(url.pathname==='/api/mail/outbox'&&request.method==='GET')
    return {status:200,body:{outbox:await store.list(),sendingEnabled:mailSendingEnabled(env,connect)}};
+  // Owner-only, provider-independent archive access; never touches SMTP/IMAP.
+  // Missing migration fails closed, and no message contents enter list responses.
+  if(url.pathname==='/api/mail/outbox/archive'&&request.method==='GET'){
+   if(url.search)return response('invalid_mail_archive_request',400);
+   if(!cipher)return response('mail_sent_archive_unavailable',503);
+   try{return {status:200,body:{...await store.listArchived(),providerIndependent:true}};}
+   catch{return response('mail_sent_archive_unavailable',503);}
+  }
+  if(url.pathname==='/api/mail/outbox/archive/view'&&request.method==='POST'){
+   if(url.search)return response('invalid_mail_archive_request',400);
+   if(!cipher)return response('mail_sent_archive_unavailable',503);
+   const input=await readBody(request,256);
+   if(!input||Object.keys(input).length!==1||typeof input.deliveryId!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deliveryId))
+    return response('invalid_mail_archive_request',400);
+   try{
+    const archive=await store.readArchived(input.deliveryId);
+    return archive?{status:200,body:{archive,providerIndependent:true}}:
+     response('mail_sent_archive_not_found',404);
+   }catch{return response('mail_sent_archive_unavailable',503);}
+  }
+  // Explicit owner-authorized read of older encrypted Sent metadata, no
+  // provider I/O and no decrypted message contents.
+  if(url.pathname==='/api/mail/outbox/archive/page'&&request.method==='POST'){
+   if(url.search)return response('invalid_mail_archive_request',400);
+   if(!cipher)return response('mail_sent_archive_unavailable',503);
+   const input=await readBody(request,320);
+   const before=input?.before;
+   if(!input||Object.keys(input).length!==1||
+      !before||typeof before!=='object'||Array.isArray(before)||
+      Object.keys(before).length!==2||
+      typeof before.acceptedAt!=='string'||before.acceptedAt.length>40||
+      !Number.isFinite(Date.parse(before.acceptedAt))||
+      typeof before.deliveryId!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(before.deliveryId))
+    return response('invalid_mail_archive_request',400);
+   try{return {status:200,body:{...await store.listArchived(before),providerIndependent:true}};}
+   catch{return response('mail_sent_archive_unavailable',503);}
+  }
+  // The probe cannot transmit, append, change flags or read MIME bodies. It
+  // requires a matching signed-owner, saved-draft-linked attempted receipt.
+  if(url.pathname==='/api/mail/outbox/sent-check'&&request.method==='POST'){
+   if(url.search)return response('invalid_mail_sent_check_request',400);
+   if(env.MAIL_ENABLED!=='true'||env.MAIL_IMAP_ADDRESS!==MAILBOX||
+      typeof env.MAIL_IMAP_PASSWORD!=='string'||!env.MAIL_IMAP_PASSWORD||
+      typeof connect!=='function'||!cipher)return response('mail_sent_check_not_configured',503);
+   const input=await readBody(request,256);
+   if(!input||Object.keys(input).length!==1||typeof input.deliveryId!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deliveryId))
+    return response('invalid_mail_sent_check_request',400);
+   const receipt=await store.readReceipt(input.deliveryId);
+   if(!receipt?.draftId||!Number.isSafeInteger(receipt.draftRevision)||
+      !['claimed','accepted','uncertain'].includes(receipt.state))
+    return response('mail_sent_check_receipt_unavailable',409);
+   try{
+    const signal=AbortSignal.any([request.signal,AbortSignal.timeout(9000)]);
+    const result=await probePurelymailSent({
+     connect,password:env.MAIL_IMAP_PASSWORD,deliveryId:receipt.deliveryId,signal});
+    return {status:200,body:{deliveryId:receipt.deliveryId,...result}};
+   }catch{
+    return response('mail_sent_check_unavailable',502);
+   }
+  }
   if(url.pathname==='/api/mail/outbox/prepare'&&request.method==='POST'){
+   if(!cipher)return response('mail_payload_encryption_not_configured',503);
    if(env.MAIL_DRAFTS_ENABLED!=='true')return response('mail_drafts_not_configured',503);
    const input=await readBody(request,4096);
    if(Object.keys(input).some(key=>!['deliveryId','draftId','draftRevision','approvedByOwner'].includes(key)))
@@ -45,7 +113,7 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
     return response('outbox_invalid_id',400);
    // Never submit a legacy/raw outbox row; only a persisted, saved-draft-linked snapshot.
    // A separately prepared immutable delivery is required; submit never enqueues.
-   const prepared=await store.read(input.deliveryId);
+   const prepared=await store.readReceipt(input.deliveryId);
    if(!prepared?.draftId||!Number.isSafeInteger(prepared.draftRevision))
     return response('mail_outbox_linked_delivery_required',409);
    // Any outcome after the claim is terminal or non-retryable, including uncertainty.
@@ -54,7 +122,7 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
    const receipt=await service().submit({deliveryId:input.deliveryId,signal});
    return {status:200,body:{receipt,deliveryConfirmed:false,automaticRetry:false}};
   }
-  if(['/api/mail/outbox','/api/mail/outbox/prepare','/api/mail/outbox/submit'].includes(url.pathname))
+  if(['/api/mail/outbox','/api/mail/outbox/prepare','/api/mail/outbox/submit','/api/mail/outbox/sent-check','/api/mail/outbox/archive','/api/mail/outbox/archive/view','/api/mail/outbox/archive/page'].includes(url.pathname))
    return response('method_not_allowed',405);
   return response('not_found',404);
  }catch(error){

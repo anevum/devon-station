@@ -4,6 +4,7 @@ import {readFileSync} from 'node:fs';
 import {DatabaseSync} from 'node:sqlite';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
 import {createD1Outbox,createOutboxDispatcher} from '../src/communications/mail-outbox.mjs';
+import {handleMailDraftApi} from '../worker/mail-drafts-api.mjs';
 
 const owner={installationId:'personal',mailboxId:'hello',ownerSub:'synthetic-owner'};
 const peer={...owner,ownerSub:'synthetic-peer'};
@@ -28,12 +29,12 @@ const isCode=code=>error=>error?.code===code;
 function fixture(t){
  const sqlite=new DatabaseSync(':memory:');
  t.after(()=>sqlite.close());
- for(const file of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql']){
+ for(const file of ['0005-comms-drafts.sql','0006-comms-outbox.sql','0007-comms-draft-outbox-lineage.sql','0008-comms-one-delivery-per-draft.sql']){
   const sql=readFileSync(new URL('../worker/migrations/'+file,import.meta.url),'utf8');
   sqlite.exec(sql);
  }
  const d1={prepare(sql){
-  return {bind(...args){
+  return {async first(){return sqlite.prepare(sql).get()??null;},bind(...args){
    const statement=sqlite.prepare(sql);
    return {
     async first(){return statement.get(...args)??null},
@@ -74,6 +75,10 @@ test('one scoped draft revision produces exactly one immutable delivery under co
  assert.equal(linked.payload.from,from);
  assert.equal(linked.payload.date,'2026-11-03T10:01:00.000Z');
  await assert.rejects(prepare(dispatcher,UUID.third),isCode('outbox_draft_already_prepared'));
+ await drafts.save(owner,{id:UUID.draft,revision:2,operationId:UUID.alternate,
+  ...sample,subject:'Edited after original delivery'});
+ await assert.rejects(prepare(dispatcher,UUID.third,3),isCode('outbox_draft_already_prepared'));
+ assert.equal(sqlite.prepare('SELECT count(*) AS n FROM comms_outbox').get().n,1);
  await assert.rejects(dispatcher.enqueueSavedDraft({deliveryId:winner,draftId:UUID.alternate,
   draftRevision:2,approvedByOwner:true}),isCode('outbox_conflict'));
 });
@@ -119,4 +124,58 @@ test('scope boundary, unique-index scope and legacy outbox inserts remain intact
  assert.equal(ownerRecord.draft_id,UUID.draft);assert.equal(ownerRecord.draft_revision,2);
  const row=await outbox.read(UUID.first);assert.equal(row.draftId,UUID.draft);
  assert(!JSON.stringify(await outbox.list()).includes(sample.body),'listing never includes saved body or recipients');
+});
+
+
+test('pending outgoing delivery blocks draft deletion atomically without affecting another owner',async t=>{
+ const {sqlite,d1,drafts,outbox,dispatcher}=fixture(t);
+ await seed(drafts);
+ const locked=createD1DraftStore(d1,{now:()=> '2026-11-03T10:00:00.000Z',protectPendingOutbox:true});
+ await prepare(dispatcher,UUID.first);
+ await drafts.create(peer,UUID.draft);
+ assert.deepEqual(await locked.remove(peer,{id:UUID.draft,revision:1}),{deleted:true},
+  'owner-scoped pending delivery must not block other owners');
+ for(const status of ['queued','claimed','uncertain']){
+  if(status==='claimed')await outbox.claim(UUID.first,UUID.alternate);
+  if(status==='uncertain')await outbox.finish(UUID.first,UUID.alternate,'uncertain');
+  await assert.rejects(locked.remove(owner,{id:UUID.draft,revision:2}),
+   isCode('mail_draft_pending_delivery'),status+' draft deletion must be blocked');
+  assert.equal((await drafts.read(owner,UUID.draft)).revision,2);
+  assert.equal((await outbox.read(UUID.first)).state,status);
+ }
+ assert.equal(sqlite.prepare('SELECT COUNT(*) n FROM comms_mail_drafts WHERE owner_sub=?').get(owner.ownerSub).n,1);
+});
+
+test('resolved SMTP acceptance permits explicit draft deletion but preserves immutable delivery record',async t=>{
+ const {d1,drafts,outbox,dispatcher}=fixture(t);
+ await seed(drafts);
+ const locked=createD1DraftStore(d1,{protectPendingOutbox:true});
+ await prepare(dispatcher,UUID.first);
+ await assert.rejects(locked.remove(owner,{id:UUID.draft,revision:1}),
+  isCode('mail_draft_conflict'),'a stale revision must not delete or expose delivery state');
+ await outbox.claim(UUID.first,UUID.alternate);
+ await outbox.finish(UUID.first,UUID.alternate,'accepted');
+ assert.deepEqual(await locked.remove(owner,{id:UUID.draft,revision:2}),{deleted:true});
+ assert.equal(await drafts.read(owner,UUID.draft),null);
+ const row=await outbox.read(UUID.first);
+ assert.equal(row.state,'accepted');
+ assert.equal(row.draftId,UUID.draft,'deleting resolved draft must retain audit linkage');
+});
+
+
+test('owner draft HTTP deletion remains blocked with SMTP/outbox feature flags disabled',async t=>{
+ const {d1,drafts,dispatcher}=fixture(t);
+ await seed(drafts);
+ await prepare(dispatcher,UUID.first);
+ const user={subject:owner.ownerSub};
+ const env={MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_DRAFTS_ENABLED:'true',MAIL_OUTBOX_ENABLED:'false',
+  MAIL_SEND_ENABLED:'false',MAIL_OWNER_SUB:owner.ownerSub,MAIL_DB:d1};
+ const url=new URL('https://station.example/api/mail/drafts/delete');
+ const request=new Request(url,{method:'POST'});
+ const readBody=async()=>({id:UUID.draft,revision:2});
+ const locked=await handleMailDraftApi({request,url,user,env,readBody});
+ assert.deepEqual(locked,{status:409,body:{error:'mail_draft_pending_delivery'}});
+ assert.equal((await drafts.read(owner,UUID.draft)).revision,2);
+ const forbidden=await handleMailDraftApi({request,url,user:{subject:peer.ownerSub},env,readBody});
+ assert.deepEqual(forbidden,{status:403,body:{error:'mail_owner_not_authorized'}});
 });

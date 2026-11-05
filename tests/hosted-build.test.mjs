@@ -12,7 +12,9 @@ test('hosted packaging removes private inventory, has no embedded private source
  for(const name of ['worker/mail-api.mjs',...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs'].map(name=>'src/communications/'+name)])assert(Object.hasOwn(bundle,name),name);
  for(const name of ['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs','decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs','pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs'])assert(Object.hasOwn(bundle,'vendor/postal-mime/'+name),name);
  assert(Object.hasOwn(bundle,'worker/mail-drafts-api.mjs'));
- assert.equal(Object.keys(bundle).length,42);
+ assert(Object.hasOwn(bundle,'src/communications/mail-sent-evidence.mjs'),'Sent evidence module must be bundled');
+ assert.match(bundle['worker/mail-outbox-api.mjs'],/mail-sent-evidence\.mjs/,'outbox must import bundled Sent probe');
+ assert.equal(Object.keys(bundle).length,44);
  assert.match(bundle['index.mjs'],/^import \{connect\} from 'cloudflare:sockets';/);
  const assets=JSON.parse(bundle['index.mjs'].match(/const assets=(.*);\nexport default/s)[1]);
  for(const [name,size] of [['icon-192.png',192],['icon-512.png',512],['apple-touch-icon.png',180]]){

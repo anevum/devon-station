@@ -56,8 +56,25 @@ test('control/bidi characters in hostile content are rendered as replacement cha
  assert.doesNotMatch(out.text,/[\u202e\u202c]/);
  assert.match(out.text,/\ufffd/);
 });
-test('body beyond the D1 index limit fails closed instead of corrupting UID cursor',async()=>{
- await assert.rejects(decodeSafeMime(bytes(headers('A'.repeat(4200)))),{code:'mime_body_index_limit'});
+test('long valid body becomes an explicitly shortened bounded preview while exact-boundary text is retained',async()=>{
+ const exact=await decodeSafeMime(bytes(headers('A'.repeat(4095))));
+ assert.equal(exact.text,'A'.repeat(4095)+'\n');
+ const long=await decodeSafeMime(bytes(headers('A'.repeat(4200))));
+ assert.equal(long.text.length,4096);assert.match(long.text,/^A+/);
+ assert.match(long.text,/\[Message shortened\. The full message remains with your email provider\.\]$/);
+ assert.deepEqual(Object.keys(long).sort(),['from','subject','text']);
+});
+test('shortened Unicode/HTML body stays inert and retains the attachment-unavailable notice within the bound',async()=>{
+ const marker='\n\n[Message shortened. The full message remains with your email provider.]';
+ const budget=4096-marker.length;
+ const unicode=await decodeSafeMime(bytes(headers('X'.repeat(budget-1)+'😀'+'Y'.repeat(500))));
+ assert.equal(unicode.text.length,4095);assert.equal(unicode.text.slice(0,budget-1),'X'.repeat(budget-1));
+ assert.doesNotMatch(unicode.text,/[\uD800-\uDFFF]/);
+ const body=['--X','Content-Type: text/html; charset=utf-8','','<p>'+('safe '.repeat(1100))+'</p><script>PRIVATE_SCRIPT()</script><img src="https://tracker.invalid/">',
+  '--X','Content-Type: application/pdf','Content-Disposition: attachment; filename="PRIVATE.pdf"','Content-Transfer-Encoding: base64','','JVBERi0xLjQK','--X--',''].join('\r\n');
+ const mixed=await decodeSafeMime(bytes(headers(body,'MIME-Version: 1.0\r\nContent-Type: multipart/mixed; boundary="X"\r\n')));
+ assert(mixed.text.length<=4096);assert.match(mixed.text,/Message shortened/);assert.match(mixed.text,/Attachment content is not available/);
+ assert.doesNotMatch(mixed.text,/PRIVATE|tracker.invalid|<script|<img|JVBER/);
 });
 test('raw wire budget is checked before MIME parsing',async()=>{
  await assert.rejects(decodeSafeMime(bytes(headers('x'.repeat(256*1024)))),{code:'mime_wire_limit'});

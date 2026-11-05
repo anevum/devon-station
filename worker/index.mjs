@@ -8,6 +8,10 @@ const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosn
 const csp="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
 const pushReady=env=>Boolean(env.DB&&env.VAPID_PUBLIC_KEY&&env.VAPID_PRIVATE_JWK&&env.VAPID_SUBJECT);
 const json=(value,status=200)=>new Response(JSON.stringify(value),{status,headers:{...common,'Content-Type':'application/json;charset=utf-8','Content-Security-Policy':csp}});
+// Cloudflare's platform-injected ID, never a caller-provided header or untrusted tag.
+// A missing or malformed metadata binding is reported as unavailable, not invented.
+const trustedWorkerVersion=env=>{const id=env?.CF_VERSION_METADATA?.id;
+ return typeof id==='string'&&/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)?id:null;};
 function publicServiceWorker(request,env,url,assets){
  // A separate, exact-path Cloudflare Access Bypass rule is ALSO required.
  // Never bypass Access for the private shell, APIs, manifests, or other assets.
@@ -38,8 +42,9 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch,ima
  if(user?.email!==env.OWNER_EMAIL||!user.subject)return json({error:'owner_only'},403);
  if(!['GET','HEAD','POST','DELETE'].includes(request.method))return json({error:'method_not_allowed'},405);
  const writes=['POST','DELETE'].includes(request.method);if(writes&&(request.headers.get('Origin')!==url.origin||request.headers.get('Content-Type')?.split(';')[0]!=='application/json'))return json({error:'same_origin_json_required'},403);
- if(url.pathname.startsWith('/api/mail/')){const result=await handleMailApi({request,url,user,env,connect:imapSocket,readBody});return json(result.body,result.status);}
- if(url.pathname==='/api/session'&&request.method==='GET')return json({authenticated:true,mode:'owner',version:'0.4.8',snapshot:true,persistentStorage:!!env.DB});
+ const workerVersionId=trustedWorkerVersion(env);
+ if(url.pathname.startsWith('/api/mail/')){const result=await handleMailApi({request,url,user,env,connect:imapSocket,readBody,workerVersionId});return json(result.body,result.status);}
+ if(url.pathname==='/api/session'&&request.method==='GET')return json({authenticated:true,mode:'owner',version:'0.4.8',snapshot:true,persistentStorage:!!env.DB,...(workerVersionId?{workerVersionId}:{})});
  if(url.pathname==='/api/workspaces'&&request.method==='GET')return json(await workspaceScopes(user,env));
  if(['/api/workspace','/api/workspace/propose','/api/workspace/decide','/api/workspace/review','/api/workspace/reconcile','/api/workspace/backup','/api/workspace/restore-review','/api/workspace/restore'].includes(url.pathname)){
   const scope={scopeKind:url.searchParams.get('scopeKind'),scopeId:url.searchParams.get('scopeId')};

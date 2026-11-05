@@ -17,7 +17,7 @@ function load(handler){
  return {dom,doc:dom.window.document,calls};
 }
 const reply=(body,status=200,type='application/json')=>({
- ok:status>=200&&status<300,status,headers:new Headers({'Content-Type':type}),json:async()=>Array.isArray(body.messages)?{revision:1,offset:0,limit:50,...body}:body
+ ok:status>=200&&status<300,status,headers:new Headers({'Content-Type':type}),json:async()=>Array.isArray(body?.messages)?{revision:1,offset:0,limit:50,...body}:body
 });
 const sample={key:'personal/hello/7/1',from:'author@example.org',subject:'<script>alert(1)</script>',
   text:'<img src="https://tracker.invalid/pixel"> is inert plaintext',
@@ -276,4 +276,248 @@ test('sync from an older page returns to the newest snapshot without a stale rev
   assert.equal(posts,1);assert.equal(x.doc.querySelector('.mail-page-range').textContent,'1–50 of 123');
   assert.equal(x.calls.at(-1).path,'/api/mail/inbox?limit=50&offset=0');
  }finally{x.dom.window.close();}
+});
+
+function diagnosticApp(fixture){
+ const view=fixture.doc.getElementById('view');
+ const wrapper=fixture.doc.createElement('div');wrapper.className='app';
+ view.parentNode.insertBefore(wrapper,view);wrapper.append(view);
+ const meta=fixture.doc.createElement('meta');meta.httpEquiv='Content-Security-Policy';
+ meta.content="default-src 'none'; connect-src 'self'";fixture.doc.head.append(meta);
+ fixture.doc.title='Devon Station';
+}
+test('in-app owner diagnostics check same-origin APIs, never sync, and never render private mailbox text',async()=>{
+ const privateText='private diagnostic marker - do not copy';
+ const sampleMail={...sample,text:privateText};
+ const x=load(path=>{
+  if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true,draftsEnabled:true,outboxEnabled:false,outgoingEnabled:false});
+  if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+  if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:1,revision:1,privateText});
+  if(path.startsWith('/api/mail/inbox?'))return reply({total:1,messages:[sampleMail]});
+  throw Error('unexpected_endpoint');
+ });
+ try{
+  diagnosticApp(x);
+  await wait();
+  x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+  const panel=x.doc.querySelector('.mail-diagnostic');
+  assert.equal(panel.querySelector('[data-check]').dataset.check,'checked');
+  assert.match(panel.textContent,/Signed owner session: verified/);
+  assert.match(panel.textContent,/Read-only application checks completed/);
+  assert.match(panel.textContent,/Outgoing submission: disabled/);
+  assert.doesNotMatch(panel.textContent,/private diagnostic marker/);
+  assert.deepEqual(x.calls.map(x=>x.path),[
+   '/api/mail/status','/api/mail/inbox?limit=50&offset=0',
+   '/api/session','/api/mail/status','/api/mail/diagnostics']);
+  assert(x.calls.every(x=>x.method==='GET'&&x.credentials==='same-origin'&&x.redirect==='manual'));
+ }finally{x.dom.window.close();}
+});
+test('diagnostics refuse non-application contexts and restrictive CSP before any probe',async()=>{
+ for(const condition of ['wrong-document','blocked-csp']){
+  const x=load(path=>path==='/api/mail/status'?
+   reply({address:'hello@devonakins.com',configured:false}):reply({total:0,messages:[]}));
+  try{
+   if(condition==='blocked-csp'){diagnosticApp(x);x.doc.querySelector('meta[http-equiv="Content-Security-Policy"]').content="default-src 'none'; connect-src 'none'";}
+   await wait();const before=x.calls.length;
+   x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+   assert.equal(x.calls.length,before);
+   assert.equal(x.doc.querySelector('.mail-diagnostic [data-check]').dataset.check,'blocked');
+   assert.equal(x.doc.querySelectorAll('.mail-diagnostic img,.mail-diagnostic script').length,0);
+  }finally{x.dom.window.close();}
+ }
+});
+test('diagnostics identify Access sign-in responses and do not read cached mail',async()=>{
+ for(const response of [reply({error:'owner_sign_in_required'},401),{
+  ok:true,status:200,headers:new Headers({'Content-Type':'text/html'}),json:async()=>'<title>Sign in</title>'
+ }]){
+  const x=load(path=>{
+   if(path==='/api/session')return response;
+   if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',configured:false});
+   throw Error('unexpected_cached_inbox');
+  });
+  try{
+   diagnosticApp(x);await wait();
+   x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+   assert.deepEqual(x.calls.map(c=>c.path),['/api/mail/status','/api/session']);
+   assert.match(x.doc.querySelector('.mail-diagnostic').textContent,/Cloudflare Access sign-in or an expired owner session/);
+  }finally{x.dom.window.close();}
+ }
+});
+test('diagnostics handle browser blocked fetch without calling provider APIs',async()=>{
+ const x=load(path=>{
+  if(path==='/api/session')throw new TypeError('Failed to fetch');
+  if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',configured:false});
+  throw Error('unexpected_mail_endpoint');
+ });
+ try{
+  diagnosticApp(x);await wait();
+  x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+  assert.deepEqual(x.calls.map(c=>c.path),['/api/mail/status','/api/session']);
+  assert.match(x.doc.querySelector('.mail-diagnostic').textContent,/browser blocked the request or the connection failed/);
+ }finally{x.dom.window.close();}
+});
+
+test('in-app diagnostics refuse untrusted plain HTTP origins even if DOM and CSP otherwise look valid',async()=>{
+ const x=load(path=>path==='/api/mail/status'?reply({address:'hello@devonakins.com',configured:false}):reply({total:0,messages:[]}));
+ try{
+  diagnosticApp(x);x.dom.reconfigure({url:'http://station.example/#mail'});
+  await wait();const before=x.calls.length;
+  x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+  assert.equal(x.calls.length,before);
+  assert.equal(x.doc.querySelector('.mail-diagnostic [data-check]').dataset.check,'blocked');
+ }finally{x.dom.window.close();}
+});
+
+test('owner-triggered provider check is explicit, POST-only, and never reveals response text or syncs',async()=>{
+ const secret='NEVER_RENDER_PROVIDER_BANNER';
+ const x=load((path,options)=>{
+  if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true,draftsEnabled:true,outboxEnabled:false,outgoingEnabled:false});
+  if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+  if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0});
+  if(path==='/api/mail/diagnostics/imap-check'){
+   assert.equal(options.method,'POST');
+   assert.equal(options.credentials,'same-origin');
+   assert.equal(options.redirect,'manual');
+   assert.equal(options.body,'{}');
+   return reply({imapAuthenticated:true,inboxReadOnly:true,messageContentRead:false,
+    remoteMailboxModified:false,cacheModified:false,smtpContacted:false,serverBanner:secret});
+  }
+  if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+  throw Error('unexpected_endpoint');
+ });
+ try{
+  diagnosticApp(x);await wait();
+  const probe=x.doc.querySelector('[data-mail-action="provider-check"]');
+  assert.equal(probe.disabled,true);
+  assert.equal(x.calls.filter(c=>c.method==='POST').length,0);
+  x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+  assert.equal(x.doc.querySelector('[data-mail-action="provider-check"]').disabled,false);
+  x.doc.querySelector('[data-mail-action="provider-check"]').click();await wait();
+  assert.equal(x.doc.querySelector('[data-provider-check]').dataset.providerCheck,'checked');
+  assert.match(x.doc.querySelector('[data-provider-check]').textContent,/read-only INBOX selection succeeded/);
+  assert.doesNotMatch(x.doc.querySelector('.mail-diagnostic').textContent,/NEVER_RENDER_PROVIDER_BANNER/);
+  assert.deepEqual(x.calls.filter(c=>c.method==='POST').map(c=>c.path),['/api/mail/diagnostics/imap-check']);
+ }finally{x.dom.window.close();}
+});
+test('provider check fails closed on invalid safety flags, network error, and Access interstitials',async()=>{
+ const bad=[
+  ()=>reply({imapAuthenticated:true,inboxReadOnly:false,messageContentRead:false,remoteMailboxModified:false,cacheModified:false,smtpContacted:false}),
+  ()=>{throw TypeError('Failed to fetch synthetic private banner');},
+  ()=>({ok:true,status:200,headers:new Headers({'Content-Type':'text/html'}),json:async()=>'<title>Access Sign in</title>'}),
+  ()=>reply({error:'private provider credentials'},502)
+ ];
+ for(const response of bad){
+  const x=load(path=>{
+   if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true,outgoingEnabled:false});
+   if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+   if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0});
+   if(path==='/api/mail/diagnostics/imap-check')return response();
+   if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+   throw Error('unexpected');
+  });
+  try{
+   diagnosticApp(x);await wait();x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+   x.doc.querySelector('[data-mail-action="provider-check"]').click();await wait();
+   assert.equal(x.doc.querySelector('[data-provider-check]').dataset.providerCheck,'blocked');
+   assert.doesNotMatch(x.doc.querySelector('.mail-diagnostic').textContent,/private provider credentials|synthetic private banner|Access Sign in/);
+   assert.equal(x.calls.filter(c=>c.path==='/api/mail/diagnostics/imap-check').length,1);
+  }finally{x.dom.window.close();}
+ }
+});
+
+test('release diagnostics report matching Cloudflare Worker IDs but reject mixed versions before provider probes',async()=>{
+ const id='a1b2c3d4-1111-4444-8888-0123456789ab';
+ const other='99999999-2222-4444-8888-0123456789ab';
+ for(const changed of ['none','status','cache']){
+  const x=load(path=>{
+   if(path==='/api/mail/status')return reply({configured:true,provider:'purelymail',address:'hello@devonakins.com',workerVersionId:changed==='status'?other:id});
+   if(path==='/api/session')return reply({authenticated:true,mode:'owner',workerVersionId:id});
+   if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0,workerVersionId:changed==='cache'?other:id});
+   if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+   throw Error('unexpected');
+  });
+  try{
+   diagnosticApp(x);await wait();
+   x.doc.querySelector('[data-mail-action="diagnose"]').click();await wait();
+   const panel=x.doc.querySelector('.mail-diagnostic');
+   if(changed==='none'){
+    assert.equal(panel.querySelector('[data-check]').dataset.check,'checked');
+    assert.match(panel.textContent,/Worker version: a1b2c3d4-1111-4444-8888-0123456789ab/);
+    assert.equal(panel.querySelector('[data-mail-action="provider-check"]').disabled,false);
+   }else{
+    assert.equal(panel.querySelector('[data-check]').dataset.check,'blocked');
+    assert.match(panel.textContent,/Different Worker versions/);
+    assert.equal(panel.querySelector('[data-mail-action="provider-check"]').disabled,true);
+   }
+   assert(x.calls.every(x=>x.method==='GET'));
+  }finally{x.dom.window.close();}
+ }
+});
+
+test('sync shows only allowlisted failure codes, keeps generic uncertainty for unknown data and never retries',async()=>{
+ for(const code of ['imap_invalid_fetch','<img src="https://private.invalid/">']){
+  let syncs=0;
+  const x=await ready((path,options)=>{
+   if(path==='/api/mail/sync'){
+    syncs++;assert.equal(options.headers['X-DevonStation-Mail-Diagnostics'],'1');
+    return reply({error:'mail_operation_failed',diagnosticCode:code},502);
+   }
+   return reply({total:0,messages:[]});
+  });
+  click(x,'sync');await wait();
+  const text=x.doc.getElementById('station-mail').textContent;
+  if(code==='imap_invalid_fetch')assert.match(text,/Synchronization stopped \(imap_invalid_fetch\)/);
+  else {assert.doesNotMatch(text,/private.invalid/);assert.match(text,/Synchronization response unavailable \(http_502\)/);}
+  assert.equal(syncs,1);assert.equal(x.doc.querySelectorAll('img,script,iframe').length,0);
+  x.dom.window.close();
+ }
+});
+
+
+test('sync response diagnostics distinguish HTTP, network and malformed receipts without raw response text or retries',async()=>{
+ const cases=[
+  [()=>reply({error:'mail_operation_failed',diagnosticCode:'mime_body_index_limit'},502),'Synchronization stopped (mime_body_index_limit)'],
+  [()=>reply({error:'PRIVATE_UPSTREAM'},500),'Synchronization response unavailable (http_500)'],
+  [()=>reply({error:'PRIVATE_UPSTREAM'},0),'Synchronization response unavailable (http_0)'],
+  [()=>reply({},200,'text/html'),'Synchronization response unavailable (non_json)'],
+  [()=>({...reply({}),json:async()=>{throw Error('PRIVATE_JSON');}}),'Synchronization response unavailable (invalid_json)'],
+  [()=>reply(null),'Synchronization response unavailable (invalid_receipt)'],
+  [()=>reply({imported:0,updated:0,hasMore:null}),'Synchronization response unavailable (invalid_receipt)'],
+  [()=>{throw Error('PRIVATE_NETWORK');},'Synchronization response unavailable (network_failed)']
+ ];
+ for(const [response,expected] of cases){
+  let posts=0;
+  const x=await ready(path=>{if(path==='/api/mail/sync'){posts++;return response();}return reply({total:0,messages:[]});});
+  try{
+   click(x,'sync');await wait();
+   const text=x.doc.querySelector('[role="status"]').textContent;
+   assert(text.includes(expected),text);assert.match(text,/0 batch\(es\) confirmed/);
+   assert.match(text,/may still have committed/);assert.doesNotMatch(text,/PRIVATE_/);
+   assert.equal(posts,1);await wait();assert.equal(posts,1);
+  }finally{x.dom.window.close();}
+ }
+});
+
+test('read-only login probe renders fixed open stages and ignores arbitrary upstream diagnostic strings',async()=>{
+ for(const code of ['imap_tls_connect_failed','imap_login_rejected','PRIVATE_NATIVE_ERROR']){
+  let probes=0;
+  const x=load((path,options)=>{
+   if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',provider:'purelymail',configured:true});
+   if(path==='/api/session')return reply({authenticated:true,mode:'owner'});
+   if(path==='/api/mail/diagnostics')return reply({cacheReady:true,indexedCount:0,revision:0});
+   if(path==='/api/mail/diagnostics/imap-check'){
+    probes++;assert.equal(options.headers['X-DevonStation-Mail-Diagnostics'],'1');
+    return reply({error:'mail_imap_probe_failed',diagnosticCode:code},502);
+   }
+   if(path.startsWith('/api/mail/inbox?'))return reply({total:0,messages:[]});
+   throw Error('unexpected');
+  });
+  try{
+   diagnosticApp(x);await wait();click(x,'diagnose');await wait();click(x,'provider-check');await wait();
+   const text=x.doc.querySelector('[data-provider-check]').textContent;
+   if(code==='PRIVATE_NATIVE_ERROR')assert.doesNotMatch(text,/PRIVATE_NATIVE_ERROR/);
+   else assert(text.includes('stopped ('+code+')'),text);
+   assert.equal(probes,1);assert.equal(x.calls.filter(c=>c.path==='/api/mail/sync').length,0);
+  }finally{x.dom.window.close();}
+ }
 });

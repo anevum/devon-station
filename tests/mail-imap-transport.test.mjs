@@ -70,7 +70,7 @@ test('malformed FETCH frame and missing UID are rejected',async()=>{
  }
 });
 test('login denial closes the socket without exposing credentials',async()=>{
- const s=server({noLogin:true});await assert.rejects(open(s),/imap_transport_failed/);assert.equal(s.closed(),true);
+ const s=server({noLogin:true});await assert.rejects(open(s),/imap_login_rejected/);assert.equal(s.closed(),true);
 });
 test('abort prevents subsequent commands and closes socket',async()=>{
  const s=server(),controller=new AbortController(), conn=await open(s,{signal:controller.signal});controller.abort();
@@ -119,5 +119,23 @@ test('all 24 requested FETCH attribute orders preserve message identity and empt
    assert.equal(result.messages[0].uid,1);assert.deepEqual(result.messages[0].flags,[]);
    assert.equal(result.messages[0].text,'Message content');
   }finally{await conn.close();}
+ }
+});
+
+
+test('TLS, greeting and login interruptions expose only trusted open stages and close the socket',async()=>{
+ for(const [phase,expected] of [['connect','imap_tls_connect_failed'],['greeting','imap_greeting_failed'],['login','imap_login_failed']]){
+  let closed=0,controller;
+  const connect=()=>({opened:phase==='connect'?Promise.reject(Error('PRIVATE_TLS')):Promise.resolve(),
+   readable:new ReadableStream({start(c){controller=c;if(phase==='greeting')c.error(Error('PRIVATE_GREETING'));else c.enqueue(bytes.encode('* OK ready\r\n'));}}),
+   writable:new WritableStream({write(){controller.error(Error('PRIVATE_LOGIN'));}}),
+   async close(){closed++;}
+  });
+  const connector=createPurelymailImapConnector({connect,credentials:async()=> 'PRIVATE_CREDENTIAL',decodeMime});
+  await assert.rejects(connector.open(settings),error=>{
+   assert.equal(error.code,expected);assert.equal(error.message,expected);
+   assert.doesNotMatch(error.stack,/PRIVATE_/);return true;
+  });
+  assert.equal(closed,1);
  }
 });

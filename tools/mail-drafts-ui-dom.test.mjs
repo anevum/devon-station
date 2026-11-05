@@ -7,9 +7,9 @@ const drafts=readFileSync(new URL('../src/mail-drafts-ui.js',import.meta.url),'u
 const id='d43f536a-e5c6-4683-b241-eb9ad1dbf680';
 const op='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,20));
-function setup({conflict=false}={}){
+function setup({conflict=false,saveErrors=[]}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{url:'https://station.example/#mail',runScripts:'outside-only'});
- Object.defineProperty(dom.window.crypto,'randomUUID',{value:(()=>{let n=0;return ()=>++n===1?id:op})(),configurable:true});
+ Object.defineProperty(dom.window.crypto,'randomUUID',{value:(()=>{let n=0;return ()=>++n===1?id:n===2?op:'2faf4ca1-324c-4c40-a0aa-'+String(n).padStart(12,'0')})(),configurable:true});
  const calls=[],records=[];
  dom.window.fetch=async(path,options)=>{
   calls.push({path,method:options.method,credentials:options.credentials,
@@ -26,6 +26,9 @@ function setup({conflict=false}={}){
   }
   if(path==='/api/mail/drafts/save'){
    if(conflict)return reply({error:'mail_draft_conflict'},409);
+   const failure=saveErrors.shift();
+   if(failure==='network')throw Error('simulated disconnection');
+   if(failure)return reply({error:failure.code},failure.status);
    const body=JSON.parse(options.body);const row={...records[0],to:body.to,subject:body.subject,
     body:body.body,revision:2};records[0]=row;return reply({draft:row});
   }
@@ -83,4 +86,56 @@ test('draft support missing from status never calls draft endpoint or shows a co
  assert.deepEqual(calls,['/api/mail/status']);
  assert.equal(dom.window.document.querySelector('#mail-drafts'),null);
  dom.window.close();
+});
+
+test('definitive recipient validation preserves edits, explains the refusal and accepts a corrected save',async()=>{
+ const x=setup({saveErrors:[{status:400,code:'invalid_mail_draft_recipient'}]});await wait();
+ x.doc.querySelector('[data-mail-draft-action="create"]').click();await wait();
+ const input=(name,value)=>{
+  const node=x.doc.querySelector('[data-mail-draft-field="'+name+'"]');
+  node.value=value;node.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+ };
+ input('to','not-an-address');input('subject','Preserve my work');input('body','Keep this unsaved body');
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ assert.match(x.doc.getElementById('mail-drafts').textContent,/Recipient address is invalid/);
+ assert.doesNotMatch(x.doc.getElementById('mail-drafts').textContent,/Save confirmation unavailable/);
+ assert.equal(x.records[0].revision,1);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]').value,'Keep this unsaved body');
+ input('to','corrected@example.invalid');
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ assert.equal(x.records[0].revision,2);
+ assert.deepEqual(x.records[0].to,['corrected@example.invalid']);
+ const saves=x.calls.filter(c=>c.path==='/api/mail/drafts/save');
+ assert.notEqual(saves[0].body.operationId,saves[1].body.operationId);
+ assert.match(x.doc.getElementById('mail-drafts').textContent,/Draft saved at revision 2/);
+ assert.equal(x.calls.filter(c=>/outbox|send|smtp/.test(c.path)).length,0);
+ x.dom.window.close();
+});
+test('recognized content/size refusals retain unsaved text and never echo arbitrary server strings',async()=>{
+ for(const failure of [{status:400,code:'invalid_mail_draft_payload'},{status:413,code:'mail_draft_payload_too_large'}]){
+  const x=setup({saveErrors:[failure]});await wait();
+  x.doc.querySelector('[data-mail-draft-action="create"]').click();await wait();
+  const node=x.doc.querySelector('[data-mail-draft-field="body"]');node.value='Retain unsaved work';
+  node.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+  assert.match(x.doc.getElementById('mail-drafts').textContent,/Draft content was refused/);
+  assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]').value,'Retain unsaved work');
+  assert.equal(x.records[0].revision,1);
+  x.dom.window.close();
+ }
+});
+test('unknown errors and disconnections preserve the exact pending save for explicit retry',async()=>{
+ for(const failure of ['network',{status:400,code:'<img src="https://tracker.test/">'},{status:502,code:'mail_draft_storage_failed'}]){
+  const x=setup({saveErrors:[failure]});await wait();
+  x.doc.querySelector('[data-mail-draft-action="create"]').click();await wait();
+  x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+  assert.match(x.doc.getElementById('mail-drafts').textContent,/Save confirmation unavailable/);
+  assert.doesNotMatch(x.doc.getElementById('mail-drafts').textContent,/tracker.test/);
+  assert.equal(x.doc.getElementById('mail-drafts').querySelectorAll('img,script,iframe').length,0);
+  assert.equal(x.calls.filter(c=>c.path==='/api/mail/drafts/save').length,1,'no automatic retry');
+  x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+  const saves=x.calls.filter(c=>c.path==='/api/mail/drafts/save');
+  assert.deepEqual(saves[0].body,saves[1].body);
+  x.dom.window.close();
+ }
 });

@@ -1,11 +1,18 @@
 name: Synthetic foundation
-on: [push, pull_request]
+on:
+  # Feature branches are verified by pull_request, not by duplicate push runs.
+  # Preserve the existing isolated review snapshot push path.
+  push:
+    branches:
+      - main
+      - feature/ds011-rb01-integrated-review
+  pull_request:
 permissions:
   contents: read
-# Keep independent workflows/events/branches separate; supersede only older runs in this group.
+# Preserve existing runs: cancellation requires explicit owner approval.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
 jobs:
   test:
     runs-on: ubuntu-latest

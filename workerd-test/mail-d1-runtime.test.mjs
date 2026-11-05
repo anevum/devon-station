@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { Miniflare } from 'miniflare';
 import { createStation } from '../worker/index.mjs';
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
 import { createD1MailStore } from '../src/communications/mail-d1-store.mjs';
 
 // This runs the actual pinned local Miniflare/workerd D1 binding, not a Node SQLite double.
@@ -34,7 +35,7 @@ test(`workerd ${compatibilityDate}: COMMS-07 real local D1 snapshot transaction 
   });
   try {
     const db = await mf.getD1Database('MAIL_TEST');
-    const store = createD1MailStore(db);
+    const store = createD1MailStore(db,{cipher:mailPayloadCipherFromEnv({MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),}),ownerSub:'synthetic-owner'});
     const migration = await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql', import.meta.url), 'utf8');
 
     // Miniflare D1 exec() parses SQL strings, but rejects a comment-only first line
@@ -141,9 +142,9 @@ test(`workerd ${compatibilityDate}: reordered FETCH commits only a complete fram
   const migration=await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql',import.meta.url),'utf8');
   for(const sql of migration.split('\n').filter(line=>!/^\s*--/.test(line)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
    await db.prepare(sql).run();
-  const store=createD1MailStore(db),before=await store.readSnapshot(scope);
+  const store=createD1MailStore(db,{cipher:mailPayloadCipherFromEnv({MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),}),ownerSub:'synthetic-owner'}),before=await store.readSnapshot(scope);
   const base='https://station.example';
-  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
+  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
    MAIL_IMAP_ADDRESS:'hello@devonakins.com',MAIL_IMAP_PASSWORD:'synthetic-only',MAIL_DB:db};
   const payload=new TextEncoder().encode('From: author@example.org\r\nSubject: Synthetic pipeline\r\nContent-Type: text/plain\r\n\r\nInert body');
   for(const complete of [false,true]){
@@ -195,8 +196,8 @@ test(`workerd ${compatibilityDate}: incremental polling preserves indexed mail a
   const migration=await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql',import.meta.url),'utf8');
   for(const sql of migration.split('\n').filter(line=>!/^\s*--/.test(line)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
    await db.prepare(sql).run();
-  const store=createD1MailStore(db),base='https://station.example';
-  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
+  const store=createD1MailStore(db,{cipher:mailPayloadCipherFromEnv({MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),}),ownerSub:'synthetic-owner'}),base='https://station.example';
+  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
    MAIL_IMAP_ADDRESS:'hello@devonakins.com',MAIL_IMAP_PASSWORD:'synthetic-only',MAIL_DB:db};
   const cases=[
    {name:'empty first mailbox',validity:7,start:1,uids:[],highest:0,imported:0},
@@ -286,11 +287,11 @@ test(`workerd ${compatibilityDate}: owner HTTP inbox pages are bound to one real
   const migration=await readFile(new URL('../worker/migrations/0004-comms-ro-mail.sql',import.meta.url),'utf8');
   for(const sql of migration.split('\n').filter(line=>!/^\s*--/.test(line)).join('\n').split(';').map(x=>x.trim()).filter(Boolean))
    await db.prepare(sql).run();
-  const store=createD1MailStore(db),base='https://station.example';
+  const store=createD1MailStore(db,{cipher:mailPayloadCipherFromEnv({MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),}),ownerSub:'synthetic-owner'}),base='https://station.example';
   const records=Array.from({length:123},(_,i)=>message(i+1));
   assert.deepEqual(await store.commitSnapshot({scope,expectedRevision:0,
    next:{cursor:{uidValidity:7,highestUid:123},records}}),{ok:true,revision:1});
-  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
+  const env={OWNER_EMAIL:'owner@example.org',APP_ORIGIN:base,MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_ENABLED:'true',MAIL_OWNER_SUB:'synthetic-owner',
    MAIL_IMAP_ADDRESS:'hello@devonakins.com',MAIL_IMAP_PASSWORD:'synthetic-only',MAIL_DB:db};
   const noSocket=()=>assert.fail('cached pagination must not open IMAP');
   const station=createStation({},async()=>({email:'owner@example.org',subject:'synthetic-owner'}),fetch,noSocket);

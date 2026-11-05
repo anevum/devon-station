@@ -15,7 +15,7 @@ const EXPECTED_MODULES = [
   'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs', 'worker/mail-outbox-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
-    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs','mail-outbound-wire.mjs','mail-smtp-transport.mjs','mail-outbox.mjs'].map(name => 'src/communications/' + name),
+    'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs','mail-outbound-wire.mjs','mail-smtp-transport.mjs','mail-outbox.mjs','mail-payload-crypto.mjs','mail-sent-evidence.mjs'].map(name => 'src/communications/' + name),
   ...['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs',
     'decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs',
     'pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs']

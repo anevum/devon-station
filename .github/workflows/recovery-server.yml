@@ -1,11 +1,18 @@
 name: Recovered server verification
-on: [push, pull_request, workflow_dispatch]
+on:
+  # A PR already verifies feature branch changes; avoid a second push run.
+  push:
+    branches:
+      - main
+      - feature/ds011-rb01-integrated-review
+  pull_request:
+  workflow_dispatch:
 permissions:
   contents: read
-# Keep independent workflows/events/branches separate; supersede only older runs in this group.
+# Preserve existing runs: cancellation requires explicit owner approval.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-${{ github.run_id }}
+  cancel-in-progress: false
 jobs:
   verify:
     runs-on: ubuntu-latest
@@ -69,6 +76,7 @@ jobs:
         shell: bash
         run: |
           node tools/prepare-rb01-review.mjs
+          node tools/comms-acceptance-upload.mjs --verify
           (cd release-review && sha256sum -c SHA256SUMS)
           cp release-review/SHA256SUMS "$RUNNER_TEMP/rb01-first-sums"
           node tools/prepare-rb01-review.mjs

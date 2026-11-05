@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {DatabaseSync} from 'node:sqlite';
 import {readFileSync} from 'node:fs';
 import {createD1DraftStore,validateDraftPayload} from '../src/communications/mail-drafts.mjs';
+import {handleMailDraftApi} from '../worker/mail-drafts-api.mjs';
 const schema=readFileSync(new URL('../worker/migrations/0005-comms-drafts.sql',import.meta.url),'utf8');
 const personal={installationId:'personal',mailboxId:'hello',ownerSub:'signed-owner-sub'};
 const sameInstallationOtherUser={...personal,ownerSub:'different-signed-sub'};
@@ -13,12 +14,12 @@ const idFromNumber=n=>'00000000-0000-4000-8000-'+n.toString(16).padStart(12,'0')
 function setup(migrate=true){
  const db=new DatabaseSync(':memory:');
  if(migrate)db.exec(schema);
- const d1={prepare(sql){return {bind(...args){return {
+ const d1={prepare(sql){return {async first(){return db.prepare(sql).get()??null;},bind(...args){return {
    async first(){return db.prepare(sql).get(...args)??null;},
    async all(){return {success:true,results:db.prepare(sql).all(...args)};},
    async run(){return {success:true,meta:{changes:db.prepare(sql).run(...args).changes}};}
  };}}}};
- return {db,store:createD1DraftStore(d1,{now:()=> '2026-11-03T12:00:00.000Z'})};
+ return {db,d1,store:createD1DraftStore(d1,{now:()=> '2026-11-03T12:00:00.000Z'})};
 }
 const assertCode=code=>e=>e?.code===code;
 test('schema migration is explicit, not an implicit side effect of opening a draft store',async()=>{
@@ -104,5 +105,21 @@ test('no write through guessed cross-owner scope or malformed ID',async()=>{
  await assert.rejects(store.create(personal,'../../other'),assertCode('invalid_mail_draft_id'));
  await assert.rejects(store.save(personal,{id:ID,revision:1,operationId:'BAD',to:[],subject:'',body:''}),assertCode('invalid_mail_draft_id'));
  assert.deepEqual(await store.list(personal),[]);
+ db.close();
+});
+
+
+test('legacy draft-only HTTP delete still works when no outbox schema exists',async()=>{
+ const {db,d1,store}=setup();
+ await store.create(personal,ID);
+ const url=new URL('https://station.example/api/mail/drafts/delete');
+ const result=await handleMailDraftApi({
+  request:new Request(url,{method:'POST'}),url,
+  user:{subject:personal.ownerSub},
+  env:{MAIL_PAYLOAD_KEY_ID:'test-key',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({'test-key':'AQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQEBAQE='}),MAIL_DRAFTS_ENABLED:'true',MAIL_OWNER_SUB:personal.ownerSub,MAIL_DB:d1},
+  readBody:async()=>({id:ID,revision:1})
+ });
+ assert.deepEqual(result,{status:200,body:{deleted:true}});
+ assert.equal((await store.list(personal)).length,0);
  db.close();
 });

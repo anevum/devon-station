@@ -58,7 +58,16 @@ async function parseFetch(line, bytes, decodeMime) {
   return {uid,from:decoded.from,subject:decoded.subject,text:decoded.text,timestamp,flags};
 }
 
-function validateCommand(command) {
+function validateCommand(command, purpose='inbox', sentExamined=false) {
+  // A separate Sent-evidence connection can only read a fixed provider folder
+  // and search for the deterministic Message-ID. Never mix it with Inbox sync.
+  if (purpose==='sent-evidence') {
+    if (command==='EXAMINE "Sent"') return 'examine';
+    if (sentExamined &&
+        /^UID SEARCH HEADER Message-ID "<[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}@devonakins\.com>"$/.test(command))
+      return 'search';
+    reject('imap_command_forbidden');
+  }
   if (command === 'EXAMINE "INBOX"') return 'examine';
   const search = /^UID SEARCH UID ([1-9][0-9]*):([1-9][0-9]*)$/.exec(command);
   if (search && UID(Number(search[1])) && UID(Number(search[2])) &&
@@ -71,12 +80,13 @@ function validateCommand(command) {
 export function createPurelymailImapConnector({connect, credentials, decodeMime} = {}) {
   if (typeof connect !== 'function' || typeof credentials !== 'function' || typeof decodeMime !== 'function') reject('imap_connector_unavailable');
   return Object.freeze({
-    async open({host, port, servername, tlsRequired, rejectUnauthorized, username, signal} = {}) {
-      if (host !== PURELYMAIL.incoming.host || servername !== host || port !== 993 ||
+    async open({host, port, servername, tlsRequired, rejectUnauthorized, username, signal, purpose='inbox'} = {}) {
+      if (!['inbox','sent-evidence'].includes(purpose) || host !== PURELYMAIL.incoming.host || servername !== host || port !== 993 ||
           tlsRequired !== true || rejectUnauthorized !== true || !ascii(username, 254) || !/^[a-z0-9._+-]+@[a-z0-9.-]+$/.test(username) || signal?.aborted) reject('imap_tls_policy_required');
       const password = await credentials(username);
       if (!ascii(password, 1024)) reject('imap_credentials_unavailable');
       let socket, reader, writer, buffer = new Uint8Array(0), closed = false, tag = 0;
+      let openFailureCode = 'imap_tls_connect_failed';
       const cleanup = async () => {
         if (closed) return;
         closed = true;
@@ -94,6 +104,7 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
         if (!socket || !socket.opened || !socket.readable || !socket.writable || typeof socket.close !== 'function') reject('imap_socket_unavailable');
         await socket.opened;
         if (closed || signal?.aborted) reject('imap_session_cancelled');
+        openFailureCode = 'imap_greeting_failed';
         reader = socket.readable.getReader();
         writer = socket.writable.getWriter();
         async function fill() {
@@ -168,12 +179,18 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
             }
           }
         }
+        openFailureCode = 'imap_login_failed';
         await exchangeRaw('LOGIN '+quote(username)+' '+quote(password),'login');
+        let sentExamined=false;
         return Object.freeze({
           async exchange(command, {signal:stepSignal}={}) {
             if (stepSignal?.aborted || signal?.aborted || closed) fail('imap_session_cancelled');
-            const kind=validateCommand(command);
-            try {return await exchangeRaw(command,kind);}
+            const kind=validateCommand(command,purpose,sentExamined);
+            try {
+              const result=await exchangeRaw(command,kind);
+              if (purpose==='sent-evidence' && kind==='examine') sentExamined=true;
+              return result;
+            }
             catch (error) {
               signal?.removeEventListener('abort',abort);
               await cleanup();
@@ -182,10 +199,13 @@ export function createPurelymailImapConnector({connect, credentials, decodeMime}
           },
           async close(){signal?.removeEventListener('abort',abort);await cleanup();}
         });
-      } catch {
+      } catch(error) {
         signal?.removeEventListener('abort',abort);
         await cleanup();
-        reject('imap_transport_failed');
+        // Project only the trusted open stage, never native errors or provider text.
+        reject(signal?.aborted?'imap_session_cancelled':
+          openFailureCode==='imap_login_failed'&&error?.code==='imap_command_failed'?
+          'imap_login_rejected':openFailureCode);
       }
     }
   });

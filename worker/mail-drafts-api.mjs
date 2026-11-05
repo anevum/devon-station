@@ -1,19 +1,22 @@
 // COMMS-12: draft CRUD only; never connects to a provider or sends an email.
 // Caller authenticates signed Cloudflare Access and validates Origin before this handler.
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
+import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
+const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
 const status=(error,httpStatus)=>({status:httpStatus,body:{error}});
 const KNOWN_ERRORS=new Set([
  'invalid_mail_draft_id','invalid_mail_draft_revision','invalid_mail_draft_payload',
  'invalid_mail_draft_recipient','invalid_mail_draft_scope','mail_draft_not_found',
- 'mail_draft_conflict','mail_draft_limit','mail_drafts_storage_unavailable'
+ 'mail_draft_conflict','mail_draft_limit','mail_drafts_storage_unavailable',
+ 'mail_draft_pending_delivery','mail_draft_delivery_locked'
 ]);
 export const mailDraftsEnabled=env=>env?.MAIL_DRAFTS_ENABLED==='true' &&
  !!env.MAIL_DB && typeof env.MAIL_DB.prepare==='function' &&
- typeof env.MAIL_OWNER_SUB==='string' && env.MAIL_OWNER_SUB.length>0;
+ typeof env.MAIL_OWNER_SUB==='string' && env.MAIL_OWNER_SUB.length>0 && !!payloadCipher(env);
 export async function handleMailDraftApi({request,url,user,env,readBody}){
  if(!user?.subject || user.subject!==env?.MAIL_OWNER_SUB)return status('mail_owner_not_authorized',403);
  if(!mailDraftsEnabled(env))return status('mail_drafts_not_configured',503);
- const store=createD1DraftStore(env.MAIL_DB);
+ const cipher=payloadCipher(env),store=createD1DraftStore(env.MAIL_DB,{cipher});
  const scope={installationId:'personal',mailboxId:'hello',ownerSub:user.subject};
  try{
   if(url.pathname==='/api/mail/drafts' && request.method==='GET')
@@ -22,13 +25,24 @@ export async function handleMailDraftApi({request,url,user,env,readBody}){
    const body=await readBody(request,4096);
    return {status:200,body:{draft:await store.create(scope,body.id)}};
   }
+  // Do not trust mutable feature flags when deciding whether a draft already
+  // has a durable delivery. With any outbox table, saves and deletes must
+  // consult the actual owner-scoped lineage atomically in SQLite.
+  async function protectedStore(){
+   let hasOutbox;
+   try{
+    const row=await env.MAIL_DB.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='comms_outbox'").first();
+    hasOutbox=row?.name==='comms_outbox';
+   }catch{throw Object.assign(new Error('mail_draft_storage_failed'),{code:'mail_draft_storage_failed',status:502});}
+   return createD1DraftStore(env.MAIL_DB,{protectPendingOutbox:hasOutbox,protectLinkedOutbox:hasOutbox,cipher});
+  }
   if(url.pathname==='/api/mail/drafts/save' && request.method==='POST'){
    const body=await readBody(request,148000);
-   return {status:200,body:{draft:await store.save(scope,body)}};
+   return {status:200,body:{draft:await (await protectedStore()).save(scope,body)}};
   }
   if(url.pathname==='/api/mail/drafts/delete' && request.method==='POST'){
    const body=await readBody(request,4096);
-   return {status:200,body:await store.remove(scope,body)};
+   return {status:200,body:await (await protectedStore()).remove(scope,body)};
   }
   return status('method_not_allowed',405);
  }catch(e){
