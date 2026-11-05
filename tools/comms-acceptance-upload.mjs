@@ -29,9 +29,11 @@ export function verifyReviewCandidate({manifest,candidateBytes,expectedSha}){
  let modules;
  try{modules=JSON.parse(bytes.toString('utf8'));}catch{refuse('invalid module JSON');}
  const names=Object.keys(modules);
- if(names.length!==manifest.candidate.moduleCount||names.length!==43 ||
+ if(names.length!==manifest.candidate.moduleCount||names.length!==44 ||
     names.some(p=>!/^([a-z0-9.-]+\/)*[a-z0-9.-]+\.mjs$/.test(p)) ||
-    !Object.hasOwn(modules,'index.mjs')||!Object.hasOwn(modules,'worker/mail-api.mjs'))
+    !Object.hasOwn(modules,'index.mjs')||!Object.hasOwn(modules,'worker/mail-api.mjs')||
+    !Object.hasOwn(modules,'worker/mail-outbox-api.mjs')||
+    !Object.hasOwn(modules,'src/communications/mail-sent-evidence.mjs'))
   refuse('module inventory differs from reviewed build');
  if(names.some(p=>typeof modules[p]!=='string'||
      sha256(modules[p])!==manifest.candidate.modulesSha256?.[p])||
@@ -42,6 +44,8 @@ export function verifyReviewCandidate({manifest,candidateBytes,expectedSha}){
     !entry.includes("export default createStation(assets,undefined,undefined,connect);")||
     !entry.includes(JSON.stringify('"privateDataLoaded":false').slice(1,-1))||
     !modules['worker/mail-api.mjs'].includes('/api/mail/diagnostics/imap-check')||
+    !modules['worker/mail-outbox-api.mjs'].includes("from '../src/communications/mail-sent-evidence.mjs'")||
+    !modules['src/communications/mail-sent-evidence.mjs'].includes('probePurelymailSent')||
     !modules['worker/index.mjs'].includes('CF_VERSION_METADATA'))
   refuse('missing reviewed TLS, privacy, diagnostics or version entrypoint');
  return Object.freeze(modules);
@@ -55,8 +59,8 @@ export function verifyAcceptanceSettings(settings){
  const bindings=new Map();
  for(const b of settings.bindings){
   if(!b?.name||bindings.has(b.name)||
-     ![...knownNames,'MAIL_IMAP_PASSWORD','CF_VERSION_METADATA'].includes(b.name)||
-     (b.name==='MAIL_IMAP_PASSWORD'&&b.type!=='secret_text')||
+     ![...knownNames,'MAIL_IMAP_PASSWORD','MAIL_SMTP_PASSWORD','CF_VERSION_METADATA'].includes(b.name)||
+     (['MAIL_IMAP_PASSWORD','MAIL_SMTP_PASSWORD'].includes(b.name)&&b.type!=='secret_text')||
      (b.name==='CF_VERSION_METADATA'&&b.type!=='version_metadata')||
      !['plain_text','d1','secret_text','version_metadata'].includes(b.type))
    refuse('unexpected or duplicate acceptance binding');
@@ -84,7 +88,9 @@ export function verifyAcceptanceSettings(settings){
  if(typeof bindings.get('ACCESS_AUD')?.text!=='string'||!bindings.get('ACCESS_AUD').text||
     typeof bindings.get('MAIL_OWNER_SUB')?.text!=='string'||!bindings.get('MAIL_OWNER_SUB').text)
   refuse('missing signed owner identity configuration');
- if(bindings.has('MAIL_SMTP_PASSWORD'))refuse('acceptance Worker must have no SMTP password');
+ // A previously provisioned SMTP password may remain bound, but the
+ // independent send and sender-verification flags must both remain false.
+ // Never read, return, or re-provision the secret during staging.
  if(bindings.get('MAIL_ENABLED')?.text!=='false'&&bindings.get('MAIL_ENABLED')?.text!=='true')
   refuse('invalid IMAP feature flag');
  const owner=bindings.get('OWNER_EMAIL')?.text;
@@ -303,7 +309,7 @@ export function buildConnectedAcceptanceCode({manifest,candidateBytes,expectedSh
   b=>b.toString(16).padStart(2,'0')).join('');
  if(await digest(candidateText)!==expectedDigest)refuse('connected candidate checksum mismatch');
  const modules=JSON.parse(candidateText);
- if(Object.keys(modules).length!==43||Object.keys(moduleDigests).length!==43)
+ if(Object.keys(modules).length!==44||Object.keys(moduleDigests).length!==44)
   refuse('connected module inventory mismatch');
  for(const [name,source] of Object.entries(modules))
   if(typeof source!=='string'||await digest(source)!==moduleDigests[name])refuse('connected module checksum mismatch');
@@ -339,7 +345,7 @@ export function buildConnectedAcceptanceCode({manifest,candidateBytes,expectedSh
  if(operation==='PREFLIGHT_ONLY'){
   const checked=await preflightAcceptance(request,approvedAccount);
   return {status:'CONNECTED_PREFLIGHT_VERIFIED_NO_UPLOAD',sourceCommit:sourceSha,candidateSha256:expectedDigest,
-   moduleCount:43,existingDeploymentId:checked.liveId,productionDeploymentId:checked.productionId};
+   moduleCount:44,existingDeploymentId:checked.liveId,productionDeploymentId:checked.productionId};
  }
  const result=await uploadAcceptanceVersionWithRequest({request,accountId:approvedAccount,sourceSha,modules});
  return {...result,candidateSha256:expectedDigest};

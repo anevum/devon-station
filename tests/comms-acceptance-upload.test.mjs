@@ -25,12 +25,14 @@ function fakeBundle(){
  const modules={
   'index.mjs':"import {connect} from 'cloudflare:sockets';\nconst s='"+marker+"';\nexport default createStation(assets,undefined,undefined,connect);\n",
   'worker/mail-api.mjs':"const path='/api/mail/diagnostics/imap-check';",
+  'worker/mail-outbox-api.mjs':"import {probePurelymailSent} from '../src/communications/mail-sent-evidence.mjs';",
+  'src/communications/mail-sent-evidence.mjs':"export function probePurelymailSent(){return false;}",
   'worker/index.mjs':"const v=env.CF_VERSION_METADATA?.id;"
  };
- for(let i=0;i<40;i++)modules['src/synthetic-'+i+'.mjs']='export const x='+i+';\n';
+ for(let i=0;i<39;i++)modules['src/synthetic-'+i+'.mjs']='export const x='+i+';\n';
  const bytes=Buffer.from(JSON.stringify(modules));
  const manifest={schemaVersion:1,status:'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED',
-  sourceCommit:sourceSha,candidate:{sha256:sha256(bytes),moduleCount:43,
+  sourceCommit:sourceSha,candidate:{sha256:sha256(bytes),moduleCount:44,
    modulesSha256:Object.fromEntries(Object.entries(modules).map(([p,s])=>[p,sha256(s)]))}};
  return {manifest,bytes,modules};
 }
@@ -60,7 +62,7 @@ const app=()=>({id:appId,type:'self_hosted',domain:new URL(origin).hostname,aud:
 const policies=()=>[{decision:'allow',include:[{email:{email:owner}}],exclude:[],require:[]}];
 test('staging review matches exact checked-out SHA, source module hashes, privacy entrypoint and TLS socket import',()=>{
  const {bytes,manifest}=fakeBundle();
- assert.equal(Object.keys(verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha:sourceSha})).length,43);
+ assert.equal(Object.keys(verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha:sourceSha})).length,44);
  const bad=Buffer.from(bytes);bad[25]^=1;
  assert.throws(()=>verifyReviewCandidate({manifest,candidateBytes:bad,expectedSha:sourceSha}),/checksum/);
  assert.throws(()=>verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha:'b'.repeat(40)}),/source SHA/);
@@ -80,9 +82,44 @@ test('staging preflight refuses send flags, missing encryption binding, public o
  }
  for(const changed of [
   {...x,bindings:x.bindings.filter(b=>b.name!=='MAIL_PAYLOAD_KEYS_JSON')},
-  {...x,bindings:[...x.bindings,{name:'MAIL_SMTP_PASSWORD',type:'secret_text'}]},
+  {...x,bindings:[...x.bindings,{name:'MAIL_SMTP_PASSWORD',type:'plain_text',text:'DO_NOT_EXPOSE'}]},
   {...x,bindings:[...x.bindings,{name:'EXTRA_USER_TOKEN',type:'unknown_type'}]}
  ])assert.throws(()=>verifyAcceptanceSettings(changed),/refused:/);
+});
+test('retains existing SMTP secret metadata but never permits enabling outbound mail',()=>{
+ const x=settings();
+ x.bindings.push({name:'MAIL_SMTP_PASSWORD',type:'secret_text'});
+ const safe=verifyAcceptanceSettings(x);
+ assert.equal(safe.inherited.length,x.bindings.length);
+ assert(safe.inherited.some(b=>b.name==='MAIL_SMTP_PASSWORD'&&b.type==='inherit'));
+ const snapshot={...x,bindings:[...structuredClone(x.bindings),{name:'CF_VERSION_METADATA',type:'version_metadata'}]};
+ assert.equal(verifyBindingParity(x,snapshot),true);
+ for(const flag of ['MAIL_SEND_ENABLED','MAIL_SENDER_VERIFIED']){
+  const bad=structuredClone(x);bad.bindings.find(b=>b.name===flag).text='true';
+  assert.throws(()=>verifyAcceptanceSettings(bad),/outgoing email must remain disabled/);
+ }
+ const bad=structuredClone(x);
+ bad.bindings.find(b=>b.name==='MAIL_SMTP_PASSWORD').type='plain_text';
+ assert.throws(()=>verifyAcceptanceSettings(bad),/unexpected or duplicate acceptance binding/);
+ const missing=structuredClone(snapshot);
+ missing.bindings=missing.bindings.filter(b=>b.name!=='MAIL_SMTP_PASSWORD');
+ assert.throws(()=>verifyBindingParity(x,missing),/binding inventory differs/);
+});
+test('review candidate rejects a missing Sent module or a broken import even with correct hashes',()=>{
+ const {bytes,manifest}=fakeBundle();
+ const modules=JSON.parse(bytes);
+ delete modules['src/communications/mail-sent-evidence.mjs'];
+ modules['src/legacy-placeholder.mjs']='export const unrelated=true;';
+ const badBytes=Buffer.from(JSON.stringify(modules));
+ const badManifest={...manifest,candidate:{sha256:sha256(badBytes),moduleCount:44,
+  modulesSha256:Object.fromEntries(Object.entries(modules).map(([p,s])=>[p,sha256(s)]))}};
+ assert.throws(()=>verifyReviewCandidate({manifest:badManifest,candidateBytes:badBytes,expectedSha:sourceSha}),/module inventory/);
+ const disconnected=JSON.parse(bytes);
+ disconnected['worker/mail-outbox-api.mjs']='// missing required import';
+ const noImportBytes=Buffer.from(JSON.stringify(disconnected));
+ const noImportManifest={...manifest,candidate:{sha256:sha256(noImportBytes),moduleCount:44,
+  modulesSha256:Object.fromEntries(Object.entries(disconnected).map(([p,s])=>[p,sha256(s)]))}};
+ assert.throws(()=>verifyReviewCandidate({manifest:noImportManifest,candidateBytes:noImportBytes,expectedSha:sourceSha}),/missing reviewed TLS/);
 });
 test('Access policy preflight accepts only the named owner and denies public/bypass policy drift',()=>{
  verifyOwnerAccess(app(),policies(),owner);
@@ -97,7 +134,7 @@ test('Access policy preflight accepts only the named owner and denies public/byp
 test('version multipart includes reviewed module bytes, inherited secret names only, version metadata and source annotation',async()=>{
  const {modules}=fakeBundle(),checked=verifyAcceptanceSettings(settings());
  const {form,metadata}=buildVersionForm(modules,sourceSha,checked.inherited);
- assert.equal([...form.keys()].length,44);
+ assert.equal([...form.keys()].length,45);
  assert.equal(metadata.main_module,'index.mjs');
  assert.deepEqual(metadata.compatibility_flags,['nodejs_compat']);
  assert.equal(metadata.annotations['workers/commit_sha'],sourceSha);
@@ -286,7 +323,7 @@ test('connected version-only upload preserves exact multipart module bytes and s
  assert.equal(upload.query.bindings_inherit,'strict');
  assert.equal(upload.rawBody,true);
  const form=await new Response(upload.body,{headers:{'content-type':upload.contentType}}).formData();
- assert.equal([...form.keys()].length,44);
+ assert.equal([...form.keys()].length,45);
  for(const [name,source] of Object.entries(h.modules))assert.equal(await form.get(name).text(),source);
  const metadata=JSON.parse(await form.get('metadata').text());
  assert.equal(metadata.annotations['workers/commit_sha'],sourceSha);
@@ -294,7 +331,7 @@ test('connected version-only upload preserves exact multipart module bytes and s
 });
 test('connected candidate corruption, wrong account, digest and approval fail before provider calls',async()=>{
  for(const mutate of [
-  code=>code.replace('export const x=39;','export const x=38;'),
+  code=>code.replace('export const x=38;','export const x=37;'),
   code=>code.replace('const approvedAccount="'+'b'.repeat(32)+'"','const approvedAccount="'+'c'.repeat(32)+'"')
  ]){
   const h=connectedHarness();
@@ -344,9 +381,9 @@ test('connected executor refuses enabled preview URLs and invalid provider resul
 test('candidate source remains inert data in the connected executor',async()=>{
  const h=connectedHarness();
  const modules=JSON.parse(h.args.candidateBytes);
- modules['src/synthetic-39.mjs']='"; globalThis.candidateExecuted=true; throw Error("candidate code executed"); //';
+ modules['src/synthetic-38.mjs']='"; globalThis.candidateExecuted=true; throw Error("candidate code executed"); //';
  const bytes=Buffer.from(JSON.stringify(modules));
- const manifest={...h.args.manifest,candidate:{sha256:sha256(bytes),moduleCount:43,
+ const manifest={...h.args.manifest,candidate:{sha256:sha256(bytes),moduleCount:44,
   modulesSha256:Object.fromEntries(Object.entries(modules).map(([p,s])=>[p,sha256(s)]))}};
  const code=buildConnectedAcceptanceCode({...h.args,manifest,candidateBytes:bytes,expectedCandidateSha256:sha256(bytes)});
  const result=await h.run(code);

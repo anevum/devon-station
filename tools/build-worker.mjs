@@ -8,7 +8,7 @@ modules['src/workspace-backup.mjs']=await readFile(resolve(root,'src/workspace-b
 modules['worker/mail-api.mjs']=await readFile(resolve(root,'worker/mail-api.mjs'),'utf8');
 modules['worker/mail-outbox-api.mjs']=await readFile(resolve(root,'worker/mail-outbox-api.mjs'),'utf8');
 modules['worker/mail-drafts-api.mjs']=await readFile(resolve(root,'worker/mail-drafts-api.mjs'),'utf8');
-for(const name of ['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs','mail-outbound-wire.mjs','mail-smtp-transport.mjs','mail-outbox.mjs','mail-payload-crypto.mjs']){
+for(const name of ['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs','mail-outbound-wire.mjs','mail-smtp-transport.mjs','mail-outbox.mjs','mail-payload-crypto.mjs','mail-sent-evidence.mjs']){
  modules['src/communications/'+name]=await readFile(resolve(root,'src','communications',name),'utf8');
 }
 for(const name of ['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs','decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs','pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs']){
