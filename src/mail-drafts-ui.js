@@ -6,7 +6,7 @@
 const path='/api/mail/drafts';
 const state={enabled:false,loaded:false,busy:false,items:[],selected:null,working:null,
  dirty:false,error:null,notice:null,pendingCreate:null,pendingSave:null,
- outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null};
+ outgoingEnabled:false,outboxEnabled:false,pendingSend:null,outboxItems:[],outboxLoaded:false,outboxError:null,sentEvidence:null,sentEvidenceErrorId:null};
 const element=(tag,kind,text)=>{
  const el=document.createElement(tag);
  if(kind)el.className=kind;
@@ -118,6 +118,19 @@ function render(){
       'Expected Message-ID <'+entry.deliveryId+'@devonakins.com> · Correlation only; not proof of delivery.'));
     item.append(element('time','mail-draft-notice','Updated '+new Date(entry.updatedAt).toLocaleString()));
     item.append(element('p','mail-draft-notice',outboxStateAdvice(entry.state)));
+    if(entry.draftId&&['claimed','accepted','uncertain'].includes(entry.state)){
+     const check=action('Check provider Sent copy','sent-check');
+     check.dataset.deliveryId=entry.deliveryId;check.disabled=state.busy;item.append(check);
+     if(state.sentEvidence?.deliveryId===entry.deliveryId){
+      const count=state.sentEvidence.candidateCount;
+      item.append(element('p','mail-draft-notice',
+       'Read-only Sent search found '+count+' candidate'+(count===1?'':'s')+
+       '. This is not proof of an exact provider copy or recipient delivery; zero candidates does not mean sending failed.'));
+     }
+     if(state.sentEvidenceErrorId===entry.deliveryId)
+      item.append(element('p','mail-draft-notice',
+       'Sent copy could not be inspected. Do not resend based on this result.'));
+    }
     list.append(item);
    }
    history.append(list);
@@ -420,9 +433,26 @@ async function fetchValidatedOutbox(){
  });
  return list.reverse();
 }
+async function checkSentCopy(deliveryId){
+ if(state.busy||!state.outboxLoaded||!state.outboxEnabled||!deliveryIdValid(deliveryId))return;
+ const row=state.outboxItems.find(item=>item.deliveryId===deliveryId);
+ if(!row?.draftId||!['claimed','accepted','uncertain'].includes(row.state))return;
+ state.busy=true;state.sentEvidence=null;state.sentEvidenceErrorId=null;render();
+ try{
+  const result=await api('/api/mail/outbox/sent-check',{deliveryId});
+  if(result?.deliveryId!==deliveryId||result.sentFolderExamined!==true||
+   !Number.isSafeInteger(result.candidateCount)||result.candidateCount<0||result.candidateCount>10||
+   result.exactHeaderVerified!==false||result.providerCopyConfirmed!==false||
+   result.recipientDeliveryConfirmed!==false||result.automaticRetry!==false)
+    throw Error('invalid_sent_evidence');
+  state.sentEvidence={deliveryId,candidateCount:result.candidateCount};
+ }catch{
+  state.sentEvidenceErrorId=deliveryId;
+ }finally{state.busy=false;render();}
+}
 async function loadOutboxHistory(){
  if(state.busy||!state.outboxEnabled)return;
- state.busy=true;state.outboxError=null;render();
+ state.busy=true;state.outboxError=null;state.sentEvidence=null;state.sentEvidenceErrorId=null;render();
  try{
   state.outboxItems=await fetchValidatedOutbox();state.outboxLoaded=true;
  }catch(e){
@@ -438,6 +468,7 @@ document.addEventListener('click',e=>{
  if(!clicked||!host()?.contains(clicked))return;
  const a=clicked.dataset.mailDraftAction;
  if(a==='outbox-refresh'){void loadOutboxHistory();return;}
+ if(a==='sent-check'){void checkSentCopy(clicked.dataset.deliveryId);return;}
  if(a==='send-prepare'){void prepareSend();return;}
  if(a==='send-submit'){void submitSend();return;}
  if(a==='send-status'){void checkSendStatus();return;}

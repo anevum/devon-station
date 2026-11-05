@@ -10,7 +10,7 @@ const operationId='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const deliveryId='123e4567-e89b-42d3-a456-426614174016';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,30));
 const copy=d=>({...d,to:d.to.slice()});
-function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false,saveLocked=false}={}){
+function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadFails=false,pendingDelete=false,saveLocked=false,sentProbeMalformed=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{
   url:'https://station.example/#mail',runScripts:'outside-only'
  });
@@ -65,6 +65,13 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
    if(submitFails)return reply({error:'mail_send_operation_failed',deliveryUncertain:true},502);
    return reply({receipt:{deliveryId:body.deliveryId,state:'accepted'},
     deliveryConfirmed:false,automaticRetry:false});
+  }
+  if(path==='/api/mail/outbox/sent-check'){
+   assert.equal(options.method,'POST');assert.deepEqual(Object.keys(body),['deliveryId']);
+   assert(outbox.some(row=>row.deliveryId===body.deliveryId&&row.draftId));
+   return reply({deliveryId:body.deliveryId,sentFolderExamined:true,
+    candidateCount:sentProbeMalformed?'invalid':0,exactHeaderVerified:false,
+    providerCopyConfirmed:false,recipientDeliveryConfirmed:false,automaticRetry:false});
   }
   if(path==='/api/mail/outbox')return outboxReadFails?reply({error:'unavailable'},503):reply({outbox:outbox.map(row=>({...row})),sendingEnabled:outgoing});
   throw Error('Unexpected external URL '+path);
@@ -192,6 +199,35 @@ test('linked delivery receipt shows expected Message-ID without asserting delive
  x.dom.window.close();
 });
 
+test('owner-triggered Sent-copy inspection with SMTP disabled is informational and never transmits',async()=>{
+ const x=setup({outgoing:false});
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();
+ x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ const inspect=x.doc.querySelector('[data-mail-draft-action="sent-check"]');assert(inspect);
+ inspect.click();await wait();
+ const history=x.doc.querySelector('[aria-label="Durable outbox status history"]');
+ assert(history.textContent.includes('Read-only Sent search found 0 candidates'));
+ assert(history.textContent.includes('zero candidates does not mean sending failed'));
+ assert.equal(count(x,'/api/mail/outbox/sent-check'),1);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
+ assert.equal(history.querySelectorAll('script,img,iframe,a[href]').length,0);
+ x.dom.window.close();
+});
+test('malformed Sent probe results fail closed without implying delivery state',async()=>{
+ const x=setup({outgoing:false,sentProbeMalformed:true});
+ x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'uncertain',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
+ x.doc.querySelector('[data-mail-draft-action="sent-check"]').click();await wait();
+ const history=x.doc.querySelector('[aria-label="Durable outbox status history"]');
+ assert(history.textContent.includes('Sent copy could not be inspected'));
+ assert(!history.textContent.includes('Read-only Sent search found'));
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.dom.window.close();
+});
 test('malformed stored receipt fails closed and never becomes executable DOM',async()=>{
  const x=setup({outgoing:false});
  x.outbox.push({deliveryId,state:'accepted',
