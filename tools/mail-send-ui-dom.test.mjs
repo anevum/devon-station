@@ -19,6 +19,10 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
  const calls=[],records=[],outbox=[],prompts=[];let resolveArchive=()=>{};
  let confirmation=false;
  dom.window.confirm=message=>{prompts.push(message);return confirmation;};
+ const archiveRows=()=>outbox.filter(x=>x.state==='accepted'&&x.draftId).map(x=>({
+  deliveryId:x.deliveryId,draftId:x.draftId,draftRevision:x.draftRevision,
+  acceptedAt:x.updatedAt,state:'accepted'})).sort((a,b)=>
+   b.acceptedAt.localeCompare(a.acceptedAt)||b.deliveryId.localeCompare(a.deliveryId));
  const reply=(value,status=200)=>({
   ok:status>=200&&status<300,status,
   headers:new Headers({'Content-Type':'application/json'}),json:async()=>value
@@ -68,10 +72,16 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
   }
   if(path==='/api/mail/outbox/archive'){
    assert.equal(options.method,'GET');
-   return reply({entries:outbox.filter(x=>x.state==='accepted'&&x.draftId).map(x=>({
-    deliveryId:x.deliveryId,draftId:x.draftId,draftRevision:x.draftRevision,
-    acceptedAt:x.updatedAt,state:'accepted'})),
-    hasMore:false,providerIndependent:true});
+   const rows=archiveRows();
+   return reply({entries:rows.slice(0,100),hasMore:rows.length>100,providerIndependent:true});
+  }
+  if(path==='/api/mail/outbox/archive/page'){
+   assert.equal(options.method,'POST');
+   assert.deepEqual(Object.keys(body),['before']);
+   assert.deepEqual(Object.keys(body.before).sort(),['acceptedAt','deliveryId']);
+   const rows=archiveRows().filter(x=>x.acceptedAt<body.before.acceptedAt||
+    (x.acceptedAt===body.before.acceptedAt&&x.deliveryId<body.before.deliveryId));
+   return reply({entries:rows.slice(0,100),hasMore:rows.length>100,providerIndependent:true});
   }
   if(path==='/api/mail/outbox/archive/view'){
    if(archiveDeferred)await new Promise(resolve=>{resolveArchive=resolve;});
@@ -292,6 +302,30 @@ test('leaving Mail clears an already decrypted Sent copy without contacting a pr
  await wait();
  assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
  assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ x.dom.window.close();
+});
+test('Sent history loads older 100-row pages by stable cursor without duplicates or SMTP',async()=>{
+ const x=setup({outgoing:false});
+ for(let i=0;i<105;i++)x.outbox.push({
+  deliveryId:'a0000000-0000-4000-8000-'+String(i+10).padStart(12,'0'),
+  draftId:savedId,draftRevision:2,state:'accepted',
+  createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
+ await wait();x.doc.querySelector('[data-mail-draft-action="archive-refresh"]').click();await wait();
+ let history=x.doc.querySelector('[aria-label="Encrypted Sent history"]');
+ assert.equal(history.querySelectorAll('li').length,100);
+ assert(history.querySelector('[data-mail-draft-action="archive-more"]'));
+ assert.equal(count(x,'/api/mail/outbox/archive/page'),0);
+ history.querySelector('[data-mail-draft-action="archive-more"]').click();await wait();
+ history=x.doc.querySelector('[aria-label="Encrypted Sent history"]');
+ assert.equal(history.querySelectorAll('li').length,105);
+ assert.equal(history.querySelector('[data-mail-draft-action="archive-more"]'),null);
+ const ids=[...history.querySelectorAll('li')].map(li=>li.querySelector('span.mail-draft-notice')?.textContent)
+  .filter(x=>x?.startsWith('Delivery '));
+ assert.equal(ids.length,105);assert.equal(new Set(ids).size,105);
+ assert.equal(count(x,'/api/mail/outbox/archive/page'),1);
+ assert.equal(count(x,'/api/mail/outbox/archive/view'),0);
+ assert.equal(count(x,'/api/mail/outbox/prepare'),0);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });

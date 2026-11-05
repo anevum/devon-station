@@ -28,7 +28,7 @@ The current encrypted outbox holds an immutable snapshot for an outgoing attempt
 4. Archive only a valid **saved-draft-linked** SMTP-accepted entry; `queued`, `claimed`, `uncertain`, `failed` and `rejected` remain distinct, non-retryable statuses as appropriate. No archive lookup, list, or migration may transmit email.
 5. A failed archive trigger aborts the accepted-state DB update. After the external SMTP call the original outbox remains **claimed**, not retried, until reviewed. Never equate archive absence or provider folder absence with unsent mail.
 6. Existing outbox receipt and draft lineage, unique-per-draft index, provider settings and production data must not be erased, weakened, or changed.
-7. The initial archive list shows the first 100 entries and an explicit `hasMore` warning; **older entries are not deleted**, but pagination is a known functional limitation. Do not claim unlimited browsing is complete.
+7. Archive pages contain at most 100 owner-scoped metadata records. The owner can load older pages with an explicit `accepted_at` / `delivery_id` keyset cursor. No message bodies are decrypted or sent while paging, and records are not deleted.
 
 ## Before applying migration (separate authorization required)
 

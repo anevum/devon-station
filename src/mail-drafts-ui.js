@@ -203,8 +203,10 @@ function render(){
    list.append(item);
   }
   sentHistory.append(list);
-  if(state.archiveHasMore)sentHistory.append(element('p','mail-draft-notice',
-   'Additional older copies exist beyond this 100-item view. No records have been deleted.'));
+  if(state.archiveHasMore){
+   const older=action('Load earlier Sent copies','archive-more');
+   older.disabled=state.busy;sentHistory.append(older);
+  }
  }
  root.append(sentHistory);
  if(!state.loaded){root.append(element('p','mail-draft-empty','Loading protected drafts…'));return;}
@@ -503,26 +505,34 @@ async function fetchValidatedOutbox(){
  });
  return list.reverse();
 }
+function validatedArchivePage(result,existingIds=new Set(),before=null){
+ if(result?.providerIndependent!==true||!Array.isArray(result.entries)||
+    result.entries.length>100||typeof result.hasMore!=='boolean'||
+    (result.hasMore&&result.entries.length===0))
+  throw Error('invalid_archive_history');
+ const seen=new Set(existingIds);let previous=before;
+ return result.entries.map(entry=>{
+  if(!entry||!deliveryIdValid(entry.deliveryId)||!deliveryIdValid(entry.draftId)||
+     !Number.isSafeInteger(entry.draftRevision)||entry.draftRevision<1||
+     entry.draftRevision>1000000000||entry.state!=='accepted'||
+     typeof entry.acceptedAt!=='string'||entry.acceptedAt.length>40||
+     !Number.isFinite(Date.parse(entry.acceptedAt))||seen.has(entry.deliveryId)||
+     (previous&&!(entry.acceptedAt<previous.acceptedAt||
+      (entry.acceptedAt===previous.acceptedAt&&entry.deliveryId<previous.deliveryId))))
+   throw Error('invalid_archive_history');
+  seen.add(entry.deliveryId);
+  previous={acceptedAt:entry.acceptedAt,deliveryId:entry.deliveryId};
+  return {deliveryId:entry.deliveryId,draftId:entry.draftId,
+   draftRevision:entry.draftRevision,acceptedAt:entry.acceptedAt,state:'accepted'};
+ });
+}
 async function loadArchivedHistory(){
  if(state.busy||!state.outboxEnabled)return;
  state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;state.archiveError=null;
  const epoch=++state.archiveEpoch;render();
  try{
   const result=await api('/api/mail/outbox/archive');
-  if(result?.providerIndependent!==true||!Array.isArray(result.entries)||
-     result.entries.length>100||typeof result.hasMore!=='boolean')
-   throw Error('invalid_archive_history');
-  const seen=new Set();
-  const rows=result.entries.map(entry=>{
-   if(!entry||!deliveryIdValid(entry.deliveryId)||!deliveryIdValid(entry.draftId)||
-      !Number.isSafeInteger(entry.draftRevision)||entry.draftRevision<1||
-      entry.draftRevision>1000000000||entry.state!=='accepted'||
-      typeof entry.acceptedAt!=='string'||!Number.isFinite(Date.parse(entry.acceptedAt))||
-      seen.has(entry.deliveryId))throw Error('invalid_archive_history');
-   seen.add(entry.deliveryId);
-   return {deliveryId:entry.deliveryId,draftId:entry.draftId,
-    draftRevision:entry.draftRevision,acceptedAt:entry.acceptedAt,state:'accepted'};
-  });
+  const rows=validatedArchivePage(result);
   if(epoch!==state.archiveEpoch||document.visibilityState==='hidden'||!state.enabled)return;
   state.archiveEntries=rows;state.archiveLoaded=true;state.archiveHasMore=result.hasMore;
  }catch{
@@ -530,6 +540,25 @@ async function loadArchivedHistory(){
    state.archiveEntries=[];state.archiveLoaded=false;state.archiveHasMore=false;
    state.archiveError='Encrypted Sent history unavailable. Delivery receipts remain unchanged.';
   }
+ }finally{state.busy=false;render();}
+}
+async function loadEarlierArchive(){
+ if(state.busy||!state.outboxEnabled||!state.archiveLoaded||
+    !state.archiveHasMore||!state.archiveEntries.length)return;
+ const last=state.archiveEntries[state.archiveEntries.length-1];
+ const before={acceptedAt:last.acceptedAt,deliveryId:last.deliveryId};
+ const known=new Set(state.archiveEntries.map(row=>row.deliveryId));
+ state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;state.archiveError=null;
+ const epoch=++state.archiveEpoch;render();
+ try{
+  const result=await api('/api/mail/outbox/archive/page',{before});
+  const rows=validatedArchivePage(result,known,before);
+  if(epoch!==state.archiveEpoch||document.visibilityState==='hidden'||!state.enabled)return;
+  state.archiveEntries=[...state.archiveEntries,...rows];
+  state.archiveHasMore=result.hasMore;
+ }catch{
+  if(epoch===state.archiveEpoch&&document.visibilityState!=='hidden')
+   state.archiveError='Older encrypted copies could not be loaded. Existing history was preserved.';
  }finally{state.busy=false;render();}
 }
 async function openArchivedCopy(deliveryId){
@@ -598,6 +627,7 @@ document.addEventListener('click',e=>{
  const a=clicked.dataset.mailDraftAction;
  if(a==='outbox-refresh'){void loadOutboxHistory();return;}
  if(a==='archive-refresh'){void loadArchivedHistory();return;}
+ if(a==='archive-more'){void loadEarlierArchive();return;}
  if(a==='sent-check'){void checkSentCopy(clicked.dataset.deliveryId);return;}
  if(a==='archive-open'){void openArchivedCopy(clicked.dataset.deliveryId);return;}
  if(a==='archive-close'){state.archiveEpoch++;state.archiveCopy=null;state.archiveErrorId=null;render();return;}
