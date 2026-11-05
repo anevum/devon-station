@@ -3,6 +3,7 @@
 import {createD1Outbox,createOutboxDispatcher} from '../src/communications/mail-outbox.mjs';
 import {createD1DraftStore} from '../src/communications/mail-drafts.mjs';
 import {mailPayloadCipherFromEnv} from '../src/communications/mail-payload-crypto.mjs';
+import {probePurelymailSent} from '../src/communications/mail-sent-evidence.mjs';
 const MAILBOX='hello@devonakins.com';
 const response=(error,status)=>({status,body:{error}});
 const payloadCipher=env=>{try{return mailPayloadCipherFromEnv(env);}catch{return null;}};
@@ -28,6 +29,30 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
  try{
   if(url.pathname==='/api/mail/outbox'&&request.method==='GET')
    return {status:200,body:{outbox:await store.list(),sendingEnabled:mailSendingEnabled(env,connect)}};
+  // The probe cannot transmit, append, change flags or read MIME bodies. It
+  // requires a matching signed-owner, saved-draft-linked attempted receipt.
+  if(url.pathname==='/api/mail/outbox/sent-check'&&request.method==='POST'){
+   if(url.search)return response('invalid_mail_sent_check_request',400);
+   if(env.MAIL_ENABLED!=='true'||env.MAIL_IMAP_ADDRESS!==MAILBOX||
+      typeof env.MAIL_IMAP_PASSWORD!=='string'||!env.MAIL_IMAP_PASSWORD||
+      typeof connect!=='function'||!cipher)return response('mail_sent_check_not_configured',503);
+   const input=await readBody(request,256);
+   if(!input||Object.keys(input).length!==1||typeof input.deliveryId!=='string'||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deliveryId))
+    return response('invalid_mail_sent_check_request',400);
+   const receipt=await store.readReceipt(input.deliveryId);
+   if(!receipt?.draftId||!Number.isSafeInteger(receipt.draftRevision)||
+      !['claimed','accepted','uncertain'].includes(receipt.state))
+    return response('mail_sent_check_receipt_unavailable',409);
+   try{
+    const signal=AbortSignal.any([request.signal,AbortSignal.timeout(9000)]);
+    const result=await probePurelymailSent({
+     connect,password:env.MAIL_IMAP_PASSWORD,deliveryId:receipt.deliveryId,signal});
+    return {status:200,body:{deliveryId:receipt.deliveryId,...result}};
+   }catch{
+    return response('mail_sent_check_unavailable',502);
+   }
+  }
   if(url.pathname==='/api/mail/outbox/prepare'&&request.method==='POST'){
    if(!cipher)return response('mail_payload_encryption_not_configured',503);
    if(env.MAIL_DRAFTS_ENABLED!=='true')return response('mail_drafts_not_configured',503);
@@ -58,7 +83,7 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
    const receipt=await service().submit({deliveryId:input.deliveryId,signal});
    return {status:200,body:{receipt,deliveryConfirmed:false,automaticRetry:false}};
   }
-  if(['/api/mail/outbox','/api/mail/outbox/prepare','/api/mail/outbox/submit'].includes(url.pathname))
+  if(['/api/mail/outbox','/api/mail/outbox/prepare','/api/mail/outbox/submit','/api/mail/outbox/sent-check'].includes(url.pathname))
    return response('method_not_allowed',405);
   return response('not_found',404);
  }catch(error){
