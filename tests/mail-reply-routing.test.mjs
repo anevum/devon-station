@@ -44,7 +44,7 @@ test('ambiguous or malformed Reply-To blocks reply routing without blocking inco
  }
 });
 test('routing survives reconciliation, encrypted D1, fresh readers and owner-only inbox projection',async t=>{
- const f=fixture(t);await seed(f,await decode('Reply-To: private-replies@example.org\r\n'));
+ const f=fixture(t);await seed(f,await decode('Reply-To: private-replies@example.org\r\nMessage-ID: <parent@example.test>\r\nReferences: <root@example.test>\r\n'));
  const raw=f.db.prepare('SELECT * FROM comms_ro_messages').get();
  assert.equal(JSON.parse(raw.body_text).alg,'A256GCM');
  assert(!JSON.stringify(raw).includes('private-replies@example.org'));assert.equal(raw.flags_json,'[]');
@@ -52,6 +52,8 @@ test('routing survives reconciliation, encrypted D1, fresh readers and owner-onl
  assert.equal((await fresh.readSnapshot(scope)).records[0].replyTo,'private-replies@example.org');
  const inbox=await listReadOnlyInbox({registry,context:{installationId:'personal',principalId:'owner'},mailboxId:'hello',store:fresh});
  assert.equal(inbox.messages[0].replyTo,'private-replies@example.org');
+ assert.deepEqual(inbox.messages[0].replyContext,{parentId:'<parent@example.test>',references:['<root@example.test>','<parent@example.test>']});
+ assert(!JSON.stringify(raw).includes('<parent@example.test>'));
  await assert.rejects(listReadOnlyInbox({registry,context:{installationId:'personal',principalId:'other'},mailboxId:'hello',store:fresh}),e=>e.code==='mailbox_not_authorized');
  await assert.rejects(createD1MailStore(f.binding,{cipher:f.cipher,ownerSub:'other'}).readSnapshot(scope),e=>e.code==='mail_d1_invalid_snapshot');
 });

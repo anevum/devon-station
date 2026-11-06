@@ -18,6 +18,14 @@
     el.dataset.mailAction=action;
     return el;
   }
+  function copyReplyContext(value){
+    const id=x=>typeof x==='string'&&x.length<=254&&/^<[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.!#$%&'*+/=?^_`{|}~-]+>$/i.test(x)&&
+      x.slice(1,-1).split('@').every(p=>!p.startsWith('.')&&!p.endsWith('.')&&!p.includes('..'));
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==2||!id(value.parentId)||
+       !Array.isArray(value.references)||!value.references.length||value.references.length>20||
+       !value.references.every(id)||new Set(value.references).size!==value.references.length||value.references.at(-1)!==value.parentId)return null;
+    return Object.freeze({parentId:value.parentId,references:Object.freeze([...value.references])});
+  }
   function sanitizeResponse(value,offset=0){
     if(!value || typeof value!=='object' || !Array.isArray(value.messages) || value.messages.length>50 ||
        !Number.isSafeInteger(value.total) || value.total<0 || value.total>5000 ||
@@ -35,7 +43,10 @@
       if(Object.hasOwn(row,'replyTo')&&row.replyTo!==null&&
          (typeof row.replyTo!=='string'||row.replyTo.length>254||/[\x00-\x20\x7f]/.test(row.replyTo)))
         throw Error('invalid_mail_response');
+      const replyContext=Object.hasOwn(row,'replyContext')?copyReplyContext(row.replyContext):undefined;
+      if(replyContext===null)throw Error('invalid_mail_response');
       return Object.freeze({key:row.key,from:row.from,subject:row.subject,text:row.text,
+        ...(replyContext?{replyContext}:{}),
         ...(Object.hasOwn(row,'replyTo')?{replyTo:row.replyTo}:{}),
         timestamp:row.timestamp,flags:Object.freeze(row.flags.slice())});
     });
@@ -416,6 +427,7 @@
       if(!state.busy&&state.status?.draftsEnabled&&item)
         void globalThis.StationDrafts?.[action]?.({from:item.from,subject:item.subject,
           ...(Object.hasOwn(item,'replyTo')?{replyTo:item.replyTo}:{}),
+          ...(Object.hasOwn(item,'replyContext')?{replyContext:item.replyContext}:{}),
           ...(action==='forward'?{text:item.text,timestamp:item.timestamp}:{})});
       return;
     }
@@ -425,6 +437,7 @@
     }
   });
   globalThis.StationMail=Object.freeze({
+    copyReplyContext,
     mounted(section){
       if(section!=='mail'){if(state.phase==='syncing')state.stopRequested=true;return;}
       render();

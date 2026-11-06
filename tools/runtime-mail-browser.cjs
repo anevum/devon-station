@@ -82,6 +82,8 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    await send.click();assert.equal(provider.evidence.dataWrites,0,'dismissed confirmation must not send');
    confirm=true;await send.click();await page.getByText('Outbox state: accepted',{exact:false}).waitFor();
    assert.equal(provider.evidence.smtpConnections,1);assert.equal(provider.evidence.dataWrites,1);
+   assert.match(provider.evidence.lastWire,/In-Reply-To: <browser-parent@example.test>\r\n/);
+   assert.match(provider.evidence.lastWire,/References: <browser-root@example.test> <browser-parent@example.test>\r\n/);
    await page.reload();await page.getByRole('button',{name:'Inspect Outbox History',exact:true}).click();
    await page.locator('[data-outbox-state=accepted]').first().waitFor();
    assert.equal(await page.locator('.mail-message').count(),1);assert.equal(provider.evidence.dataWrites,1);
@@ -94,7 +96,7 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    // A different signed subject cannot list mail even with the same named email.
    const denied=await context.request.get(server.url+'/api/mail/inbox',{headers:{'Cf-Access-Jwt-Assertion':token('not-owner')}});assert.equal(denied.status(),403);
    assert.equal(server.externalCalls(),0);
-   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,replyDraft:true,replyToRouting:true,forwardDraft:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
+   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,replyDraft:true,replyToRouting:true,replyHeaders:true,forwardDraft:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
    await context.close();await server.close();server=null;
   }
   writeFileSync(join(__dirname,'mail-browser-results.json'),JSON.stringify({provider:'synthetic-only',results},null,2));console.log(JSON.stringify({provider:'synthetic-only',results}));

@@ -32,7 +32,7 @@ function setup({conflict=false,saveErrors=[],messages=[],createFailure=false}={}
    if(failure==='network')throw Error('simulated disconnection');
    if(failure)return reply({error:failure.code},failure.status);
    const body=JSON.parse(options.body);const row={...records[0],to:body.to,subject:body.subject,
-    body:body.body,revision:2};records[0]=row;return reply({draft:row});
+    body:body.body,...(body.replyContext?{replyContext:body.replyContext}:{}),revision:2};records[0]=row;return reply({draft:row});
   }
   if(path==='/api/mail/drafts/delete'){
    records.splice(0);return reply({deleted:true});
@@ -293,5 +293,25 @@ test('malformed routing from a client call cannot create a reply draft',async()=
  const x=setup({messages:[incoming]});await wait();
  for(const replyTo of ['a@example.org,b@example.org','a@example.org\nBcc:b@example.org',42,{}])
   await x.dom.window.StationDrafts.reply({...incoming,replyTo});
+ assert.equal(x.calls.filter(c=>c.method==='POST').length,0);x.dom.window.close();
+});
+
+const replyLink={parentId:'<parent@example.test>',references:['<root@example.test>','<parent@example.test>']};
+test('reply linkage survives explicit save/reload while a new forward stays unlinked',async()=>{
+ const x=setup({messages:[{...incoming,replyContext:replyLink}]});await wait();
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.match(x.doc.querySelector('#mail-drafts').textContent,/reference the original message/);
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ assert.deepEqual(x.calls.find(c=>c.path.endsWith('/save')).body.replyContext,replyLink);
+ x.doc.querySelector('[data-mail-draft-action="reload"]').click();await wait();
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="subject"]').value,'Re: A question');
+ x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const saves=x.calls.filter(c=>c.path.endsWith('/save'));assert.equal(saves.length,2);
+ assert.equal(saves[1].body.replyContext,undefined,'forward must not pretend to be a reply');x.dom.window.close();
+});
+test('malformed reply linkage from a client call is refused before creating a draft',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ await x.dom.window.StationDrafts.reply({...incoming,replyContext:{parentId:'<p@example.test>\r\nBcc: evil@example.test',references:[]}});
  assert.equal(x.calls.filter(c=>c.method==='POST').length,0);x.dom.window.close();
 });

@@ -27,7 +27,8 @@ function isDraft(item){
  typeof item.subject==='string'&&item.subject.length<=512&&
  typeof item.body==='string'&&item.body.length<=32768&&
  typeof item.updatedAt==='string'&&Number.isFinite(Date.parse(item.updatedAt))&&
- item.from==='hello@devonakins.com';
+ item.from==='hello@devonakins.com'&&(!Object.hasOwn(item,'replyContext')||
+  !!globalThis.StationMail?.copyReplyContext?.(item.replyContext));
 }
 async function api(url,body){
  const options={method:body===undefined?'GET':'POST',credentials:'same-origin',
@@ -336,6 +337,9 @@ async function draftFromMessage(message,mode){
   state.error='Reply-To is invalid or ambiguous. Start a new draft and choose the recipient yourself.';
   render();return;
  }
+ const replyContext=!forwarding&&Object.hasOwn(message,'replyContext')?
+  globalThis.StationMail?.copyReplyContext?.(message.replyContext):undefined;
+ if(!forwarding&&Object.hasOwn(message,'replyContext')&&!replyContext){state.error='Reply information is invalid. Start a new draft instead.';render();return;}
  let body='';
  if(forwarding){
   if(typeof message.text!=='string'||message.text.length>4096||
@@ -349,11 +353,12 @@ async function draftFromMessage(message,mode){
    '\n\n[Only the text shown in the reader is included. Attachments are not forwarded.]';
  }
  if(await create()!==true)return;
- state.working={...state.working,to:forwarding?[]:[recipient],subject:title,body};
+ state.working={...state.working,to:forwarding?[]:[recipient],subject:title,body,
+  ...(replyContext?{replyContext}:{})};
  state.dirty=true;
  state.notice=forwarding?'Forwarded text preview added. Enter a recipient, review the text, then save. Attachments are not included. Nothing was sent.':
   (recipient!==from?'Reply addressed to the message Reply-To address. ':'Reply addressed to the message sender. ')+
-  'Write your message, then save the draft. Nothing was sent.';
+  (replyContext?'This reply will reference the original message. ':'')+'Write your message, then save the draft. Nothing was sent.';
  render();
  const input=host()?.querySelector('[data-mail-draft-field="'+(forwarding?'to':'body')+'"]');
  input?.focus();input?.scrollIntoView?.({block:'center',behavior:'instant'});
@@ -364,7 +369,8 @@ async function save(){
  state.busy=true;state.error=null;state.notice=null;
  const d=state.working;
  if(!state.pendingSave)state.pendingSave={
-  id:d.id,revision:d.revision,operationId:uuid(),to:d.to,subject:d.subject,body:d.body
+  id:d.id,revision:d.revision,operationId:uuid(),to:d.to,subject:d.subject,body:d.body,
+  ...(d.replyContext?{replyContext:d.replyContext}:{})
  };
  const pending=state.pendingSave;
  render();
@@ -412,6 +418,7 @@ async function remove(){
 function sameSavedDraft(stored,working){
  return stored.id===working.id&&stored.revision===working.revision&&
   stored.subject===working.subject&&stored.body===working.body&&
+  JSON.stringify(stored.replyContext)===JSON.stringify(working.replyContext)&&
   JSON.stringify(stored.to)===JSON.stringify(working.to);
 }
 function showSendStatus(s){
@@ -426,7 +433,8 @@ async function prepareSend(){
  if(state.busy||!state.outgoingEnabled||state.pendingSend||state.dirty||!state.working)return;
  const draft=state.items.find(d=>sameSavedDraft(d,state.working));
  if(!draft||!draft.to.length)return;
- const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body};
+ const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body,
+  ...(draft.replyContext?{replyContext:draft.replyContext}:{})};
  state.busy=true;state.error=null;state.notice=null;render();
  // Re-read the signed owner's durable outbox before allocating a new delivery ID.
  // Avoid a second preparation after a reload, even if the draft revision changed.

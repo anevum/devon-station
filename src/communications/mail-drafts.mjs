@@ -1,5 +1,6 @@
 // COMMS-12: owner-scoped D1 drafts. No SMTP, autonomous send, or browser-held secrets.
 // SQL parameters are bound, and the owner subject is supplied only by signed Access.
+import {validateReplyContext} from './mail-core.mjs';
 const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const MAIL=/^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
 // One canonical recipient grammar for D1 drafts, MIME preparation and SMTP envelope.
@@ -36,7 +37,11 @@ export function validateDraftPayload(value){
      throw error('invalid_mail_draft_recipient',400);
    seen.add(address.toLowerCase());return address;
  });
- return Object.freeze({to,subject:value.subject,body:value.body});
+ let reply={};
+ if(Object.hasOwn(value,'replyContext')){
+  try{reply={replyContext:validateReplyContext(value.replyContext)};}catch{throw error('invalid_mail_draft_payload',400);}
+ }
+ return Object.freeze({to,subject:value.subject,body:value.body,...reply});
 }
 function mapRow(row){
  if(!row||typeof row.draft_id!=='string'||!UUID.test(row.draft_id)||
@@ -47,10 +52,11 @@ function mapRow(row){
  let to;
  try{to=JSON.parse(row.recipients_json);}catch{throw error('mail_draft_storage_invalid',502);}
  let payload;
- try{payload=validateDraftPayload({to,subject:row.subject,body:row.body_text});}
+ try{payload=validateDraftPayload({to,subject:row.subject,body:row.body_text,
+  ...(Object.hasOwn(row,'replyContext')?{replyContext:row.replyContext}:{})});}
  catch{throw error('mail_draft_storage_invalid',502);}
  return Object.freeze({id:row.draft_id,revision:row.revision,to:payload.to,subject:payload.subject,
-  body:payload.body,updatedAt:row.updated_at,from:'hello@devonakins.com'});
+  body:payload.body,...(payload.replyContext?{replyContext:payload.replyContext}:{}),updatedAt:row.updated_at,from:'hello@devonakins.com'});
 }
 const SELECT='SELECT draft_id,revision,recipients_json,subject,body_text,updated_at,last_operation FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND draft_id=?';
 const INSERT='INSERT INTO comms_mail_drafts (installation_id,mailbox_id,owner_sub,draft_id,revision,recipients_json,subject,body_text,created_at,updated_at,last_operation) SELECT ?,?,?,?,1,\'[]\',\'\',\'\',?,?,? WHERE (SELECT COUNT(*) FROM comms_mail_drafts WHERE installation_id=? AND mailbox_id=? AND owner_sub=?)<20 ON CONFLICT(installation_id,mailbox_id,owner_sub,draft_id) DO NOTHING';
@@ -67,9 +73,13 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
   if(row.subject!==''||row.body_text!=='')throw error('mail_draft_storage_invalid',502);
   const payload=await cipher.open(row.recipients_json,['draft',...s,row.draft_id]);
   const valid=validateDraftPayload(payload);
-  return mapRow({...row,recipients_json:JSON.stringify(valid.to),subject:valid.subject,body_text:valid.body});
+  return mapRow({...row,recipients_json:JSON.stringify(valid.to),subject:valid.subject,body_text:valid.body,
+   ...(valid.replyContext?{replyContext:valid.replyContext}:{})});
  };
- const encode=(s,id,payload)=>cipher?cipher.seal(payload,['draft',...s,id]):JSON.stringify(payload.to);
+ const encode=(s,id,payload)=>{
+  if(!cipher&&payload.replyContext)throw error('invalid_mail_draft_payload',400);
+  return cipher?cipher.seal(payload,['draft',...s,id]):JSON.stringify(payload.to);
+ };
  const get=async(s,id)=> {
    try{return await db.prepare(SELECT).bind(...s,id).first();}
    catch{throw error('mail_draft_storage_failed',502);}
@@ -98,9 +108,9 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
    if(!row)throw error('mail_draft_limit',409);
    return decode(s,row);
   },
-  async save(scope,{id,revision,operationId,to,subject,body}={}){
+  async save(scope,{id,revision,operationId,to,subject,body,replyContext}={}){
    const s=validScope(scope),key=validId(id),rev=validRevision(revision),operation=validId(operationId);
-   const payload=validateDraftPayload({to,subject,body}),at=now();
+   const payload=validateDraftPayload({to,subject,body,...(replyContext!==undefined?{replyContext}:{})}),at=now();
    const encoded=await encode(s,key,payload);
    let result;
    try{result=await db.prepare(protectLinkedOutbox?UPDATE_SAFE:UPDATE)
@@ -112,7 +122,8 @@ export function createD1DraftStore(db,{now=()=>new Date().toISOString(),protectP
    if(row.last_operation===operation && row.revision===rev+1){
      const stored=await decode(s,row);
      if(JSON.stringify(stored.to)!==JSON.stringify(payload.to)||
-        stored.subject!==payload.subject||stored.body!==payload.body)
+        stored.subject!==payload.subject||stored.body!==payload.body||
+        JSON.stringify(stored.replyContext)!==JSON.stringify(payload.replyContext))
        throw error('mail_draft_conflict',409);
      return stored;
    }

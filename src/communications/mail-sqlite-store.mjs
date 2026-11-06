@@ -1,6 +1,6 @@
 // COMMS-05: isolated SQLite store for a scoped read-only mail index.
 // Caller owns database and applies schema explicitly. No credentials or network.
-import {incomingReplyTo} from './mail-core.mjs';
+import {incomingReplyTo,validateReplyContext} from './mail-core.mjs';
 const ID = /^[a-z][a-z0-9-]{0,62}$/;
 const FLAGS = new Set(['seen', 'answered', 'flagged', 'draft']);
 const fail = (code, status = 400) => { const e = new Error(code); e.code = code; e.status = status; throw e; };
@@ -32,10 +32,12 @@ function validateNext(scope, next) {
         Object.hasOwn(row, 'html') || Object.hasOwn(row, 'raw') || Object.hasOwn(row, 'attachments')) fail('invalid_mail_snapshot');
     seen.add(row.key);
     if(Object.hasOwn(row,'replyTo'))incomingReplyTo(row.replyTo);
+    if(Object.hasOwn(row,'replyContext'))validateReplyContext(row.replyContext);
     return [scope.installationId, scope.mailboxId, row.uidValidity, row.uid, row.from, row.subject,
       row.text, row.timestamp, JSON.stringify([...new Set(row.flags)])];
   });
-  return { cursor, rows, replyTargets:next.records.map(row=>Object.hasOwn(row,'replyTo')?{replyTo:row.replyTo}:{}) };
+  return { cursor, rows, privateMetadata:next.records.map(row=>({...(Object.hasOwn(row,'replyTo')?{replyTo:row.replyTo}:{}),
+    ...(Object.hasOwn(row,'replyContext')?{replyContext:row.replyContext}:{})})) };
 }
 export const MAIL_SQLITE_SCHEMA = `
 CREATE TABLE IF NOT EXISTS comms_ro_mailboxes (
@@ -90,8 +92,8 @@ export function createSqliteMailStore(db) {
     async commitSnapshot({scope, expectedRevision, next} = {}) {
       const [installationId, mailboxId] = scopeKey(scope);
       if (!integer(expectedRevision) || expectedRevision > 1000000000) fail('invalid_mail_revision');
-      const {cursor, rows,replyTargets} = validateNext(scope, next);
-      if(replyTargets.some(row=>Object.hasOwn(row,'replyTo')))fail('mail_reply_metadata_requires_encryption');
+      const {cursor, rows,privateMetadata} = validateNext(scope, next);
+      if(privateMetadata.some(row=>Object.keys(row).length))fail('mail_reply_metadata_requires_encryption');
       let active = false;
       try {
         db.exec('BEGIN IMMEDIATE'); active = true;

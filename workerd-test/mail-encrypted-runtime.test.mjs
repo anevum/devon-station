@@ -21,7 +21,7 @@ test('workerd '+compatibilityDate+': native WebCrypto encrypts inbox/draft/outbo
   const expected={recovered:true,revision:2,inbox:1,state:'queued'};assert.deepEqual(await seeded.json(),expected);
   for(const [table,column] of [['comms_mail_drafts','recipients_json'],['comms_ro_messages','body_text'],['comms_outbox','payload_json']]){
    const row=await db.prepare('SELECT '+column+' AS payload FROM '+table).first();
-   assert.equal(JSON.parse(row.payload).alg,'A256GCM');assert.doesNotMatch(row.payload,/confidential|synthetic-recipient|synthetic-author|private-reply-target/);
+   assert.equal(JSON.parse(row.payload).alg,'A256GCM');assert.doesNotMatch(row.payload,/confidential|synthetic-recipient|synthetic-author|private-reply-target|native-parent/);
   }
   await mf.dispose();mf=new Miniflare(config);
   assert.deepEqual(await (await mf.dispatchFetch('http://localhost/read')).json(),expected);
