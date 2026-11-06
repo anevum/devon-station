@@ -8,6 +8,8 @@ on:
       - 'tests/comms-acceptance-upload.test.mjs'
       - 'tools/comms-acceptance-readback.mjs'
       - 'tests/comms-acceptance-readback.test.mjs'
+      - 'tools/comms-migration-readiness.mjs'
+      - 'tests/comms-migration-readiness.test.mjs'
 permissions:
   contents: read
 concurrency:
@@ -30,3 +32,5 @@ jobs:
         run: node --test tests/comms-acceptance-upload.test.mjs
       - name: Test inactive readback without remote requests
         run: node --test tests/comms-acceptance-readback.test.mjs
+      - name: Test acceptance migration metadata without D1 writes
+        run: node --test tests/comms-migration-readiness.test.mjs
