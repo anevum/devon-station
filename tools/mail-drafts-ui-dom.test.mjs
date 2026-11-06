@@ -194,3 +194,62 @@ test('expired-session reply creation never claims a saved reply or submits mail'
  x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
  assert.equal(x.calls.filter(c=>c.method==='POST').length,1,'unconfirmed create needs explicit resolution');x.dom.window.close();
 });
+
+test('forward opens a recipient-free draft with a labeled inert text preview and requires explicit save',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ x.doc.querySelector('[data-mail-action="forward"]').click();
+ x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/create')).length,1);
+ const field=name=>x.doc.querySelector('[data-mail-draft-field="'+name+'"]');
+ assert.equal(field('to').value,'');assert.equal(x.doc.activeElement,field('to'));
+ assert.equal(field('subject').value,'Fwd: A question');
+ assert.match(field('body').value,/Forwarded text preview/);
+ assert(field('body').value.includes(incoming.text));
+ assert.match(field('body').value,/Attachments are not forwarded/);
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/save')).length,0);
+ assert.equal(x.doc.querySelectorAll('#station-mail img,#station-mail script').length,0);
+ field('to').value='chosen@example.org';field('to').dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const saved=x.calls.find(c=>c.path.endsWith('/save')).body;
+ assert.deepEqual(saved.to,['chosen@example.org']);assert.equal(saved.subject,'Fwd: A question');
+ assert(saved.body.includes(incoming.text));assert.equal(x.calls.filter(c=>/outbox|smtp|sync/.test(c.path)).length,0);
+ x.dom.window.close();
+});
+test('forward preserves unsaved reply edits instead of replacing the recipient or body',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ const body=x.doc.querySelector('[data-mail-draft-field="body"]');body.value='Answer in progress';
+ body.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+ x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/create')).length,1);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]').value,'Answer in progress');
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="to"]').value,incoming.from);
+ x.dom.window.close();
+});
+test('existing Fw/Fwd subjects and shortened preview notices survive without implying full content',async()=>{
+ for(const subject of ['FW: Test','Fwd: Test']){
+  const message={...incoming,subject,text:'Partial message\n[Message shortened. The full message remains with your email provider.]'};
+  const x=setup({messages:[message]});await wait();
+  x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+  assert.equal(x.doc.querySelector('[data-mail-draft-field="subject"]').value,subject);
+  assert(x.doc.querySelector('[data-mail-draft-field="body"]').value.includes(message.text));x.dom.window.close();
+ }
+});
+test('invalid forwarding content or metadata is refused before allocating a draft',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ for(const patch of [{text:'x'.repeat(4097)},{text:'bad\u0000body'},{text:'bad\u202ebody'},
+  {timestamp:'invalid'},{timestamp:null},{from:'sender@example.org\nOther: value'},
+  {subject:'x'.repeat(512)}]){
+  await x.dom.window.StationDrafts.forward({...incoming,...patch});
+ }
+ assert.equal(x.calls.filter(c=>c.method==='POST').length,0);x.dom.window.close();
+});
+
+test('expired-session forwarding creates no editable preview and never sends',async()=>{
+ const x=setup({messages:[incoming],createFailure:true});await wait();
+ x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+ assert.match(x.doc.querySelector('#mail-drafts').textContent,/Owner session expired/);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]'),null);
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/save')||/outbox|smtp/.test(c.path)).length,0);
+ x.dom.window.close();
+});

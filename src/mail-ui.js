@@ -179,6 +179,10 @@
       if(state.status?.draftsEnabled&&globalThis.StationDrafts?.reply){
         const reply=button('Reply to sender','reply');
         reply.disabled=state.busy;reader.append(reply);
+        if(globalThis.StationDrafts?.forward){
+          const forward=button('Forward text','forward');
+          forward.disabled=state.busy;reader.append(forward);
+        }
       }
       const text=node('div','mail-body',item.text);
       text.setAttribute('aria-label','Plain text message body');
@@ -401,10 +405,11 @@
     if(action==='catchup'){void sync(10);return;}
     if(action==='reload'){void start();return;}
     if(action==='stop'){state.stopRequested=true;render();return;}
-    if(action==='reply'){
+    if(action==='reply'||action==='forward'){
       const item=state.items.find(x=>x.key===state.selected);
       if(!state.busy&&state.status?.draftsEnabled&&item)
-        void globalThis.StationDrafts?.reply?.({from:item.from,subject:item.subject});
+        void globalThis.StationDrafts?.[action]?.({from:item.from,subject:item.subject,
+          ...(action==='forward'?{text:item.text,timestamp:item.timestamp}:{})});
       return;
     }
     if(action==='select'){
