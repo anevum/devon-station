@@ -3,16 +3,18 @@
 // this module supplies no data-write SQL, migration execution or credentials.
 export const ACCEPTANCE_MAIL_DB_ID='efb86ffd-f422-43af-88e5-7f93af91eda2';
 
+// Independently SHA-256-checked against exact source bytes of the approved
+// PR #36 commit. Names alone cannot detect a tampered/incorrect migration ledger.
 const expectedMigrations=Object.freeze([
- 'worker/migrations/0004-comms-ro-mail.sql',
- 'worker/migrations/0005-comms-drafts.sql',
- 'worker/migrations/0006-comms-outbox.sql',
- 'worker/migrations/0007-comms-draft-outbox-lineage.sql',
- 'worker/migrations/0008-comms-one-delivery-per-draft.sql'
-]);
+ ['worker/migrations/0004-comms-ro-mail.sql','025a0397c98b90a4566e777e3851c58cb91478f84af02389459bf9bd59486e48'],
+ ['worker/migrations/0005-comms-drafts.sql','f418547e7aa89978a2fd3815ee98492f1489a3476e39f627eb0e8a90afcc3e7d'],
+ ['worker/migrations/0006-comms-outbox.sql','e13a0b179343592b8592373634dcb54c4147a663497da7b7292f538be73b0864'],
+ ['worker/migrations/0007-comms-draft-outbox-lineage.sql','a4953d41ee4d1a93974ccd08c2e058fe3a2a32db745d52840778ac2cdeae17c1'],
+ ['worker/migrations/0008-comms-one-delivery-per-draft.sql','adbf26a703aad288ace491864f2107e215a349c665bbe5968a327d7ff55baeb9']
+].map(([name,sha256])=>Object.freeze({name,sha256})));
 
 export const MIGRATION_READINESS_SQL=Object.freeze({
- ledger:'SELECT name FROM station_schema_migrations ORDER BY name',
+ ledger:'SELECT name, sha256 FROM station_schema_migrations ORDER BY name',
  objects:"SELECT type, name, sql FROM sqlite_master WHERE name IN ('comms_outbox','comms_outbox_saved_draft_revision','comms_outbox_saved_draft_once') OR name LIKE 'comms_sent_archive%' OR name LIKE 'comms_archive_%' ORDER BY name",
  columns:'PRAGMA table_info(comms_outbox)',
  counts:`SELECT COUNT(*) AS total,
@@ -54,10 +56,11 @@ const safeRows=value=>{
 };
 
 export function assessAcceptanceMigrationReadiness({ledger,objects,columns,counts}){
- const migrations=safeRows(ledger).map(x=>x.name);
+ const migrations=safeRows(ledger);
  if(migrations.length!==expectedMigrations.length||
-    migrations.some((x,i)=>x!==expectedMigrations[i]))
-  refuse('migration ledger incomplete, duplicated or already includes 0009');
+    migrations.some((row,i)=>row.name!==expectedMigrations[i].name||
+      row.sha256!==expectedMigrations[i].sha256))
+  refuse('migration ledger name or source checksum differs from reviewed prerequisites');
  const schema=safeRows(objects);
  if(schema.length!==3||schema.some(x=>!Object.hasOwn(indexDefinitions,x.name)&&x.name!=='comms_outbox')||
     new Set(schema.map(x=>x.name)).size!==3)
