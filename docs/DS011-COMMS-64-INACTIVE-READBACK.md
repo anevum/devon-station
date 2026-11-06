@@ -1,3 +1,20 @@
+# Proposed next candidate pins — COMMS-68
+
+Pending explicit owner approval; this draft does not authorize a release.
+
+- Application PR #44 source: `be6644f58297dedfcd1c1d60ec2aef17e64b0f35`.
+- Independently rebuilt 44-module candidate SHA-256: `07491e2aa5aa9dab75d8a1ce211645c70d367011310e481e4febd811bc764aa1`.
+- Exact-head CI: [server](https://github.com/devonalanakins/devon-station/actions/runs/42306610375), [foundation](https://github.com/devonalanakins/devon-station/actions/runs/42306610374), [release source checks](https://github.com/devonalanakins/devon-station/actions/runs/42306610359) all passed.
+- Initial Sent is accepted outbox receipt history and on-demand encrypted contents; no migration 0009 is needed. Application/schema/Access/provider/device requirements are documented in the [candidate record](https://github.com/devonalanakins/devon-station/blob/be6644f58297dedfcd1c1d60ec2aef17e64b0f35/docs/DS011-COMMS-68-INTEGRATED-EMAIL-CANDIDATE.md).
+
+The draft release tooling pins this new source/digest and checks PR #44 head, while the existing version-15 readback remains explicitly anchored to the older approved PR #36 source. Both are deliberately distinct. Trusted main's active workflow remains unchanged until separately approved integration. Candidate-side checks stay unprivileged; the credential-bearing job still executes trusted source, checks exact source/digest before credentials, and can only upload an inactive acceptance version. No traffic or real database changes, Access changes, or email are authorized. Earlier approval for the old version was already exercised and cannot authorize this new one.
+
+Before any upload, independently inspect protected main and the acceptance environment's approval/branch restrictions, finish required private recovery evidence, and obtain scoped authorization to integrate this release PR and perform one inactive upload. After upload, verify the new source/version/bindings while confirming both traffic anchors unchanged. The old readback cannot validate a new UUID: do not silently replace its baseline. Acceptance activation, provider actions and production remain separate gates.
+
+The historical instructions below describe version 15 only; their original source/checksum pins remain historical evidence.
+
+---
+
 # DS011-COMMS-64 — Inactive acceptance version readback
 
 Date: November 6, 2026. Source-only readback tooling; **no migration, traffic activation, SMTP send or production release**.

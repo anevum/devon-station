@@ -1,7 +1,7 @@
 // DS011 COMMS-64: read-only evidence check for the one approved, inactive
 // acceptance version. No POST, secret readback, migration, activation or SMTP.
 import {
- APPROVED_RELEASE,preflightAcceptance,verifyAcceptanceSettings,
+ preflightAcceptance,verifyAcceptanceSettings,
  verifyBindingParity,verifyDatabaseIsolation
 } from './comms-acceptance-upload.mjs';
 
@@ -9,11 +9,13 @@ const UUID=/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 const ACCOUNT=/^[0-9a-f]{32}$/;
 const REFUSE=reason=>{throw new Error('DS011 inactive readback refused: '+reason);};
 
+// Historical version 15 retains its original PR #36 source even when the next
+// proposed uploader pin changes. Never relabel the old version as a new build.
 // Baseline is deliberately immutable. A legitimate rollout or config change
 // requires fresh independent review, not silently re-pinning to the new state.
 export const INACTIVE_ANCHORS=Object.freeze({
  versionId:'523569b4-38d9-4cab-acbd-e84dd22a59aa',
- sourceCommit:APPROVED_RELEASE.sourceCommit,
+ sourceCommit:'bba373f35f3cc913447e72fcdfff589cd6f3a073',
  acceptanceDeploymentId:'99577640-1f02-446f-8d38-88f723f51f82',
  acceptanceServingVersionId:'c31f8bd4-283d-457c-9779-87605927eec4',
  productionDeploymentId:'890cc9d9-533b-4b9a-b326-26a7c4f88402',

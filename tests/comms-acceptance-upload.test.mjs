@@ -446,3 +446,15 @@ test('actual privileged CLI rejects forged release bytes before credentials or p
  assert.equal(run.stdout,'');
  assert.doesNotMatch(run.stderr,/missing exact upload authorization|Cloudflare/);
 });
+
+
+test('next-candidate workflow targets PR 44 and preserves the prior inactive version source',()=>{
+ const workflow=readFileSync(new URL('../.github/workflows/mail-acceptance-version-only.yml',import.meta.url),'utf8');
+ assert.match(workflow,/pulls\/44/);assert.doesNotMatch(workflow,/pulls\/36/);
+ const prior='bba373f35f3cc913447e72fcdfff589cd6f3a073';
+ const {manifest,bytes}=fakeBundle();
+ assert.throws(()=>verifyApprovedRelease({manifest:{...manifest,sourceCommit:prior},candidateBytes:bytes,expectedSha:prior}),/immutable owner-approved source SHA/);
+ const readback=readFileSync(new URL('../tools/comms-acceptance-readback.mjs',import.meta.url),'utf8');
+ assert(readback.includes("sourceCommit:'"+prior+"'"));
+ assert(!readback.includes('sourceCommit:APPROVED_RELEASE.sourceCommit'));
+});

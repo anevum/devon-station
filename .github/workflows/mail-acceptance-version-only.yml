@@ -3,7 +3,7 @@ on:
   workflow_dispatch:
     inputs:
       source_sha:
-        description: Approved SHA bba373f35f3cc913447e72fcdfff589cd6f3a073 only
+        description: Candidate SHA (requires owner approval) be6644f58297dedfcd1c1d60ec2aef17e64b0f35 only
         required: true
         type: string
       operation:
@@ -30,8 +30,8 @@ jobs:
           EXPECTED_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
-          test "$EXPECTED_SHA" = 'bba373f35f3cc913447e72fcdfff589cd6f3a073'
-          PR_HEAD="$(gh api "repos/$GITHUB_REPOSITORY/pulls/36" --jq '.head.sha')"
+          test "$EXPECTED_SHA" = 'be6644f58297dedfcd1c1d60ec2aef17e64b0f35'
+          PR_HEAD="$(gh api "repos/$GITHUB_REPOSITORY/pulls/44" --jq '.head.sha')"
           test "$PR_HEAD" = "$EXPECTED_SHA"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -110,8 +110,8 @@ jobs:
           APPROVED_SHA: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
-          test "$APPROVED_SHA" = 'bba373f35f3cc913447e72fcdfff589cd6f3a073'
-          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/36" --jq '.head.sha')" = "$APPROVED_SHA"
+          test "$APPROVED_SHA" = 'be6644f58297dedfcd1c1d60ec2aef17e64b0f35'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/44" --jq '.head.sha')" = "$APPROVED_SHA"
       - name: Upload inactive Cloudflare version ONLY (no deployment)
         env:
           DS011_ALLOW_ACCEPTANCE_UPLOAD: 'true'
