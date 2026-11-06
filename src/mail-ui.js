@@ -5,7 +5,7 @@
   const OPEN_DIAGNOSTIC_CODES=new Set(['imap_tls_connect_failed','imap_greeting_failed','imap_login_failed','imap_login_rejected','imap_session_cancelled']);
   const SYNC_DIAGNOSTIC_CODES=new Set([...OPEN_DIAGNOSTIC_CODES, "imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed", "mail_sender_address_invalid", "mime_wire_limit", "mime_parse_failed", "mime_invalid_from", "mime_subject_limit", "mime_html_conversion_failed", "mime_body_index_limit", "mail_sync_unclassified"]);
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
-  const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
+  const state={search:'',phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
   function node(tag,className,text){
     const el=document.createElement(tag);
     if(className)el.className=className;
@@ -81,6 +81,20 @@
         response.status===409?'mail_inbox_changed':'mail_request_failed');
     return response.json();
   }
+  function filterLoadedPage(root){
+    const query=state.search.trim().toLowerCase();
+    let visible=0;
+    for(const row of root.querySelectorAll('.mail-message')){
+      const item=state.items.find(message=>message.key===row.dataset.mailKey);
+      const match=!!item&&(!query||[item.from,item.subject,item.text]
+        .some(value=>value.toLowerCase().includes(query)));
+      row.hidden=!match;if(match)visible++;
+    }
+    const summary=root.querySelector('[data-mail-search-summary]');
+    if(summary)summary.textContent=query?
+      visible+' of '+state.items.length+' loaded messages match. Other pages are not searched.':
+      'Search is limited to the currently loaded inbox page.';
+  }
   function render(){
     const root=document.getElementById('station-mail');
     if(!root)return;
@@ -154,6 +168,17 @@
     listing.append(node('div','mail-list-title',state.status?.configured?
       'Inbox · '+state.total+' indexed':'Inbox · not connected'));
     if(state.status?.configured){
+      const label=node('label','mail-page-search-label','Find on this page');
+      const search=node('input','mail-page-search');
+      search.type='search';search.maxLength=120;search.autocomplete='off';
+      search.placeholder='Sender, subject or message text';search.value=state.search;
+      label.append(search);listing.append(label);
+      const summary=node('p','mail-page-search-summary');
+      summary.dataset.mailSearchSummary='true';listing.append(summary);
+      search.addEventListener('input',()=>{
+        state.search=search.value.slice(0,120);
+        filterLoadedPage(root);
+      });
       const pages=node('nav','mail-pagination');pages.setAttribute('aria-label','Inbox pages');
       const newer=button('Newer','newer'),older=button('Older','older');
       newer.disabled=state.busy||state.stale||state.offset===0;
@@ -211,6 +236,7 @@
     body.append(listing,reader);
     root.append(body);
     if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true,state.status?.outboxEnabled===true);
+    filterLoadedPage(root);
   }
   function diagnostic(phase,summary,items=[]){
     state.diagnostic={phase,summary,items};render();
