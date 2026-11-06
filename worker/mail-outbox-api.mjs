@@ -29,6 +29,37 @@ export async function handleMailOutboxApi({request,url,user,env,readBody,registr
  try{
   if(url.pathname==='/api/mail/outbox'&&request.method==='GET')
    return {status:200,body:{outbox:await store.list(),sendingEnabled:mailSendingEnabled(env,connect)}};
+  // Receipt-backed Sent is usable before migration 0009. Reads never initiate
+  // provider I/O, enqueue, claim, resend, or change any record.
+  const acceptedPath='/api/mail/outbox/accepted';
+  if([acceptedPath,acceptedPath+'/page',acceptedPath+'/view'].includes(url.pathname)){
+   if(url.search)return response('invalid_mail_history_request',400);
+   const list=url.pathname===acceptedPath,view=url.pathname.endsWith('/view');
+   if(request.method!==(list?'GET':'POST'))return response('method_not_allowed',405);
+   if(!cipher)return response('mail_sent_history_unavailable',503);
+   let input;
+   if(!list){
+    input=await readBody(request,320);
+    if(!input||typeof input!=='object'||Array.isArray(input)||Object.keys(input).length!==1)
+     return response('invalid_mail_history_request',400);
+    const before=input.before;
+    if(view?(!Object.hasOwn(input,'deliveryId')||typeof input.deliveryId!=='string'||
+       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(input.deliveryId)):
+      (!before||typeof before!=='object'||Array.isArray(before)||Object.keys(before).length!==2||
+       typeof before.acceptedAt!=='string'||before.acceptedAt.length>40||!Number.isFinite(Date.parse(before.acceptedAt))||
+       typeof before.deliveryId!=='string'||
+       !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(before.deliveryId)))
+     return response('invalid_mail_history_request',400);
+   }
+   try{
+    if(view){
+     const copy=await store.readAccepted(input.deliveryId);
+     return copy?{status:200,body:{copy,providerIndependent:true}}:
+      response('mail_sent_history_not_found',404);
+    }
+    return {status:200,body:{...await store.listAccepted(list?null:input.before),providerIndependent:true}};
+   }catch{return response('mail_sent_history_unavailable',503);}
+  }
   // Owner-only, provider-independent archive access; never touches SMTP/IMAP.
   // Missing migration fails closed, and no message contents enter list responses.
   if(url.pathname==='/api/mail/outbox/archive'&&request.method==='GET'){

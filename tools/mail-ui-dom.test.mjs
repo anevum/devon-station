@@ -521,3 +521,92 @@ test('read-only login probe renders fixed open stages and ignores arbitrary upst
   }finally{x.dom.window.close();}
  }
 });
+
+test('page-local inbox search only filters cached message rows without making network requests',async()=>{
+ const first={...sample,key:'personal/hello/7/1',from:'alice@example.test',subject:'Daily report',text:'Morning notes'};
+ const second={...sample,key:'personal/hello/7/2',from:'billing@example.test',subject:'Invoice <script>ignore</script>',text:'Payment summary'};
+ const x=await ready(()=>reply({total:2,messages:[first,second]}));
+ try{
+  const initialCalls=x.calls.length;
+  const input=x.doc.querySelector('.mail-page-search');
+  assert(input);assert.match(x.doc.querySelector('[data-mail-search-summary]').textContent,/currently loaded inbox page/);
+  input.value='iNvOiCe';input.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  const visible=[...x.doc.querySelectorAll('.mail-message:not([hidden])')];
+  assert.equal(visible.length,1);assert.equal(visible[0].dataset.mailKey,second.key);
+  assert.match(x.doc.querySelector('[data-mail-search-summary]').textContent,/1 of 2 loaded messages match/);
+  assert.equal(x.calls.length,initialCalls,'search must be entirely local');
+  visible[0].click();
+  assert.equal(x.doc.querySelector('.mail-body').textContent,second.text);
+  assert.equal(x.doc.querySelectorAll('script,img,iframe').length,0,'message text remains inert');
+  const clear=x.doc.querySelector('.mail-page-search');
+  clear.value='';clear.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  assert.equal(x.doc.querySelectorAll('.mail-message:not([hidden])').length,2);
+  assert.equal(x.doc.querySelector('.mail-body').textContent,second.text,'selected reader remains unchanged');
+  assert.equal(x.calls.length,initialCalls);
+ }finally{x.dom.window.close();}
+});
+test('local search retains query across explicit paging and does not remount private draft inputs',async()=>{
+ const messages=Array.from({length:50},(_,i)=>({...sample,key:'personal/hello/7/'+(i+1),subject:'Page one '+i,text:'Only on this page'}));
+ const second={...sample,key:'personal/hello/7/51',subject:'Second page item',text:'unique-page-needle'};
+ const x=load(path=>{
+  if(path==='/api/mail/status')return reply({address:'hello@devonakins.com',configured:true,draftsEnabled:true});
+  if(path.includes('offset=50'))return reply({total:51,offset:50,messages:[second]});
+  return reply({total:51,messages});
+ });
+ try{
+  await wait();
+  const editor=x.doc.querySelector('#mail-drafts');
+  const dirty=x.doc.createElement('textarea');dirty.value='unsaved private message';editor.append(dirty);
+  const initialCalls=x.calls.length;
+  const search=x.doc.querySelector('.mail-page-search');
+  search.value='unique-page-needle';search.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  assert.equal(x.calls.length,initialCalls);
+  assert.equal(x.doc.querySelectorAll('.mail-message:not([hidden])').length,0);
+  assert.equal(x.doc.querySelector('[data-mail-action="older"]').disabled,false);
+  assert.equal(x.doc.querySelector('#mail-drafts textarea'),dirty,'local search cannot remount dirty draft');
+  assert.equal(dirty.value,'unsaved private message');
+  click(x,'older');await wait();
+  assert.equal(x.doc.querySelector('.mail-page-search').value,'unique-page-needle');
+  assert.equal(x.doc.querySelectorAll('.mail-message:not([hidden])').length,1);
+  assert.equal(x.doc.querySelector('.mail-body').textContent,second.text);
+  assert.equal(x.calls.length,3,'only explicit pagination fetches another page');
+ }finally{x.dom.window.close();}
+});
+
+test('search conceals unmatched reader, disables stale reply/forward handoff and restores selection on clear',async()=>{
+ const first={...sample,key:'personal/hello/7/1',from:'alice@example.test',subject:'Daily report',text:'Morning notes'};
+ const second={...sample,key:'personal/hello/7/2',from:'billing@example.test',subject:'Invoice',text:'Payment summary'};
+ const x=load(path=>path==='/api/mail/status'?
+  reply({address:'hello@devonakins.com',configured:true,draftsEnabled:true}):
+  reply({total:2,messages:[first,second]}));
+ let replied=0,forwarded=0;
+ try{
+  await wait();
+  x.dom.window.StationDrafts={reply:()=>{replied++;},forward:()=>{forwarded++;},mount:()=>{}};
+  x.dom.window.StationMail.mounted('mail');
+  assert.equal(x.doc.querySelector('.mail-body').textContent,first.text);
+  const initialCalls=x.calls.length;
+  const input=x.doc.querySelector('.mail-page-search');
+  input.value='invoice';input.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  assert.equal(x.doc.querySelector('[data-mail-reader-content]').hidden,true);
+  assert.equal(x.doc.querySelector('[data-mail-reader-filtered]').hidden,false);
+  assert.match(x.doc.querySelector('[data-mail-reader-filtered]').textContent,/outside these results/);
+  assert.equal(x.doc.querySelector('.mail-page-search-summary').getAttribute('aria-live'),'polite');
+  assert.equal(x.doc.querySelector('[data-mail-filter-empty]').hidden,true);
+  // Programmatic clicks on concealed controls must not create a draft handoff.
+  x.doc.querySelector('[data-mail-action="reply"]').click();
+  x.doc.querySelector('[data-mail-action="forward"]').click();
+  assert.equal(replied,0);assert.equal(forwarded,0);assert.equal(x.calls.length,initialCalls);
+  input.value='not found';input.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  assert.equal(x.doc.querySelector('[data-mail-filter-empty]').hidden,false);
+  assert.equal(x.doc.querySelectorAll('.mail-message:not([hidden])').length,0);
+  input.value='';input.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+  assert.equal(x.doc.querySelector('[data-mail-reader-content]').hidden,false);
+  assert.equal(x.doc.querySelector('[data-mail-reader-filtered]').hidden,true);
+  assert.equal(x.doc.querySelector('[data-mail-filter-empty]').hidden,true);
+  assert.equal(x.doc.querySelector('.mail-body').textContent,first.text);
+  x.doc.querySelector('[data-mail-action="reply"]').click();
+  assert.equal(replied,1,'restored visible selection can initiate the existing guarded handoff');
+  assert.equal(x.calls.length,initialCalls);
+ }finally{x.dom.window.close();}
+});

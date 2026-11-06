@@ -90,6 +90,67 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
     fail('outbox_draft_stale');
    fail('outbox_limit');
   },
+  // Initial Sent history uses permanent accepted receipts (0006–0008), not
+  // the separately gated archive schema. Metadata only; bodies are on demand.
+  async listAccepted(before=null){
+   if(!cipher)fail('outbox_history_unavailable');
+   if(before!==null&&(!before||typeof before!=='object'||Array.isArray(before)||
+      Object.keys(before).length!==2||typeof before.acceptedAt!=='string'||
+      before.acceptedAt.length>40||!Number.isFinite(Date.parse(before.acceptedAt))||
+      typeof before.deliveryId!=='string'||!UUID.test(before.deliveryId)))
+    fail('outbox_invalid_archive_cursor');
+   let result;
+   try{result=await db.prepare(
+    "SELECT delivery_id,draft_id,draft_revision,updated_at AS accepted_at FROM comms_outbox "+
+    "WHERE installation_id=? AND mailbox_id=? AND owner_sub=? AND state='accepted' "+
+    "AND draft_id IS NOT NULL AND draft_revision IS NOT NULL"+
+    (before?" AND (updated_at<? OR (updated_at=? AND delivery_id<?))":'')+
+    ' ORDER BY updated_at DESC,delivery_id DESC LIMIT 101'
+   ).bind(...parts,...(before?[before.acceptedAt,before.acceptedAt,before.deliveryId]:[])).all();}
+   catch{fail('outbox_history_unavailable');}
+   if(result?.success===false||!Array.isArray(result?.results)||result.results.length>101)
+    fail('outbox_history_unavailable');
+   const entries=result.results.slice(0,100).map(row=>{
+    if(!UUID.test(row.delivery_id)||!UUID.test(row.draft_id)||
+       !Number.isSafeInteger(row.draft_revision)||row.draft_revision<1||row.draft_revision>1000000000||
+       typeof row.accepted_at!=='string'||!Number.isFinite(Date.parse(row.accepted_at)))
+      fail('outbox_history_unavailable');
+    return {deliveryId:row.delivery_id,draftId:row.draft_id,draftRevision:row.draft_revision,
+     acceptedAt:row.accepted_at,state:'accepted'};
+   });
+   return {entries,hasMore:result.results.length>100};
+  },
+  async readAccepted(deliveryId){
+   if(!cipher)fail('outbox_history_unavailable');
+   const key=id(deliveryId);
+   try{
+    const row=await get(key);
+    // Claimed/uncertain is never presented as SMTP accepted. Legacy raw sends
+    // without saved-draft lineage are excluded from this user-facing history.
+    if(!row||row.state!=='accepted'||!row.draft_id||row.draft_revision===null)return null;
+    if(!UUID.test(row.draft_id)||!Number.isSafeInteger(row.draft_revision)||
+       row.draft_revision<1||row.draft_revision>1000000000||
+       typeof row.updated_at!=='string'||!Number.isFinite(Date.parse(row.updated_at)))
+     fail('outbox_history_unavailable');
+    // Retention can scrub an accepted outbox only after matching its encrypted
+    // archive. Use that archive only for a deliberately scrubbed payload; never
+    // mask decryption/key errors by silently substituting another record.
+    if(row.payload_json==='null'){
+     const archived=await this.readArchived(key);
+     if(!archived)fail('outbox_history_unavailable');
+     return {...archived,storageSource:'archive'};
+    }
+    const payload=await cipher.open(row.payload_json,context(key));
+    if(!payload||payload.from!=='hello@devonakins.com'||
+       typeof payload.date!=='string'||!Number.isFinite(Date.parse(payload.date)))
+     fail('outbox_history_unavailable');
+    const draft=validateDraftPayload(payload.draft);
+    return {deliveryId:key,draftId:row.draft_id,draftRevision:row.draft_revision,
+     acceptedAt:row.updated_at,from:payload.from,to:draft.to,subject:draft.subject,body:draft.body,
+     messageId:'<'+key+'@devonakins.com>',state:'accepted',storageSource:'outbox',
+     providerCopyConfirmed:false,recipientDeliveryConfirmed:false};
+   }catch{fail('outbox_history_unavailable');}
+  },
   // COMMS-39: read-only encrypted Sent archive. A SQLite trigger captures the
   // original outbox AES-GCM envelope in the accepted-state transaction.
   // No provider access, autonomous send, or mailbox mutation occurs here.

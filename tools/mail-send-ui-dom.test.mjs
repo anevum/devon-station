@@ -70,12 +70,12 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
    return reply({receipt:{deliveryId:body.deliveryId,state:'accepted'},
     deliveryConfirmed:false,automaticRetry:false});
   }
-  if(path==='/api/mail/outbox/archive'){
+  if(path==='/api/mail/outbox/accepted'){
    assert.equal(options.method,'GET');
    const rows=archiveRows();
    return reply({entries:rows.slice(0,100),hasMore:rows.length>100,providerIndependent:true});
   }
-  if(path==='/api/mail/outbox/archive/page'){
+  if(path==='/api/mail/outbox/accepted/page'){
    assert.equal(options.method,'POST');
    assert.deepEqual(Object.keys(body),['before']);
    assert.deepEqual(Object.keys(body.before).sort(),['acceptedAt','deliveryId']);
@@ -83,12 +83,12 @@ function setup({outgoing=true,submitFails=false,duplicateDraft=false,outboxReadF
     (x.acceptedAt===body.before.acceptedAt&&x.deliveryId<body.before.deliveryId));
    return reply({entries:rows.slice(0,100),hasMore:rows.length>100,providerIndependent:true});
   }
-  if(path==='/api/mail/outbox/archive/view'){
+  if(path==='/api/mail/outbox/accepted/view'){
    if(archiveDeferred)await new Promise(resolve=>{resolveArchive=resolve;});
    assert.equal(options.method,'POST');assert.deepEqual(Object.keys(body),['deliveryId']);
    const row=outbox.find(x=>x.deliveryId===body.deliveryId&&x.state==='accepted'&&x.draftId);
    if(!row)return reply({error:'mail_sent_archive_not_found'},404);
-   return reply({archive:{deliveryId:row.deliveryId,draftId:row.draftId,
+   return reply({copy:{deliveryId:row.deliveryId,draftId:row.draftId,
     draftRevision:row.draftRevision,state:'accepted',from:'hello@devonakins.com',
     to:['friend@example.test'],subject:'<script>alert(1)</script>',
     body:'<img src="https://pixel.example.test"> inert text',messageId:'<'+row.deliveryId+'@devonakins.com>',
@@ -222,7 +222,7 @@ test('linked delivery receipt shows expected Message-ID without asserting delive
   const checks=history.querySelectorAll('button');
   assert.deepEqual([...checks].map(x=>x.dataset.mailDraftAction).sort(),
    state==='accepted'?['archive-open','sent-check']:['sent-check']);
-  assert.equal(count(x,'/api/mail/outbox/archive/view'),0,'archive is never fetched automatically');
+  assert.equal(count(x,'/api/mail/outbox/accepted/view'),0,'archive is never fetched automatically');
   assert.equal(count(x,'/api/mail/outbox/sent-check'),0,'must not call provider without owner click');
  }
  x.outbox[0]={...row,state:'queued'};
@@ -256,14 +256,14 @@ test('accepted receipt renders encrypted archive only on click, not as executabl
  x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
   createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
  await wait();x.doc.querySelector('[data-mail-draft-action="outbox-refresh"]').click();await wait();
- assert.equal(count(x,'/api/mail/outbox/archive/view'),0);
+ assert.equal(count(x,'/api/mail/outbox/accepted/view'),0);
  x.doc.querySelector('[data-mail-draft-action="archive-open"]').click();await wait();
  const panel=x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]');
  assert(panel);assert(panel.textContent.includes('<img src="https://pixel.example.test">'));
  assert(panel.textContent.includes('<script>alert(1)</script>'));
  assert.equal(panel.querySelectorAll('img,iframe,script,a[href]').length,0);
  assert(panel.textContent.includes('not confirmed'));
- assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ assert.equal(count(x,'/api/mail/outbox/accepted/view'),1);
  for(const path of ['/api/mail/outbox/sent-check','/api/mail/outbox/prepare','/api/mail/outbox/submit'])
   assert.equal(count(x,path),0);
  x.doc.querySelector('[data-mail-draft-action="archive-close"]').click();await wait();
@@ -275,13 +275,13 @@ test('owner can browse encrypted Sent metadata independently from outbox history
  x.outbox.push({deliveryId,draftId:savedId,draftRevision:2,state:'accepted',
   createdAt:'2026-11-03T16:00:00.000Z',updatedAt:'2026-11-03T16:01:00.000Z'});
  await wait();
- assert.equal(count(x,'/api/mail/outbox/archive'),0);
+ assert.equal(count(x,'/api/mail/outbox/accepted'),0);
  x.doc.querySelector('[data-mail-draft-action="archive-refresh"]').click();await wait();
  const section=x.doc.querySelector('[aria-label="Encrypted Sent history"]');
  assert(section);assert(section.textContent.includes(deliveryId));
  assert(!section.textContent.includes('pixel.example.test'),'listing must exclude private message body');
- assert.equal(count(x,'/api/mail/outbox/archive'),1);
- assert.equal(count(x,'/api/mail/outbox/archive/view'),0,'archive body must remain on-demand');
+ assert.equal(count(x,'/api/mail/outbox/accepted'),1);
+ assert.equal(count(x,'/api/mail/outbox/accepted/view'),0,'archive body must remain on-demand');
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.doc.querySelector('[data-mail-draft-action="archive-open"]').click();await wait();
  const opened=x.doc.querySelector('[aria-label="Encrypted Sent history"] [aria-label="Decrypted Sent copy — owner only"]');
@@ -301,7 +301,7 @@ test('leaving Mail clears an already decrypted Sent copy without contacting a pr
  x.dom.window.location.hash='#settings';
  await wait();
  assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
- assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ assert.equal(count(x,'/api/mail/outbox/accepted/view'),1);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });
@@ -315,7 +315,7 @@ test('Sent history loads older 100-row pages by stable cursor without duplicates
  let history=x.doc.querySelector('[aria-label="Encrypted Sent history"]');
  assert.equal(history.querySelectorAll('li').length,100);
  assert(history.querySelector('[data-mail-draft-action="archive-more"]'));
- assert.equal(count(x,'/api/mail/outbox/archive/page'),0);
+ assert.equal(count(x,'/api/mail/outbox/accepted/page'),0);
  history.querySelector('[data-mail-draft-action="archive-more"]').click();await wait();
  history=x.doc.querySelector('[aria-label="Encrypted Sent history"]');
  assert.equal(history.querySelectorAll('li').length,105);
@@ -323,8 +323,8 @@ test('Sent history loads older 100-row pages by stable cursor without duplicates
  const ids=[...history.querySelectorAll('li')].map(li=>li.querySelector('span.mail-draft-notice')?.textContent)
   .filter(x=>x?.startsWith('Delivery '));
  assert.equal(ids.length,105);assert.equal(new Set(ids).size,105);
- assert.equal(count(x,'/api/mail/outbox/archive/page'),1);
- assert.equal(count(x,'/api/mail/outbox/archive/view'),0);
+ assert.equal(count(x,'/api/mail/outbox/accepted/page'),1);
+ assert.equal(count(x,'/api/mail/outbox/accepted/view'),0);
  assert.equal(count(x,'/api/mail/outbox/prepare'),0);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
@@ -339,7 +339,7 @@ test('hidden mobile tab discards archive body even when in-flight response arriv
  x.doc.dispatchEvent(new x.dom.window.Event('visibilitychange'));
  x.resolveArchive();await wait();
  assert.equal(x.doc.querySelector('[aria-label="Decrypted Sent copy — owner only"]'),null);
- assert.equal(count(x,'/api/mail/outbox/archive/view'),1);
+ assert.equal(count(x,'/api/mail/outbox/accepted/view'),1);
  assert.equal(count(x,'/api/mail/outbox/submit'),0);
  x.dom.window.close();
 });

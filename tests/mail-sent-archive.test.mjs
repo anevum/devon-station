@@ -367,3 +367,99 @@ test('signed owner archive endpoints read the snapshot without provider I/O, rej
  const missed=await handleMailOutboxApi({...args,env:{...env,MAIL_DB:other.db},url:listUrl,request:new Request(listUrl)});
  assert.deepEqual(missed,{status:503,body:{error:'mail_sent_archive_unavailable'}});
 });
+
+test('receipt-backed Sent works before 0009, survives fresh readers and draft deletion, and cannot erase its sole ciphertext',async t=>{
+ const f=fixture(t,{migrate:false});await f.seed();await f.accept();
+ assert.equal(f.sqlite.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='comms_sent_archive'").get().n,0);
+ const fresh=createD1Outbox(f.db,owner,{cipher:f.cipher,now:()=> '2026-03-10T00:00:00.000Z'});
+ const listing=await fresh.listAccepted();
+ assert.equal(listing.entries.length,1);assert.equal(listing.hasMore,false);
+ assert(!JSON.stringify(listing).includes(sample.subject));assert(!JSON.stringify(listing).includes('recipient@'));
+ const copy=await fresh.readAccepted(deliveryId);
+ assert.deepEqual({to:copy.to,subject:copy.subject,body:copy.body},sample);
+ assert.equal(copy.storageSource,'outbox');assert.equal(copy.recipientDeliveryConfirmed,false);
+ const locked=createD1DraftStore(f.db,{cipher:f.cipher,protectPendingOutbox:true});
+ await locked.remove(owner,{id:draftId,revision:2});
+ assert.equal((await fresh.readAccepted(deliveryId)).body,sample.body);
+ const envelope=f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json;
+ await assert.rejects(fresh.expireTerminalPayloads({before:'2026-02-05T00:00:00.000Z'}),/outbox_retention_failed/);
+ assert.equal(f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json,envelope);
+ assert.equal(await f.outbox.claim(deliveryId,claimId),null,'history never grants resend authority');
+});
+test('receipt-backed Sent excludes queued, claimed, uncertain and unlinked messages and enforces owner isolation',async t=>{
+ const f=fixture(t,{migrate:false});await f.seed();
+ for(const state of ['queued','claimed','uncertain']){
+  f.sqlite.prepare('UPDATE comms_outbox SET state=?').run(state);
+  assert.deepEqual(await f.outbox.listAccepted(),{entries:[],hasMore:false});
+  assert.equal(await f.outbox.readAccepted(deliveryId),null);
+ }
+ f.sqlite.prepare("UPDATE comms_outbox SET state='accepted'").run();
+ assert.equal((await f.outbox.listAccepted()).entries.length,1);
+ assert.deepEqual(await f.other.listAccepted(),{entries:[],hasMore:false});
+ assert.equal(await f.other.readAccepted(deliveryId),null);
+ f.sqlite.prepare('UPDATE comms_outbox SET draft_id=NULL,draft_revision=NULL').run();
+ assert.deepEqual(await f.outbox.listAccepted(),{entries:[],hasMore:false});
+ assert.equal(await f.outbox.readAccepted(deliveryId),null);
+});
+test('receipt-backed history pages all accepted receipts even when unresolved attempts crowd the status list',async t=>{
+ const f=fixture(t,{migrate:false});await f.seed();await f.accept();
+ const row=f.sqlite.prepare('SELECT * FROM comms_outbox').get();
+ const insert=f.sqlite.prepare('INSERT INTO comms_outbox (installation_id,mailbox_id,owner_sub,delivery_id,payload_json,state,created_at,updated_at,draft_id,draft_revision) VALUES (?,?,?,?,?,?,?,?,?,?)');
+ for(let i=10;i<115;i++){
+  const key='a0000000-0000-4000-8000-'+String(i).padStart(12,'0');
+  const linked='b0000000-0000-4000-8000-'+String(i).padStart(12,'0');
+  const encrypted=await f.cipher.seal({from,draft:sample,date:row.updated_at},['outbox',owner.installationId,owner.mailboxId,owner.ownerSub,key]);
+  insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,key,encrypted,'accepted',row.created_at,row.updated_at,linked,2);
+ }
+ for(let i=200;i<300;i++)insert.run(owner.installationId,owner.mailboxId,owner.ownerSub,
+  'c0000000-0000-4000-8000-'+String(i).padStart(12,'0'),row.payload_json,'uncertain',row.created_at,row.updated_at,null,null);
+ assert((await f.outbox.list()).every(x=>x.state==='uncertain'));
+ const first=await f.outbox.listAccepted();assert.equal(first.entries.length,100);assert.equal(first.hasMore,true);
+ const last=await f.outbox.listAccepted({acceptedAt:first.entries.at(-1).acceptedAt,deliveryId:first.entries.at(-1).deliveryId});
+ assert.equal(last.entries.length,6);assert.equal(last.hasMore,false);
+ assert.equal(new Set([...first.entries,...last.entries].map(x=>x.deliveryId)).size,106);
+ assert.equal((await f.outbox.readAccepted(first.entries[0].deliveryId)).body,sample.body);
+ await assert.rejects(f.outbox.listAccepted({acceptedAt:row.updated_at,deliveryId,ownerSub:peer.ownerSub}),/outbox_invalid_archive_cursor/);
+});
+test('accepted history uses the archive after deliberate retention, but never hides missing keys or corrupted ciphertext',async t=>{
+ const f=fixture(t);await f.seed();await f.accept();
+ const wrong=createD1Outbox(f.db,owner,{cipher:createMailPayloadCipher({activeKeyId:'other',keys:{other:key}})});
+ await assert.rejects(wrong.readAccepted(deliveryId),/outbox_history_unavailable/);
+ const original=f.sqlite.prepare('SELECT payload_json FROM comms_outbox').get().payload_json;
+ f.sqlite.prepare('UPDATE comms_outbox SET payload_json=?').run(JSON.stringify({corrupt:true}));
+ await assert.rejects(f.outbox.readAccepted(deliveryId),/outbox_history_unavailable/);
+ f.sqlite.prepare('UPDATE comms_outbox SET payload_json=?').run(original);
+ f.setClock('2026-03-10T00:00:00.000Z');await f.outbox.expireTerminalPayloads({before:'2026-02-05T00:00:00.000Z'});
+ assert.equal((await f.outbox.readAccepted(deliveryId)).storageSource,'archive');
+ assert.equal((await f.outbox.readAccepted(deliveryId)).body,sample.body);
+ const noArchive=fixture(t,{migrate:false});await noArchive.seed();await noArchive.accept();
+ noArchive.sqlite.prepare("UPDATE comms_outbox SET payload_json='null'").run();
+ await assert.rejects(noArchive.outbox.readAccepted(deliveryId),/outbox_history_unavailable/);
+});
+test('accepted-history APIs require owner, strict inputs and cipher, return redacted failures and never call a provider',async t=>{
+ const f=fixture(t,{migrate:false});await f.seed();await f.accept();
+ const env={MAIL_OWNER_SUB:owner.ownerSub,MAIL_OUTBOX_ENABLED:'true',MAIL_DB:f.db,
+  MAIL_PAYLOAD_KEY_ID:'one',MAIL_PAYLOAD_KEYS_JSON:JSON.stringify({one:key}),MAIL_SEND_ENABLED:'false'};
+ let remote=0;
+ const call=(path,method='GET',input,user=owner.ownerSub,settings=env)=>{
+  const url=new URL('https://station.example/api/mail/outbox/accepted'+path);
+  return handleMailOutboxApi({request:new Request(url,{method}),url,env:settings,user:{subject:user},
+   readBody:async()=>input,connect:()=>{remote++;throw Error('no provider');},registry:{}});
+ };
+ assert.equal((await call('')).body.entries.length,1);
+ const copy=await call('/view','POST',{deliveryId});assert.equal(copy.status,200);assert.equal(copy.body.copy.body,sample.body);
+ const before={acceptedAt:'2026-01-02T00:00:00.000Z',deliveryId};
+ assert.equal((await call('/page','POST',{before})).body.entries.length,1);
+ for(const path of ['', '/page','/view'])assert.equal((await call(path,path?'POST':'GET',path==='/page'?{before}:{deliveryId},peer.ownerSub)).status,403);
+ for(const input of [null,{},[],{deliveryId,extra:true},{deliveryId:'bad'},{deliveryId,ownerSub:peer.ownerSub}])
+  assert.equal((await call('/view','POST',input)).status,400);
+ for(const input of [{before:null},{before:{...before,extra:1}},{before:{...before,acceptedAt:'bad'}},{deliveryId}])
+  assert.equal((await call('/page','POST',input)).status,400);
+ assert.equal((await call('?owner=other')).status,400);
+ assert.equal((await call('/view')).status,405);
+ assert.equal((await call('','POST')).status,405);
+ assert.equal((await call('','GET',null,owner.ownerSub,{...env,MAIL_PAYLOAD_KEYS_JSON:''})).status,503);
+ f.sqlite.prepare('UPDATE comms_outbox SET payload_json=?').run(JSON.stringify({untrusted:'error details'}));
+ assert.deepEqual(await call('/view','POST',{deliveryId}),{status:503,body:{error:'mail_sent_history_unavailable'}});
+ assert.equal(remote,0);
+});

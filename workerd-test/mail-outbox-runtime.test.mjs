@@ -199,7 +199,19 @@ test('workerd '+compatibilityDate+': durable outbox claim, isolation and crash-s
     assert.equal(listed.status,200);
     const listing=await listed.json();assert.equal(listing.sendingEnabled,true);
     assert.equal(listing.outbox.find(item=>item.deliveryId===deliveryId).state,'accepted');
-    assert.equal(sockets,1);
+    // This D1 has only 0005–0008: accepted history must survive reload
+    // without archive migration, provider access, or another transmission.
+    assert.equal(await db.prepare("SELECT name FROM sqlite_master WHERE name='comms_sent_archive'").first(),null);
+    const history=await station.fetch(request('/api/mail/outbox/accepted'),env);
+    assert.equal(history.status,200);
+    assert((await history.json()).entries.some(row=>row.deliveryId===deliveryId));
+    const savedCopy=await station.fetch(request('/api/mail/outbox/accepted/view','POST',{deliveryId}),env);
+    assert.equal(savedCopy.status,200);
+    const copy=(await savedCopy.json()).copy;
+    assert.equal(copy.body,draft.body);assert.equal(copy.storageSource,'outbox');
+    assert.equal(copy.recipientDeliveryConfirmed,false);
+    assert.equal((await station.fetch(request('/api/mail/outbox/accepted'),{...env,MAIL_OWNER_SUB:'other'})).status,403);
+    assert.equal(sockets,1);assert.equal(dataWrites,1);
    });
  }finally{await mf.dispose();}
 });

@@ -5,7 +5,7 @@
   const OPEN_DIAGNOSTIC_CODES=new Set(['imap_tls_connect_failed','imap_greeting_failed','imap_login_failed','imap_login_rejected','imap_session_cancelled']);
   const SYNC_DIAGNOSTIC_CODES=new Set([...OPEN_DIAGNOSTIC_CODES, "imap_transport_failed", "imap_command_failed", "imap_invalid_fetch", "invalid_imap_fetch", "imap_invalid_search", "invalid_imap_search", "imap_invalid_framing", "imap_invalid_mime", "imap_literal_limit", "imap_response_limit", "imap_stream_closed", "imap_unexpected_literal", "imap_unexpected_response", "imap_tag_mismatch", "invalid_imap_examine", "imap_search_limit", "imap_session_cancelled", "provider_timeout", "mail_d1_read_failed", "mail_d1_invalid_snapshot", "mail_d1_snapshot_limit", "mail_d1_batch_failed", "invalid_mail_snapshot", "invalid_scoped_snapshot", "mail_payload_unavailable", "mail_validation_failed", "mail_sender_address_invalid", "mime_wire_limit", "mime_parse_failed", "mime_invalid_from", "mime_subject_limit", "mime_html_conversion_failed", "mime_body_index_limit", "mail_sync_unclassified"]);
   const URLS={status:'/api/mail/status',inbox:'/api/mail/inbox?limit=50&offset=0',sync:'/api/mail/sync'};
-  const state={phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
+  const state={search:'',phase:'checking',status:null,items:[],selected:null,total:0,offset:0,revision:null,stale:false,error:null,busy:false,initialized:false,receipt:null,hasMore:null,stopRequested:false,run:null,diagnostic:{phase:'idle',summary:'Checks have not been run.',items:[]},provider:{phase:'idle',summary:'Provider login has not been tested.'}};
   function node(tag,className,text){
     const el=document.createElement(tag);
     if(className)el.className=className;
@@ -81,6 +81,27 @@
         response.status===409?'mail_inbox_changed':'mail_request_failed');
     return response.json();
   }
+  function matchesSearch(item,query=state.search.trim().toLowerCase()){
+    return !query||[item.from,item.subject,item.text].some(value=>value.toLowerCase().includes(query));
+  }
+  function filterLoadedPage(root){
+    const query=state.search.trim().toLowerCase();
+    const matches=new Set(state.items.filter(item=>matchesSearch(item,query)).map(item=>item.key));
+    for(const row of root.querySelectorAll('.mail-message'))row.hidden=!matches.has(row.dataset.mailKey);
+    const visible=matches.size;
+    const summary=root.querySelector('[data-mail-search-summary]');
+    if(summary)summary.textContent=query?
+      visible+' of '+state.items.length+' loaded messages match. Other pages are not searched.':
+      'Search is limited to the currently loaded inbox page.';
+    const empty=root.querySelector('[data-mail-filter-empty]');
+    if(empty)empty.hidden=!query||visible>0||state.items.length===0;
+    // Do not leave reply/forward controls for a hidden, previously selected mail.
+    // Preserve the selection in memory so clearing the search restores the reader.
+    const selectedHidden=!!query&&state.selected!==null&&!matches.has(state.selected);
+    const selected=root.querySelector('[data-mail-reader-content]');
+    const filtered=root.querySelector('[data-mail-reader-filtered]');
+    if(selected&&filtered){selected.hidden=selectedHidden;filtered.hidden=!selectedHidden;}
+  }
   function render(){
     const root=document.getElementById('station-mail');
     if(!root)return;
@@ -154,6 +175,20 @@
     listing.append(node('div','mail-list-title',state.status?.configured?
       'Inbox · '+state.total+' indexed':'Inbox · not connected'));
     if(state.status?.configured){
+      const label=node('label','mail-page-search-label','Find on this page');
+      const search=node('input','mail-page-search');
+      search.type='search';search.maxLength=120;search.autocomplete='off';
+      search.placeholder='Sender, subject or message text';search.value=state.search;
+      label.append(search);listing.append(label);
+      const summary=node('p','mail-page-search-summary');
+      summary.dataset.mailSearchSummary='true';
+      summary.setAttribute('aria-live','polite');
+      summary.setAttribute('aria-atomic','true');
+      listing.append(summary);
+      search.addEventListener('input',()=>{
+        state.search=search.value.slice(0,120);
+        filterLoadedPage(root);
+      });
       const pages=node('nav','mail-pagination');pages.setAttribute('aria-label','Inbox pages');
       const newer=button('Newer','newer'),older=button('Older','older');
       newer.disabled=state.busy||state.stale||state.offset===0;
@@ -178,6 +213,10 @@
       listing.append(node('p','mail-empty',state.status?.configured?
         'No synchronized messages. Select Synchronize Inbox to check for mail.':
         'The initial mailbox must be configured and authorized before it can be used.'));
+    }
+    if(state.status?.configured){
+      const empty=node('p','mail-empty','No matches on this loaded page. Clear the search or choose Newer/Older.');
+      empty.dataset.mailFilterEmpty='true';empty.hidden=true;listing.append(empty);
     }
     const reader=node('article','mail-reader');
     reader.setAttribute('aria-label','Selected message');
@@ -208,9 +247,17 @@
     } else {
       reader.append(node('div','mail-placeholder','Select a message to read it securely.'));
     }
+    const content=node('div','mail-reader-content');
+    content.dataset.mailReaderContent='true';
+    while(reader.firstChild)content.append(reader.firstChild);
+    reader.append(content);
+    const filtered=node('p','mail-placeholder',
+      'The selected message is outside these results. Select a matching message or clear the search.');
+    filtered.dataset.mailReaderFiltered='true';filtered.hidden=true;reader.append(filtered);
     body.append(listing,reader);
     root.append(body);
     if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true,state.status?.outboxEnabled===true);
+    filterLoadedPage(root);
   }
   function diagnostic(phase,summary,items=[]){
     state.diagnostic={phase,summary,items};render();
@@ -424,7 +471,7 @@
     if(action==='stop'){state.stopRequested=true;render();return;}
     if(action==='reply'||action==='forward'){
       const item=state.items.find(x=>x.key===state.selected);
-      if(!state.busy&&state.status?.draftsEnabled&&item)
+      if(!state.busy&&state.status?.draftsEnabled&&item&&matchesSearch(item))
         void globalThis.StationDrafts?.[action]?.({from:item.from,subject:item.subject,
           ...(Object.hasOwn(item,'replyTo')?{replyTo:item.replyTo}:{}),
           ...(Object.hasOwn(item,'replyContext')?{replyContext:item.replyContext}:{}),
