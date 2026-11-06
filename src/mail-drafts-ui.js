@@ -306,9 +306,36 @@ async function create(){
   state.selected=result.draft.id;state.working={...result.draft,to:result.draft.to.slice()};
   state.dirty=false;state.pendingSave=null;state.items=[state.working,...state.items.filter(x=>x.id!==state.selected)];
   state.notice='Unsent draft created and stored securely.';
+  return true;
  }catch(e){state.error=e.message==='mail_sign_in_required'?'Owner session expired.':
   'Draft creation did not receive confirmation. Select New Draft to retry the same request.';}
  finally{state.busy=false;render();}
+}
+// Incoming mail supplies only the sender and subject. No provider command or
+// send preparation is triggered, and a bounded inbox preview is never quoted
+// as if it were the complete original message.
+async function replyToSender(message){
+ if(!state.enabled||!state.loaded||!host()||state.busy)return;
+ capture();
+ if(state.dirty||state.pendingSave||state.pendingSend||state.pendingCreate){
+  state.error='Finish saving or reviewing the current draft before starting a reply. Your edits are preserved.';
+  render();return;
+ }
+ const from=message?.from,subject=message?.subject;
+ const address=/^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
+ const title=typeof subject==='string'&&/^re:/i.test(subject)?subject:'Re: '+subject;
+ if(typeof from!=='string'||from.length>254||!address.test(from)||from.includes('..')||
+    typeof subject!=='string'||title.length>512||/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/.test(title)){
+  state.error='This message cannot prefill a reply safely. Start a new draft and enter the recipient and subject yourself.';
+  render();return;
+ }
+ if(await create()!==true)return;
+ state.working={...state.working,to:[from],subject:title,body:''};
+ state.dirty=true;
+ state.notice='Reply addressed to the message sender. Write your message, then save the draft. Nothing was sent.';
+ render();
+ const body=host()?.querySelector('[data-mail-draft-field="body"]');
+ body?.focus();body?.scrollIntoView?.({block:'center',behavior:'instant'});
 }
 async function save(){
  if(state.busy||state.pendingSend||!state.working)return;
@@ -657,6 +684,7 @@ document.addEventListener('input',e=>{
  if(review)review.disabled=true;
 });
 globalThis.StationDrafts=Object.freeze({
+ reply:replyToSender,
  mount(container,enabled,outgoingEnabled=false,outboxEnabled=false){
   if(!container)return;
   state.enabled=enabled===true;

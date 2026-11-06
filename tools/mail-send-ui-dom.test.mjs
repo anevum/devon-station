@@ -464,3 +464,14 @@ test('saved draft cannot be overwritten after a linked SMTP attempt on another s
  assert(x.doc.querySelector('[data-mail-draft-field="body"]').value.includes('My new changes remain local'));
  x.dom.window.close();
 });
+
+test('reply cannot replace a saved draft while its outgoing delivery is under review',async()=>{
+ const x=await savedDraft(setup());
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ x.doc.querySelector('[data-mail-draft-action="send-prepare"]').click();await wait();
+ await x.dom.window.StationDrafts.reply({from:'other@example.test',subject:'Different message'});
+ assert.equal(count(x,'/api/mail/drafts/create'),1);assert.equal(count(x,'/api/mail/outbox/submit'),0);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="to"]').value,'friend@example.test');
+ assert(x.doc.querySelector('[aria-label="Review outgoing email before submission"]'));
+ assert.match(x.doc.querySelector('#mail-drafts').textContent,/Your edits are preserved/);x.dom.window.close();
+});

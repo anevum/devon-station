@@ -7,7 +7,7 @@ const drafts=readFileSync(new URL('../src/mail-drafts-ui.js',import.meta.url),'u
 const id='d43f536a-e5c6-4683-b241-eb9ad1dbf680';
 const op='2faf4ca1-324c-4c40-a0aa-b0cbe51b7fc4';
 const wait=()=>new Promise(resolve=>setTimeout(resolve,20));
-function setup({conflict=false,saveErrors=[]}={}){
+function setup({conflict=false,saveErrors=[],messages=[],createFailure=false}={}){
  const dom=new JSDOM('<main><section id="station-mail"></section></main>',{url:'https://station.example/#mail',runScripts:'outside-only'});
  Object.defineProperty(dom.window.crypto,'randomUUID',{value:(()=>{let n=0;return ()=>++n===1?id:n===2?op:'2faf4ca1-324c-4c40-a0aa-'+String(n).padStart(12,'0')})(),configurable:true});
  const calls=[],records=[];
@@ -17,9 +17,11 @@ function setup({conflict=false,saveErrors=[]}={}){
   const reply=(value,status=200)=>({ok:status>=200&&status<300,status,
    headers:new Headers({'Content-Type':'application/json'}),json:async()=>value});
   if(path==='/api/mail/status')
-   return reply({configured:false,draftsEnabled:true,address:'hello@devonakins.com',outgoingEnabled:false});
+   return reply({configured:messages.length>0,draftsEnabled:true,address:'hello@devonakins.com',outgoingEnabled:false});
+  if(path.startsWith('/api/mail/inbox?'))return reply({messages,total:messages.length,offset:0,limit:50,revision:1});
   if(path==='/api/mail/drafts'&&options.method==='GET')return reply({drafts:records});
   if(path==='/api/mail/drafts/create'){
+   if(createFailure)return reply({error:'owner_sign_in_required'},401);
    const row={id:options.body?JSON.parse(options.body).id:id,revision:1,from:'hello@devonakins.com',
     to:[],subject:'',body:'',updatedAt:'2026-11-03T12:00:00.000Z'};
    records.push(row);return reply({draft:row});
@@ -138,4 +140,57 @@ test('unknown errors and disconnections preserve the exact pending save for expl
   assert.deepEqual(saves[0].body,saves[1].body);
   x.dom.window.close();
  }
+});
+
+const incoming={key:'personal/hello/7/1',from:'sender@example.org',subject:'A question',
+ text:'<img src="https://tracker.invalid/pixel"> untrusted preview',timestamp:'2026-11-06T12:00:00.000Z',flags:[]};
+test('reply opens a focused unsent draft and requires an explicit save; no SMTP or automatic quote',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ const reply=x.doc.querySelector('[data-mail-action="reply"]');assert(reply);reply.click();reply.click();await wait();
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/create')).length,1);
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/save')).length,0);
+ const field=name=>x.doc.querySelector('[data-mail-draft-field="'+name+'"]');
+ assert.equal(field('to').value,incoming.from);assert.equal(field('subject').value,'Re: A question');
+ assert.equal(field('body').value,'');assert.equal(x.doc.activeElement,field('body'));
+ assert.equal(x.records[0].subject,'','prefill must not mutate the confirmed server snapshot');
+ field('body').value='My answer';field('body').dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const saved=x.calls.find(c=>c.path.endsWith('/save')).body;
+ assert.deepEqual(saved.to,[incoming.from]);assert.equal(saved.subject,'Re: A question');assert.equal(saved.body,'My answer');
+ assert.equal(x.calls.filter(c=>/outbox|smtp|sync/.test(c.path)).length,0);
+ assert.equal(x.doc.querySelectorAll('#station-mail img,#station-mail script').length,0);x.dom.window.close();
+});
+test('reply preserves dirty edits and refuses a second creation until they are saved',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ x.doc.querySelector('[data-mail-draft-action="create"]').click();await wait();
+ const body=x.doc.querySelector('[data-mail-draft-field="body"]');body.value='Keep my work';
+ body.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/create')).length,1);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]').value,'Keep my work');
+ assert.match(x.doc.querySelector('#mail-drafts').textContent,/Your edits are preserved/);x.dom.window.close();
+});
+test('reply treats subjects as inert text and avoids repeated Re prefixes',async()=>{
+ const x=setup({messages:[{...incoming,subject:'RE: <script>unsafe()</script>'}]});await wait();
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="subject"]').value,'RE: <script>unsafe()</script>');
+ assert.equal(x.doc.querySelectorAll('#station-mail script').length,0);x.dom.window.close();
+});
+test('malformed sender, header injection and overlong reply subject cause no draft mutation',async()=>{
+ for(const message of [{...incoming,from:'sender@example.org,other@example.org'},
+  {...incoming,from:'sender@example.org\r\nBcc:other@example.org'},
+  {...incoming,subject:'Bad\r\nSubject'}, {...incoming,subject:'x'.repeat(512)}]){
+  const x=setup({messages:[message]});await wait();
+  x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+  assert.equal(x.calls.filter(c=>c.method==='POST').length,0);
+  assert.match(x.doc.querySelector('#mail-drafts').textContent,/cannot prefill a reply safely/);x.dom.window.close();
+ }
+});
+test('expired-session reply creation never claims a saved reply or submits mail',async()=>{
+ const x=setup({messages:[incoming],createFailure:true});await wait();
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.match(x.doc.querySelector('#mail-drafts').textContent,/Owner session expired/);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]'),null);
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.equal(x.calls.filter(c=>c.method==='POST').length,1,'unconfirmed create needs explicit resolution');x.dom.window.close();
 });

@@ -176,6 +176,10 @@
       const dt2=node('dt','','Date');const dd2=node('dd');dd2.append(date);
       meta.append(dt,dd,dt2,dd2);
       reader.append(meta);
+      if(state.status?.draftsEnabled&&globalThis.StationDrafts?.reply){
+        const reply=button('Reply to sender','reply');
+        reply.disabled=state.busy;reader.append(reply);
+      }
       const text=node('div','mail-body',item.text);
       text.setAttribute('aria-label','Plain text message body');
       reader.append(text);
@@ -397,6 +401,12 @@
     if(action==='catchup'){void sync(10);return;}
     if(action==='reload'){void start();return;}
     if(action==='stop'){state.stopRequested=true;render();return;}
+    if(action==='reply'){
+      const item=state.items.find(x=>x.key===state.selected);
+      if(!state.busy&&state.status?.draftsEnabled&&item)
+        void globalThis.StationDrafts?.reply?.({from:item.from,subject:item.subject});
+      return;
+    }
     if(action==='select'){
       const key=button.dataset.mailKey;
       if(state.items.some(x=>x.key===key)){state.selected=key;render();}
