@@ -6,6 +6,8 @@ on:
       - '.github/workflows/mail-acceptance-uploader-review.yml'
       - 'tools/comms-acceptance-upload.mjs'
       - 'tests/comms-acceptance-upload.test.mjs'
+      - 'tools/comms-acceptance-readback.mjs'
+      - 'tests/comms-acceptance-readback.test.mjs'
 permissions:
   contents: read
 concurrency:
@@ -26,3 +28,5 @@ jobs:
         run: node --check tools/comms-acceptance-upload.mjs
       - name: Test upload boundaries with synthetic inputs only
         run: node --test tests/comms-acceptance-upload.test.mjs
+      - name: Test inactive readback without remote requests
+        run: node --test tests/comms-acceptance-readback.test.mjs
