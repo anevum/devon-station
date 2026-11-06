@@ -1,8 +1,10 @@
 // COMMS-11: convert bounded untrusted RFC 5322/MIME into inert, minimal owner-index fields.
 // The parser may decode HTML only into text. Raw HTML, binary attachments, URLs, credentials,
 // and arbitrary headers NEVER enter persistent D1 or the public client API.
+// The single optional Reply-To routing address is validated and encrypted with the message.
 import PostalMime from '../../vendor/postal-mime/postal-mime.mjs';
 import {htmlToText} from '../../vendor/postal-mime/text-format.mjs';
+import {incomingReplyTo,validMessageId,validateReplyContext} from './mail-core.mjs';
 
 const MAX_WIRE_BYTES=256*1024;
 const MAX_BODY_CHARS=4096;
@@ -67,5 +69,28 @@ export async function decodeSafeMime(raw){
    text=text.slice(0,budget).replace(/[\uD800-\uDBFF]$/,'')+SHORTENED_NOTE;
  }
  text+=note;
- return Object.freeze({from,subject,text});
+ const replyHeaders=message.headers?.filter(h=>h.key==='reply-to')??[];
+ const routing={};
+ if(replyHeaders.length){
+  routing.replyTo=null;
+  if(replyHeaders.length===1&&message.replyTo?.length===1&&!message.replyTo[0].group){
+   try{routing.replyTo=incomingReplyTo(message.replyTo[0].address);}catch{}
+  }
+ }
+ const idHeaders=message.headers?.filter(h=>h.key==='message-id')??[];
+ const parentId=idHeaders.length===1?idHeaders[0].value.trim():null;
+ if(validMessageId(parentId)){
+  const refs=message.headers.filter(h=>h.key==='references');
+  const prior=message.headers.filter(h=>h.key==='in-reply-to');
+  const raw=refs.length===1?refs[0].value:!refs.length&&prior.length===1?prior[0].value:'';
+  let chain=[];
+  if(raw.length<=8192){
+   const ids=raw.match(/<[^<>]+>/g)??[];
+   if(!raw.replace(/<[^<>]+>/g,'').trim()&&ids.every(validMessageId)&&
+      (refs.length||ids.length<=1))chain=[...new Set(ids.filter(id=>id!==parentId))];
+  }
+  if(chain.length>19)chain=[chain[0],...chain.slice(-18)];
+  routing.replyContext=validateReplyContext({parentId,references:[...chain,parentId]});
+ }
+ return Object.freeze({from,subject,text,...routing});
 }

@@ -27,7 +27,8 @@ function isDraft(item){
  typeof item.subject==='string'&&item.subject.length<=512&&
  typeof item.body==='string'&&item.body.length<=32768&&
  typeof item.updatedAt==='string'&&Number.isFinite(Date.parse(item.updatedAt))&&
- item.from==='hello@devonakins.com';
+ item.from==='hello@devonakins.com'&&(!Object.hasOwn(item,'replyContext')||
+  !!globalThis.StationMail?.copyReplyContext?.(item.replyContext));
 }
 async function api(url,body){
  const options={method:body===undefined?'GET':'POST',credentials:'same-origin',
@@ -306,9 +307,61 @@ async function create(){
   state.selected=result.draft.id;state.working={...result.draft,to:result.draft.to.slice()};
   state.dirty=false;state.pendingSave=null;state.items=[state.working,...state.items.filter(x=>x.id!==state.selected)];
   state.notice='Unsent draft created and stored securely.';
+  return true;
  }catch(e){state.error=e.message==='mail_sign_in_required'?'Owner session expired.':
   'Draft creation did not receive confirmation. Select New Draft to retry the same request.';}
  finally{state.busy=false;render();}
+}
+// Compose from the reader only after explicit owner action. Forwarding labels
+// the bounded text preview and omitted attachments; it never claims full fidelity.
+async function draftFromMessage(message,mode){
+ if(!state.enabled||!state.loaded||!host()||state.busy)return;
+ capture();
+ if(state.dirty||state.pendingSave||state.pendingSend||state.pendingCreate){
+  state.error='Finish saving or reviewing the current draft before starting another message. Your edits are preserved.';
+  render();return;
+ }
+ const from=message?.from,subject=message?.subject;
+ const address=/^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
+ const forwarding=mode==='forward';
+ const recipient=!forwarding&&Object.hasOwn(message,'replyTo')?message.replyTo:from;
+ const prefix=forwarding?'Fwd: ':'Re: ';
+ const existingPrefix=forwarding?/^(?:fwd|fw):/i:/^re:/i;
+ const title=typeof subject==='string'&&existingPrefix.test(subject)?subject:prefix+subject;
+ if(typeof from!=='string'||from.length>254||!address.test(from)||from.includes('..')||
+    typeof subject!=='string'||title.length>512||/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/.test(title)){
+  state.error='This message cannot prefill a '+(forwarding?'forward':'reply')+' safely. Start a new draft and enter the recipient and subject yourself.';
+  render();return;
+ }
+ if(!forwarding&&(typeof recipient!=='string'||recipient.length>254||!address.test(recipient)||recipient.includes('..'))){
+  state.error='Reply-To is invalid or ambiguous. Start a new draft and choose the recipient yourself.';
+  render();return;
+ }
+ const replyContext=!forwarding&&Object.hasOwn(message,'replyContext')?
+  globalThis.StationMail?.copyReplyContext?.(message.replyContext):undefined;
+ if(!forwarding&&Object.hasOwn(message,'replyContext')&&!replyContext){state.error='Reply information is invalid. Start a new draft instead.';render();return;}
+ let body='';
+ if(forwarding){
+  if(typeof message.text!=='string'||message.text.length>4096||
+     /[\x00\u202a-\u202e\u2066-\u2069]/.test(message.text)||
+     typeof message.timestamp!=='string'||!Number.isFinite(Date.parse(message.timestamp))){
+   state.error='The text preview is unavailable for forwarding. Your existing draft is unchanged.';
+   render();return;
+  }
+  body='\n\n--- Forwarded text preview ---\nFrom: '+from+'\nDate: '+new Date(message.timestamp).toISOString()+
+   '\nSubject: '+subject+'\n\n'+message.text+
+   '\n\n[Only the text shown in the reader is included. Attachments are not forwarded.]';
+ }
+ if(await create()!==true)return;
+ state.working={...state.working,to:forwarding?[]:[recipient],subject:title,body,
+  ...(replyContext?{replyContext}:{})};
+ state.dirty=true;
+ state.notice=forwarding?'Forwarded text preview added. Enter a recipient, review the text, then save. Attachments are not included. Nothing was sent.':
+  (recipient!==from?'Reply addressed to the message Reply-To address. ':'Reply addressed to the message sender. ')+
+  (replyContext?'This reply will reference the original message. ':'')+'Write your message, then save the draft. Nothing was sent.';
+ render();
+ const input=host()?.querySelector('[data-mail-draft-field="'+(forwarding?'to':'body')+'"]');
+ input?.focus();input?.scrollIntoView?.({block:'center',behavior:'instant'});
 }
 async function save(){
  if(state.busy||state.pendingSend||!state.working)return;
@@ -316,7 +369,8 @@ async function save(){
  state.busy=true;state.error=null;state.notice=null;
  const d=state.working;
  if(!state.pendingSave)state.pendingSave={
-  id:d.id,revision:d.revision,operationId:uuid(),to:d.to,subject:d.subject,body:d.body
+  id:d.id,revision:d.revision,operationId:uuid(),to:d.to,subject:d.subject,body:d.body,
+  ...(d.replyContext?{replyContext:d.replyContext}:{})
  };
  const pending=state.pendingSave;
  render();
@@ -364,6 +418,7 @@ async function remove(){
 function sameSavedDraft(stored,working){
  return stored.id===working.id&&stored.revision===working.revision&&
   stored.subject===working.subject&&stored.body===working.body&&
+  JSON.stringify(stored.replyContext)===JSON.stringify(working.replyContext)&&
   JSON.stringify(stored.to)===JSON.stringify(working.to);
 }
 function showSendStatus(s){
@@ -378,7 +433,8 @@ async function prepareSend(){
  if(state.busy||!state.outgoingEnabled||state.pendingSend||state.dirty||!state.working)return;
  const draft=state.items.find(d=>sameSavedDraft(d,state.working));
  if(!draft||!draft.to.length)return;
- const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body};
+ const snapshot={to:draft.to.slice(),subject:draft.subject,body:draft.body,
+  ...(draft.replyContext?{replyContext:draft.replyContext}:{})};
  state.busy=true;state.error=null;state.notice=null;render();
  // Re-read the signed owner's durable outbox before allocating a new delivery ID.
  // Avoid a second preparation after a reload, even if the draft revision changed.
@@ -657,6 +713,8 @@ document.addEventListener('input',e=>{
  if(review)review.disabled=true;
 });
 globalThis.StationDrafts=Object.freeze({
+ reply:message=>draftFromMessage(message,'reply'),
+ forward:message=>draftFromMessage(message,'forward'),
  mount(container,enabled,outgoingEnabled=false,outboxEnabled=false){
   if(!container)return;
   state.enabled=enabled===true;

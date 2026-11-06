@@ -59,6 +59,14 @@ function recipientsHeader(recipients) {
   lines.push(current);
   return lines.join('\r\n');
 }
+function identificationHeader(name,ids){
+ const lines=[];let line=name+':';
+ for(const id of ids){
+  if(line.length+id.length+1>78&&line!==name+':'){lines.push(line);line=' '+id;}
+  else line+=' '+id;
+ }
+ lines.push(line);return lines.join('\r\n');
+}
 
 /**
  * A stable Message-ID helps correlate an outbox attempt but does NOT itself
@@ -93,6 +101,10 @@ export function prepareOutgoingPlainText({registry,context,mailboxId,from,draft,
     subjectHeader(payload.subject),
     'Date: '+date.toUTCString().replace(/ GMT$/,' +0000'),
     'Message-ID: '+messageId,
+    ...(payload.replyContext?[
+      identificationHeader('In-Reply-To',[payload.replyContext.parentId]),
+      identificationHeader('References',payload.replyContext.references)
+    ]:[]),
     'MIME-Version: 1.0',
     'Content-Type: text/plain; charset=UTF-8',
     'Content-Transfer-Encoding: base64'

@@ -49,6 +49,7 @@ export function createD1Outbox(db,scope,{now=()=>new Date().toISOString(),cipher
    if(!payload||!payload.draft||!Array.isArray(payload.draft.to)||
     typeof payload.draft.subject!=='string'||typeof payload.draft.body!=='string')
     fail('outbox_invalid_draft_payload');
+   if(!cipher&&Object.hasOwn(payload.draft,'replyContext'))fail('outbox_invalid_draft_payload');
    const plain=JSON.stringify(payload),at=clock();
    if(new TextEncoder().encode(plain).length>160*1024)fail('outbox_payload_limit');
    const encoded=await encode(deliveryId,payload);
@@ -242,7 +243,8 @@ export function createOutboxDispatcher({store,draftStore,ownerSub,registry,conte
    const saved=await draftStore.read({installationId:context.installationId,
     mailboxId,ownerSub},draftId);
    if(!saved||saved.revision!==draftRevision)fail('outbox_draft_stale');
-   const payload={from,draft:{to:saved.to,subject:saved.subject,body:saved.body},date:now().toISOString()};
+   const payload={from,draft:{to:saved.to,subject:saved.subject,body:saved.body,
+    ...(saved.replyContext?{replyContext:saved.replyContext}:{})},date:now().toISOString()};
    prepare(deliveryId,payload);
    return store.offerLinkedDraft(deliveryId,{draftId,draftRevision,payload});
   },

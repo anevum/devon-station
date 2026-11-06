@@ -55,7 +55,9 @@ async function parseFetch(line, bytes, decodeMime) {
   const decoded = await decodeMime(bytes);
   if (!decoded || typeof decoded !== 'object' || !ascii(decoded.from, 254) ||
       typeof decoded.subject !== 'string' || typeof decoded.text !== 'string') reject('imap_invalid_mime');
-  return {uid,from:decoded.from,subject:decoded.subject,text:decoded.text,timestamp,flags};
+  return {uid,from:decoded.from,subject:decoded.subject,text:decoded.text,timestamp,flags,
+    ...(Object.hasOwn(decoded,'replyTo')?{replyTo:decoded.replyTo}:{}),
+    ...(Object.hasOwn(decoded,'replyContext')?{replyContext:decoded.replyContext}:{})};
 }
 
 function validateCommand(command, purpose='inbox', sentExamined=false) {

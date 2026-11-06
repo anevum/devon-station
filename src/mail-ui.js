@@ -18,6 +18,14 @@
     el.dataset.mailAction=action;
     return el;
   }
+  function copyReplyContext(value){
+    const id=x=>typeof x==='string'&&x.length<=254&&/^<[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.!#$%&'*+/=?^_`{|}~-]+>$/i.test(x)&&
+      x.slice(1,-1).split('@').every(p=>!p.startsWith('.')&&!p.endsWith('.')&&!p.includes('..'));
+    if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==2||!id(value.parentId)||
+       !Array.isArray(value.references)||!value.references.length||value.references.length>20||
+       !value.references.every(id)||new Set(value.references).size!==value.references.length||value.references.at(-1)!==value.parentId)return null;
+    return Object.freeze({parentId:value.parentId,references:Object.freeze([...value.references])});
+  }
   function sanitizeResponse(value,offset=0){
     if(!value || typeof value!=='object' || !Array.isArray(value.messages) || value.messages.length>50 ||
        !Number.isSafeInteger(value.total) || value.total<0 || value.total>5000 ||
@@ -32,7 +40,14 @@
          !Array.isArray(row.flags) || row.flags.some(f=>!['seen','answered','flagged','draft'].includes(f)))
         throw Error('invalid_mail_response');
       keys.add(row.key);
+      if(Object.hasOwn(row,'replyTo')&&row.replyTo!==null&&
+         (typeof row.replyTo!=='string'||row.replyTo.length>254||/[\x00-\x20\x7f]/.test(row.replyTo)))
+        throw Error('invalid_mail_response');
+      const replyContext=Object.hasOwn(row,'replyContext')?copyReplyContext(row.replyContext):undefined;
+      if(replyContext===null)throw Error('invalid_mail_response');
       return Object.freeze({key:row.key,from:row.from,subject:row.subject,text:row.text,
+        ...(replyContext?{replyContext}:{}),
+        ...(Object.hasOwn(row,'replyTo')?{replyTo:row.replyTo}:{}),
         timestamp:row.timestamp,flags:Object.freeze(row.flags.slice())});
     });
     return {messages,total:value.total,offset,revision:value.revision};
@@ -175,7 +190,17 @@
       const dt=node('dt','','From');const dd=node('dd','',item.from);
       const dt2=node('dt','','Date');const dd2=node('dd');dd2.append(date);
       meta.append(dt,dd,dt2,dd2);
+      if(typeof item.replyTo==='string')meta.append(node('dt','','Reply-To'),node('dd','',item.replyTo));
       reader.append(meta);
+      if(item.replyTo===null)reader.append(node('p','mail-error','Reply-To is invalid or ambiguous. Start a new draft and choose the recipient yourself.'));
+      if(state.status?.draftsEnabled&&globalThis.StationDrafts?.reply){
+        const reply=button(item.replyTo&&item.replyTo!==item.from?'Reply to reply address':'Reply to sender','reply');
+        reply.disabled=state.busy||item.replyTo===null;reader.append(reply);
+        if(globalThis.StationDrafts?.forward){
+          const forward=button('Forward text','forward');
+          forward.disabled=state.busy;reader.append(forward);
+        }
+      }
       const text=node('div','mail-body',item.text);
       text.setAttribute('aria-label','Plain text message body');
       reader.append(text);
@@ -397,12 +422,22 @@
     if(action==='catchup'){void sync(10);return;}
     if(action==='reload'){void start();return;}
     if(action==='stop'){state.stopRequested=true;render();return;}
+    if(action==='reply'||action==='forward'){
+      const item=state.items.find(x=>x.key===state.selected);
+      if(!state.busy&&state.status?.draftsEnabled&&item)
+        void globalThis.StationDrafts?.[action]?.({from:item.from,subject:item.subject,
+          ...(Object.hasOwn(item,'replyTo')?{replyTo:item.replyTo}:{}),
+          ...(Object.hasOwn(item,'replyContext')?{replyContext:item.replyContext}:{}),
+          ...(action==='forward'?{text:item.text,timestamp:item.timestamp}:{})});
+      return;
+    }
     if(action==='select'){
       const key=button.dataset.mailKey;
       if(state.items.some(x=>x.key===key)){state.selected=key;render();}
     }
   });
   globalThis.StationMail=Object.freeze({
+    copyReplyContext,
     mounted(section){
       if(section!=='mail'){if(state.phase==='syncing')state.stopRequested=true;return;}
       render();

@@ -24,6 +24,23 @@ function incomingAddress(value) {
     throw Object.assign(new TypeError('Invalid incoming email address'),{code:'mail_sender_address_invalid'});
   return value;
 }
+// null means the original Reply-To was present but unsafe/ambiguous. Absence
+// means no routing metadata is available; never turn null into a sender fallback.
+export const incomingReplyTo=value=>value===null?null:incomingAddress(value);
+// Conservative modern dot-atom Message-ID subset; no comments, quoted IDs,
+// domain literals or untrusted whitespace may become an outgoing header.
+export function validMessageId(value){
+ if(typeof value!=='string'||value.length>254||!/^<[a-z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-z0-9.!#$%&'*+/=?^_`{|}~-]+>$/i.test(value))return false;
+ return value.slice(1,-1).split('@').every(part=>!part.startsWith('.')&&!part.endsWith('.')&&!part.includes('..'));
+}
+export function validateReplyContext(value){
+ if(!value||typeof value!=='object'||Array.isArray(value)||Object.keys(value).length!==2||
+    !validMessageId(value.parentId)||!Array.isArray(value.references)||!value.references.length||
+    value.references.length>20||!value.references.every(validMessageId)||
+    new Set(value.references).size!==value.references.length||value.references.at(-1)!==value.parentId)
+  throw new TypeError('Invalid reply context');
+ return Object.freeze({parentId:value.parentId,references:Object.freeze([...value.references])});
+}
 function immutable(item) { return Object.freeze(item); }
 function distinct(items, key, kind) {
   const seen = new Set();
@@ -167,7 +184,9 @@ function messageRecord({uidValidity, installationId, mailboxId, item}) {
     throw new TypeError('Unsupported message flags');
   }
   return immutable({key: `${installationId}/${mailboxId}/${uidValidity}/${uid}`, installationId, mailboxId,
-    uidValidity, uid, from, subject: textField(item.subject, 512), text: textField(item.text, MAX_BODY),
+    uidValidity, uid, from, ...(Object.hasOwn(item,'replyTo')?{replyTo:incomingReplyTo(item.replyTo)}:{}),
+    ...(Object.hasOwn(item,'replyContext')?{replyContext:validateReplyContext(item.replyContext)}:{}),
+    subject: textField(item.subject, 512), text: textField(item.text, MAX_BODY),
     timestamp: new Date(timestamp).toISOString(), flags: immutable([...new Set(flags)])});
 }
 /** Deterministic, atomic *proposal* for a batch already fetched by a trusted provider adapter.
