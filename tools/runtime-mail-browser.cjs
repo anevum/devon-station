@@ -49,6 +49,21 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    assert.deepEqual(providerPosts.map(x=>x.path),['/api/mail/diagnostics/imap-check']);
    await page.getByRole('button',{name:'Synchronize Inbox',exact:true}).click();
    await page.locator('.mail-message').waitFor();await page.locator('.mail-message').click();
+   // Search is intentionally page-local. A nonmatching query must hide both
+   // message content and reply controls without contacting the backend.
+   const requestsBeforeSearch=diagnosticsRequests.length;
+   const search=page.getByRole('searchbox',{name:'Find on this page'});
+   await search.fill('does-not-exist-in-this-mailbox-index');
+   assert.equal(await page.locator('.mail-message:visible').count(),0);
+   assert.equal(await page.locator('[data-mail-filter-empty]').isVisible(),true);
+   assert.equal(await page.locator('[data-mail-reader-content]').isVisible(),false);
+   assert.equal(await page.locator('[data-mail-reader-filtered]').isVisible(),true);
+   await search.fill('Browser incoming fixture');
+   assert.equal(await page.locator('.mail-message:visible').count(),1);
+   assert.equal(await page.locator('[data-mail-reader-content]').isVisible(),true);
+   assert.equal(await page.locator('[data-mail-reader-filtered]').isVisible(),false);
+   await search.fill('');
+   assert.equal(diagnosticsRequests.length,requestsBeforeSearch);
    await page.getByRole('heading',{name:'Browser incoming fixture',exact:true}).waitFor();
    assert.match(await page.locator('.mail-body').textContent(),/Safe incoming browser message/);
    assert.equal(await page.locator('#station-mail img,#station-mail iframe,#station-mail script').count(),0);
