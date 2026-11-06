@@ -58,6 +58,8 @@ test('ledger refuses a missing prerequisite, duplicate row or already-applied ar
   x=>x.ledger.shift(),
   x=>x.ledger.push({...x.ledger[0]}),
   x=>x.ledger.push({name:'worker/migrations/0009-comms-sent-archive.sql'}),
+  x=>x.ledger.push({name:'worker/migrations/0010-unreviewed.sql'}),
+  x=>x.ledger.reverse(),
   x=>x.ledger.push({name:42})
  ]){const x=fixture();mutate(x);assert.throws(()=>assessAcceptanceMigrationReadiness(x),/refused: migration ledger/);}
 });
@@ -69,6 +71,8 @@ test('outbox schema fails closed on unexpected archive table, trigger, index dri
   x=>x.objects.pop(),
   x=>{x.objects.find(z=>z.name==='comms_outbox_saved_draft_once').sql='CREATE INDEX comms_outbox_saved_draft_once ON comms_outbox(draft_id)';},
   x=>{x.objects.find(z=>z.name==='comms_outbox').sql='CREATE TABLE comms_outbox (delivery_id TEXT)';},
+  x=>{x.objects.find(z=>z.name==='comms_outbox').sql=table.replace('BETWEEN 1 AND 1000000000','BETWEEN 1 AND 500000000');},
+  x=>{x.objects.find(z=>z.name==='comms_outbox').sql=table.replace('CHECK(json_valid(payload_json))','CHECK(length(payload_json)>0)');},
   x=>{x.columns.pop();},
   x=>{x.columns[4].notnull=0;}
  ]){const x=fixture();mutate(x);assert.throws(()=>assessAcceptanceMigrationReadiness(x),/refused:/);}
