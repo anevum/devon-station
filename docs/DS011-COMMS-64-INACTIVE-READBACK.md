@@ -58,3 +58,9 @@ The earlier migration-0009 preflight checked the sequence of migration names and
 The five expected hashes were independently computed from the exact SQL bytes in approved application PR #36 (`bba373f35f3cc913447e72fcdfff589cd6f3a073`) and compared to the isolated acceptance D1's recorded checksums. No migration source was changed; the historical values match. Synthetic regression cases reject modified, missing, swapped, non-string or otherwise noncanonical hashes.
 
 This tightens **read-only integrity evidence only**. It neither verifies the historical act of applying each migration nor proves a real off-provider restore, decryption, authenticated user path, or approval to run migration 0009. A mismatch is a stop signal for review, not permission to rewrite the migration ledger.
+
+## DS011-COMMS-67 — detect preflight drift across read passes
+
+The migration-readiness tool now reads its four fixed SQL metadata/aggregate views **twice**. Each pass must satisfy the exact approved source SHA, ledger, schema, index, and accepted/outstanding-record invariants. The tool compares the first and second result snapshots and refuses if any view differs. This detects schema, ledger or count drift visible during the preflight, including unexpected inbound changes and interrupted reads, rather than treating the first successful sequence as a durable release approval.
+
+**Important limitation:** D1's four API queries are not a single snapshot-isolated database transaction; two successful passes do not prove atomicity, freeze future mailbox activity, detect changes that retain the same reported aggregates, or authorize an actual migration. Re-run independent readiness checks immediately before any separately approved migration. The SQL remains fixed SELECT/PRAGMA against isolated acceptance D1; no mail payloads or keys are exported. The new checks are covered by synthetic second-pass drift and redacted-provider-failure regression tests.
