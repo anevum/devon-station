@@ -107,3 +107,6 @@ textarea.mail-draft-field{resize:vertical;min-height:180px}
 .mail-page-search:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
 .mail-page-search-summary{margin:0;padding:9px 14px;border-bottom:1px solid var(--line);font-size:11px;color:var(--muted);line-height:1.5}
 .mail-message[hidden]{display:none!important}
+
+/* Hiding a filtered reader must override display-driven placeholder styling. */
+.mail-reader-content[hidden],.mail-placeholder[hidden],.mail-empty[hidden]{display:none!important}
