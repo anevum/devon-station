@@ -1,0 +1,122 @@
+name: DS011 Communications - manual acceptance version upload only
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Approved SHA bba373f35f3cc913447e72fcdfff589cd6f3a073 only
+        required: true
+        type: string
+      operation:
+        description: Type UPLOAD_VERSION_ONLY_NO_DEPLOY to authorize an inactive version upload
+        required: true
+        type: string
+permissions:
+  contents: read
+  pull-requests: read
+concurrency:
+  group: ds011-mail-acceptance-version-only
+  cancel-in-progress: false
+
+jobs:
+  review-unprivileged:
+    if: ${{ github.ref == 'refs/heads/main' && inputs.operation == 'UPLOAD_VERSION_ONLY_NO_DEPLOY' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Require exact current Communications PR head
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$EXPECTED_SHA" = 'bba373f35f3cc913447e72fcdfff589cd6f3a073'
+          PR_HEAD="$(gh api "repos/$GITHUB_REPOSITORY/pulls/36" --jq '.head.sha')"
+          test "$PR_HEAD" = "$EXPECTED_SHA"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ inputs.source_sha }}
+          persist-credentials: false
+      - name: Confirm pinned checkout
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$EXPECTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=no)"
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - run: npm ci --ignore-scripts --no-audit --no-fund
+      - run: npm test
+      - run: npm run build
+      - run: npm run verify:privacy
+      - name: Reproduce and verify review-only artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          node tools/prepare-rb01-review.mjs
+          node tools/comms-acceptance-upload.mjs --verify
+          (cd release-review && sha256sum -c SHA256SUMS)
+      - name: Preserve reviewed candidate as data, not executable tooling
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: ds011-mail-acceptance-exact-sha
+          path: release-review/
+          if-no-files-found: error
+          retention-days: 1
+
+  upload-version-only:
+    needs: review-unprivileged
+    if: ${{ needs.review-unprivileged.result == 'success' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: ds011-mail-acceptance
+    steps:
+      # This is the trusted WORKFLOW commit, not the candidate PR head.
+      # Never execute scripts extracted from the candidate review artifact with a Cloudflare token.
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Download untrusted candidate as review data only
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: ds011-mail-acceptance-exact-sha
+          path: release-review/
+      - name: Verify trusted uploader, archive checksums, and owner-enabled gate
+        shell: bash
+        env:
+          TRUSTED_SHA: ${{ github.workflow_sha }}
+          DS011_TRUSTED_UPLOADER_SHA: ${{ github.workflow_sha }}
+          DS011_APPROVED_SOURCE_SHA: ${{ inputs.source_sha }}
+          STAGE_ENABLED: ${{ vars.DS011_MAIL_ACCEPTANCE_STAGE_ENABLED }}
+        run: |
+          set -euo pipefail
+          test "$(git rev-parse HEAD)" = "$TRUSTED_SHA"
+          test -z "$(git status --porcelain=v1 --untracked-files=no)"
+          test "$STAGE_ENABLED" = 'true'
+          node tools/comms-acceptance-upload.mjs --verify-approved
+          node --test tests/comms-acceptance-upload.test.mjs
+      - name: Recheck exact PR head immediately before version upload
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          APPROVED_SHA: ${{ inputs.source_sha }}
+        run: |
+          set -euo pipefail
+          test "$APPROVED_SHA" = 'bba373f35f3cc913447e72fcdfff589cd6f3a073'
+          test "$(gh api "repos/$GITHUB_REPOSITORY/pulls/36" --jq '.head.sha')" = "$APPROVED_SHA"
+      - name: Upload inactive Cloudflare version ONLY (no deployment)
+        env:
+          DS011_ALLOW_ACCEPTANCE_UPLOAD: 'true'
+          DS011_APPROVED_SOURCE_SHA: ${{ inputs.source_sha }}
+          DS011_TRUSTED_UPLOADER_SHA: ${{ github.workflow_sha }}
+          CLOUDFLARE_API_TOKEN: ${{ secrets.DS011_CF_ACCEPTANCE_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.DS011_CF_ACCOUNT_ID }}
+        run: node tools/comms-acceptance-upload.mjs --upload
