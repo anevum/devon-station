@@ -7,10 +7,11 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 
-// Owner-approved immutable release. Changes require a new reviewed authorization.
+// Proposed next immutable release pin, pending explicit owner authorization.
+// This draft source change is not permission to upload, activate, migrate or send.
 export const APPROVED_RELEASE=Object.freeze({
- sourceCommit:'bba373f35f3cc913447e72fcdfff589cd6f3a073',
- candidateSha256:'119ef1d3b3212f34be707a7262be11071b177fd532e9661768a4d74d9125d32d'
+ sourceCommit:'be6644f58297dedfcd1c1d60ec2aef17e64b0f35',
+ candidateSha256:'07491e2aa5aa9dab75d8a1ce211645c70d367011310e481e4febd811bc764aa1'
 });
 const WORKER='devon-station-mail-acceptance';
 const PRODUCTION_WORKER='devon-station';
@@ -178,7 +179,7 @@ export function buildVersionForm(modules,sourceSha,inherited){
   bindings:[...inherited,{type:'version_metadata',name:'CF_VERSION_METADATA'}],
   annotations:{'workers/commit_sha':sourceSha,
    'workers/repository_url':'https://github.com/devonalanakins/devon-station',
-   'workers/pull_request_number':'36',
+   'workers/pull_request_number':'44',
    'workers/message':'DS011 Communications acceptance only; never deploy or enable sending automatically'}
  };
  const form=new FormData();
