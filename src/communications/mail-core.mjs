@@ -24,6 +24,9 @@ function incomingAddress(value) {
     throw Object.assign(new TypeError('Invalid incoming email address'),{code:'mail_sender_address_invalid'});
   return value;
 }
+// null means the original Reply-To was present but unsafe/ambiguous. Absence
+// means no routing metadata is available; never turn null into a sender fallback.
+export const incomingReplyTo=value=>value===null?null:incomingAddress(value);
 function immutable(item) { return Object.freeze(item); }
 function distinct(items, key, kind) {
   const seen = new Set();
@@ -167,7 +170,8 @@ function messageRecord({uidValidity, installationId, mailboxId, item}) {
     throw new TypeError('Unsupported message flags');
   }
   return immutable({key: `${installationId}/${mailboxId}/${uidValidity}/${uid}`, installationId, mailboxId,
-    uidValidity, uid, from, subject: textField(item.subject, 512), text: textField(item.text, MAX_BODY),
+    uidValidity, uid, from, ...(Object.hasOwn(item,'replyTo')?{replyTo:incomingReplyTo(item.replyTo)}:{}),
+    subject: textField(item.subject, 512), text: textField(item.text, MAX_BODY),
     timestamp: new Date(timestamp).toISOString(), flags: immutable([...new Set(flags)])});
 }
 /** Deterministic, atomic *proposal* for a batch already fetched by a trusted provider adapter.

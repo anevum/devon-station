@@ -323,12 +323,17 @@ async function draftFromMessage(message,mode){
  const from=message?.from,subject=message?.subject;
  const address=/^[a-z0-9.!#$%&'*+/=?^_\x60{|}~-]+@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)+$/i;
  const forwarding=mode==='forward';
+ const recipient=!forwarding&&Object.hasOwn(message,'replyTo')?message.replyTo:from;
  const prefix=forwarding?'Fwd: ':'Re: ';
  const existingPrefix=forwarding?/^(?:fwd|fw):/i:/^re:/i;
  const title=typeof subject==='string'&&existingPrefix.test(subject)?subject:prefix+subject;
  if(typeof from!=='string'||from.length>254||!address.test(from)||from.includes('..')||
     typeof subject!=='string'||title.length>512||/[\x00-\x1f\x7f\u202a-\u202e\u2066-\u2069]/.test(title)){
   state.error='This message cannot prefill a '+(forwarding?'forward':'reply')+' safely. Start a new draft and enter the recipient and subject yourself.';
+  render();return;
+ }
+ if(!forwarding&&(typeof recipient!=='string'||recipient.length>254||!address.test(recipient)||recipient.includes('..'))){
+  state.error='Reply-To is invalid or ambiguous. Start a new draft and choose the recipient yourself.';
   render();return;
  }
  let body='';
@@ -344,10 +349,11 @@ async function draftFromMessage(message,mode){
    '\n\n[Only the text shown in the reader is included. Attachments are not forwarded.]';
  }
  if(await create()!==true)return;
- state.working={...state.working,to:forwarding?[]:[from],subject:title,body};
+ state.working={...state.working,to:forwarding?[]:[recipient],subject:title,body};
  state.dirty=true;
  state.notice=forwarding?'Forwarded text preview added. Enter a recipient, review the text, then save. Attachments are not included. Nothing was sent.':
-  'Reply addressed to the message sender. Write your message, then save the draft. Nothing was sent.';
+  (recipient!==from?'Reply addressed to the message Reply-To address. ':'Reply addressed to the message sender. ')+
+  'Write your message, then save the draft. Nothing was sent.';
  render();
  const input=host()?.querySelector('[data-mail-draft-field="'+(forwarding?'to':'body')+'"]');
  input?.focus();input?.scrollIntoView?.({block:'center',behavior:'instant'});

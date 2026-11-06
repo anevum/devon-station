@@ -62,12 +62,13 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    await page.getByLabel('To (comma-separated addresses)',{exact:true}).fill('forward-recipient@example.test');
    await page.getByRole('button',{name:'Save Draft',exact:true}).click();
    await page.getByText(/^Draft saved at revision [0-9]+\. No message was sent\.$/,{exact:true}).waitFor();
-   await page.getByRole('button',{name:'Reply to sender',exact:true}).click();
+   await page.getByRole('button',{name:'Reply to reply address',exact:true}).click();
    // The prior forward editor is still visible while the new draft is created.
    // Wait for the new working copy rather than merely an existing textbox.
    await page.waitForFunction(()=>document.querySelector('[data-mail-draft-field="subject"]')?.value==='Re: Browser incoming fixture');
    assert.equal(await page.getByLabel('Subject',{exact:true}).inputValue(),'Re: Browser incoming fixture');
    assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'');
+   assert.equal(await page.getByLabel('To (comma-separated addresses)',{exact:true}).inputValue(),'private-reply-target@example.test');
    assert.equal(provider.evidence.smtpConnections,0);
    assert.equal(provider.evidence.dataWrites,0);
    await page.getByLabel('To (comma-separated addresses)',{exact:true}).fill('synthetic-recipient@example.test');
@@ -93,7 +94,7 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    // A different signed subject cannot list mail even with the same named email.
    const denied=await context.request.get(server.url+'/api/mail/inbox',{headers:{'Cf-Access-Jwt-Assertion':token('not-owner')}});assert.equal(denied.status(),403);
    assert.equal(server.externalCalls(),0);
-   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,replyDraft:true,forwardDraft:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
+   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,replyDraft:true,replyToRouting:true,forwardDraft:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
    await context.close();await server.close();server=null;
   }
   writeFileSync(join(__dirname,'mail-browser-results.json'),JSON.stringify({provider:'synthetic-only',results},null,2));console.log(JSON.stringify({provider:'synthetic-only',results}));

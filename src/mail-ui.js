@@ -32,7 +32,11 @@
          !Array.isArray(row.flags) || row.flags.some(f=>!['seen','answered','flagged','draft'].includes(f)))
         throw Error('invalid_mail_response');
       keys.add(row.key);
+      if(Object.hasOwn(row,'replyTo')&&row.replyTo!==null&&
+         (typeof row.replyTo!=='string'||row.replyTo.length>254||/[\x00-\x20\x7f]/.test(row.replyTo)))
+        throw Error('invalid_mail_response');
       return Object.freeze({key:row.key,from:row.from,subject:row.subject,text:row.text,
+        ...(Object.hasOwn(row,'replyTo')?{replyTo:row.replyTo}:{}),
         timestamp:row.timestamp,flags:Object.freeze(row.flags.slice())});
     });
     return {messages,total:value.total,offset,revision:value.revision};
@@ -175,10 +179,12 @@
       const dt=node('dt','','From');const dd=node('dd','',item.from);
       const dt2=node('dt','','Date');const dd2=node('dd');dd2.append(date);
       meta.append(dt,dd,dt2,dd2);
+      if(typeof item.replyTo==='string')meta.append(node('dt','','Reply-To'),node('dd','',item.replyTo));
       reader.append(meta);
+      if(item.replyTo===null)reader.append(node('p','mail-error','Reply-To is invalid or ambiguous. Start a new draft and choose the recipient yourself.'));
       if(state.status?.draftsEnabled&&globalThis.StationDrafts?.reply){
-        const reply=button('Reply to sender','reply');
-        reply.disabled=state.busy;reader.append(reply);
+        const reply=button(item.replyTo&&item.replyTo!==item.from?'Reply to reply address':'Reply to sender','reply');
+        reply.disabled=state.busy||item.replyTo===null;reader.append(reply);
         if(globalThis.StationDrafts?.forward){
           const forward=button('Forward text','forward');
           forward.disabled=state.busy;reader.append(forward);
@@ -409,6 +415,7 @@
       const item=state.items.find(x=>x.key===state.selected);
       if(!state.busy&&state.status?.draftsEnabled&&item)
         void globalThis.StationDrafts?.[action]?.({from:item.from,subject:item.subject,
+          ...(Object.hasOwn(item,'replyTo')?{replyTo:item.replyTo}:{}),
           ...(action==='forward'?{text:item.text,timestamp:item.timestamp}:{})});
       return;
     }

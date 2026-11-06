@@ -1,7 +1,7 @@
 // Deterministic, in-memory protocol fixture. There is no real network transport.
 export function syntheticMailProvider(){
  const evidence={imapConnections:0,smtpConnections:0,dataWrites:0};
- const incoming=new TextEncoder().encode('From: Synthetic Author <synthetic-author@example.test>\r\nSubject: Browser incoming fixture\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSafe incoming browser message. <img src="https://tracker.invalid/pixel">');
+ const incoming=new TextEncoder().encode('From: Synthetic Author <synthetic-author@example.test>\r\nSubject: Browser incoming fixture\r\nReply-To: Private replies <private-reply-target@example.test>\r\nContent-Type: text/plain; charset=utf-8\r\n\r\nSafe incoming browser message. <img src="https://tracker.invalid/pixel">');
  return {evidence,connect(address,options){
   if(options.secureTransport!=='on'||!['imap.purelymail.com','smtp.purelymail.com'].includes(address.hostname))throw Error('unexpected fixture socket');
   const imap=address.hostname==='imap.purelymail.com';

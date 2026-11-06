@@ -1,6 +1,6 @@
 // COMMS-04: source-only, provider-neutral read-only orchestration. No network or database driver.
 // All configuration, provider factories, store handles and identity context MUST be server-owned.
-import {accessibleMailboxes, hasMailPermission, reconcileImapBatch} from './mail-core.mjs';
+import {accessibleMailboxes, hasMailPermission, reconcileImapBatch,incomingReplyTo} from './mail-core.mjs';
 import {PURELYMAIL} from './mail-onboarding.mjs';
 
 const MAX_POLL = 100;
@@ -53,6 +53,9 @@ function safeSnapshot(snapshot, scope) {
       throw new MailReadOnlyError('invalid_scoped_snapshot', 500);
     }
     keys.add(row.key);
+    if(Object.hasOwn(row,'replyTo')){
+      try{incomingReplyTo(row.replyTo);}catch{throw new MailReadOnlyError('invalid_scoped_snapshot',500);}
+    }
   }
   return snapshot;
 }
@@ -169,6 +172,7 @@ export async function listReadOnlyInbox({registry,context,mailboxId,store,limit 
   const rows=snapshot.records.slice().sort((a,b)=>
     Date.parse(b.timestamp)-Date.parse(a.timestamp) || b.uidValidity-a.uidValidity || b.uid-a.uid)
     .slice(offset,offset+limit).map(row=>Object.freeze({key:row.key,from:row.from,
+      ...(Object.hasOwn(row,'replyTo')?{replyTo:row.replyTo}:{}),
       subject:row.subject,text:row.text,timestamp:row.timestamp,flags:Object.freeze([...row.flags])}));
   return Object.freeze({mailboxId,revision:snapshot.revision,total:snapshot.records.length,
     offset,limit,messages:Object.freeze(rows)});

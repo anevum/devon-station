@@ -269,3 +269,29 @@ test('a saved forward stays separate when the owner subsequently opens a reply',
  assert.equal(x.calls.filter(c=>c.path.endsWith('/save')).length,1,'new reply must require its own explicit save');
  x.dom.window.close();
 });
+
+test('Reply-To is visible and prefills the distinct reply recipient without altering the sender',async()=>{
+ const x=setup({messages:[{...incoming,replyTo:'support@example.org'}]});await wait();
+ const reader=x.doc.querySelector('.mail-reader');assert(reader.textContent.includes(incoming.from));
+ assert(reader.textContent.includes('support@example.org'));
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="to"]').value,'support@example.org');
+ assert.match(x.doc.querySelector('#mail-drafts').textContent,/message Reply-To address/);
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/save')||/outbox|smtp/.test(c.path)).length,0);x.dom.window.close();
+});
+test('ambiguous Reply-To never falls back to From, while reading and forwarding stay available',async()=>{
+ const message={...incoming,replyTo:null};const x=setup({messages:[message]});await wait();
+ assert.equal(x.doc.querySelector('[data-mail-action="reply"]').disabled,true);
+ assert.match(x.doc.querySelector('.mail-reader').textContent,/Reply-To is invalid or ambiguous/);
+ await x.dom.window.StationDrafts.reply(message);
+ assert.equal(x.calls.filter(c=>c.method==='POST').length,0);
+ x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="to"]').value,'');
+ assert(x.doc.querySelector('[data-mail-draft-field="body"]').value.includes(incoming.text));x.dom.window.close();
+});
+test('malformed routing from a client call cannot create a reply draft',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ for(const replyTo of ['a@example.org,b@example.org','a@example.org\nBcc:b@example.org',42,{}])
+  await x.dom.window.StationDrafts.reply({...incoming,replyTo});
+ assert.equal(x.calls.filter(c=>c.method==='POST').length,0);x.dom.window.close();
+});
