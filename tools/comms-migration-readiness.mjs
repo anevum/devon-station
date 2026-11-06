@@ -31,6 +31,16 @@ const indexDefinitions=Object.freeze({
  comms_outbox_saved_draft_once:
   'CREATE UNIQUE INDEX comms_outbox_saved_draft_once ON comms_outbox(installation_id,mailbox_id,owner_sub,draft_id) WHERE draft_id IS NOT NULL'
 });
+// Exact reviewed schema after migrations 0006/0007. A new constraint, column,
+// or unexpected redefinition requires a human-reviewed baseline update.
+const expectedOutboxTable=`CREATE TABLE comms_outbox (
+ installation_id TEXT NOT NULL, mailbox_id TEXT NOT NULL, owner_sub TEXT NOT NULL,
+ delivery_id TEXT NOT NULL, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),
+ state TEXT NOT NULL CHECK(state IN ('queued','claimed','accepted','rejected','failed','uncertain')),
+ claim_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, draft_id TEXT, draft_revision INTEGER
+ CHECK (draft_revision IS NULL OR (draft_revision BETWEEN 1 AND 1000000000)),
+ PRIMARY KEY(installation_id,mailbox_id,owner_sub,delivery_id)
+)`;
 const outboxColumns=Object.freeze([
  ['installation_id','TEXT',1],['mailbox_id','TEXT',1],['owner_sub','TEXT',1],
  ['delivery_id','TEXT',1],['payload_json','TEXT',1],['state','TEXT',1],
@@ -45,9 +55,8 @@ const safeRows=value=>{
 
 export function assessAcceptanceMigrationReadiness({ledger,objects,columns,counts}){
  const migrations=safeRows(ledger).map(x=>x.name);
- if(migrations.some(x=>typeof x!=='string'||x.length>180)||new Set(migrations).size!==migrations.length||
-    expectedMigrations.some(x=>!migrations.includes(x))||
-    migrations.some(x=>/0009-comms-sent-archive\.sql$/.test(x)))
+ if(migrations.length!==expectedMigrations.length||
+    migrations.some((x,i)=>x!==expectedMigrations[i]))
   refuse('migration ledger incomplete, duplicated or already includes 0009');
  const schema=safeRows(objects);
  if(schema.length!==3||schema.some(x=>!Object.hasOwn(indexDefinitions,x.name)&&x.name!=='comms_outbox')||
@@ -55,10 +64,7 @@ export function assessAcceptanceMigrationReadiness({ledger,objects,columns,count
   refuse('archive objects exist, or required outbox schema is incomplete');
  const table=schema.find(x=>x.name==='comms_outbox');
  const definition=typeof table?.sql==='string'?sqlKey(table.sql):'';
- if(table?.type!=='table'||!definition.startsWith('create table comms_outbox(')||
-    !definition.includes('primary key(installation_id,mailbox_id,owner_sub,delivery_id)')||
-    !definition.includes('check(json_valid(payload_json))')||
-    !definition.includes("state in('queued','claimed','accepted','rejected','failed','uncertain')"))
+ if(table?.type!=='table'||definition!==sqlKey(expectedOutboxTable))
   refuse('outbox table constraints differ from reviewed prerequisites');
  for(const [name,expected] of Object.entries(indexDefinitions)){
   const object=schema.find(x=>x.name===name);
