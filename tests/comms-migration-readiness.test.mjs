@@ -5,11 +5,17 @@ import {
  assessAcceptanceMigrationReadiness,preflightAcceptanceMigration0009
 } from '../tools/comms-migration-readiness.mjs';
 
-const ledger=()=>[4,5,6,7,8].map((n,i)=>({
- name:'worker/migrations/000'+n+'-'+[
-  'comms-ro-mail','comms-drafts','comms-outbox','comms-draft-outbox-lineage',
-  'comms-one-delivery-per-draft'
- ][i]+'.sql'
+// These values were independently checked against the exact PR #36 source
+// bytes and the isolated acceptance D1 migration ledger. Only nonsecret hashes.
+const migrations=Object.freeze([
+ ['0004-comms-ro-mail','025a0397c98b90a4566e777e3851c58cb91478f84af02389459bf9bd59486e48'],
+ ['0005-comms-drafts','f418547e7aa89978a2fd3815ee98492f1489a3476e39f627eb0e8a90afcc3e7d'],
+ ['0006-comms-outbox','e13a0b179343592b8592373634dcb54c4147a663497da7b7292f538be73b0864'],
+ ['0007-comms-draft-outbox-lineage','a4953d41ee4d1a93974ccd08c2e058fe3a2a32db745d52840778ac2cdeae17c1'],
+ ['0008-comms-one-delivery-per-draft','adbf26a703aad288ace491864f2107e215a349c665bbe5968a327d7ff55baeb9']
+]);
+const ledger=()=>migrations.map(([slug,sha256])=>({
+ name:'worker/migrations/'+slug+'.sql',sha256
 }));
 const table='CREATE TABLE comms_outbox (\n installation_id TEXT NOT NULL, mailbox_id TEXT NOT NULL, owner_sub TEXT NOT NULL,\n delivery_id TEXT NOT NULL, payload_json TEXT NOT NULL CHECK(json_valid(payload_json)),\n state TEXT NOT NULL CHECK(state IN (\'queued\',\'claimed\',\'accepted\',\'rejected\',\'failed\',\'uncertain\')),\n claim_id TEXT, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, draft_id TEXT, draft_revision INTEGER\n CHECK (draft_revision IS NULL OR (draft_revision BETWEEN 1 AND 1000000000)),\n PRIMARY KEY(installation_id,mailbox_id,owner_sub,delivery_id)\n)';
 const objects=()=>[
@@ -62,6 +68,23 @@ test('ledger refuses a missing prerequisite, duplicate row or already-applied ar
   x=>x.ledger.reverse(),
   x=>x.ledger.push({name:42})
  ]){const x=fixture();mutate(x);assert.throws(()=>assessAcceptanceMigrationReadiness(x),/refused: migration ledger/);}
+});
+
+test('migration ledger rejects altered, absent, swapped and noncanonical SQL source digests',()=>{
+ const wrong=[
+  x=>{x.ledger[0].sha256='0'.repeat(64);},
+  x=>{x.ledger[0].sha256=x.ledger[1].sha256;},
+  x=>{x.ledger[0].sha256=x.ledger[0].sha256.toUpperCase();},
+  x=>{delete x.ledger[0].sha256;},
+  x=>{x.ledger[0].sha256=null;},
+  x=>{x.ledger[0].sha256=42;},
+  x=>{x.ledger[0].sha256+='0';},
+  x=>{const prior=x.ledger[2].sha256;x.ledger[2].sha256=x.ledger[3].sha256;x.ledger[3].sha256=prior;}
+ ];
+ for(const change of wrong){
+  const x=fixture();change(x);
+  assert.throws(()=>assessAcceptanceMigrationReadiness(x),/migration ledger name or source checksum/);
+ }
 });
 
 test('outbox schema fails closed on unexpected archive table, trigger, index drift or conflicting table constraints',()=>{
