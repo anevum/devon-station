@@ -50,3 +50,11 @@ Observed point-in-time baseline: migration ledger contains exactly `0004`–`000
 The existing release-control source-review workflow now runs `node --test tests/comms-migration-readiness.test.mjs` in a **synthetic** environment alongside the original uploader and inactive-version checks. It is not the actual D1 client and cannot prove provider availability. This preflight is conservative and is intended to stop on any changed acceptance data; an intentional new email or schema change requires a fresh review rather than silently updating expected counts.
 
 **Release remains NO-GO:** independent off-provider backup and separately controlled complete key-ring recovery have not been verified. Owner approval for applying migration 0009 and for activating the inactive acceptance version are distinct outstanding gates. Do not migrate the real acceptance DB or enable SMTP based on this metadata result. Production stays untouched.
+
+## DS011-COMMS-66 — migration-ledger checksum integrity
+
+The earlier migration-0009 preflight checked the sequence of migration names and the current SQL schema, but failed to validate the `sha256` field already stored with each applied migration. A malicious or accidentally altered ledger with the correct names could therefore pass. The preflight now selects `name, sha256` and requires **exact SHA-256 parity for every applied migration 0004–0008**.
+
+The five expected hashes were independently computed from the exact SQL bytes in approved application PR #36 (`bba373f35f3cc913447e72fcdfff589cd6f3a073`) and compared to the isolated acceptance D1's recorded checksums. No migration source was changed; the historical values match. Synthetic regression cases reject modified, missing, swapped, non-string or otherwise noncanonical hashes.
+
+This tightens **read-only integrity evidence only**. It neither verifies the historical act of applying each migration nor proves a real off-provider restore, decryption, authenticated user path, or approval to run migration 0009. A mismatch is a stop signal for review, not permission to rewrite the migration ledger.
