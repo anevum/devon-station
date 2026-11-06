@@ -104,14 +104,36 @@ export function assessAcceptanceMigrationReadiness({ledger,objects,columns,count
 
 export async function preflightAcceptanceMigration0009({query}={}){
  if(typeof query!=='function')refuse('read-only D1 query adapter is missing');
- const result={};
- // Only constant SQL in this fixed allowlist is sent, always to the pinned
- // acceptance MAIL_DB. No message body, recipient or ciphertext is selected.
- for(const [name,sql] of Object.entries(MIGRATION_READINESS_SQL)){
-  let rows;
-  try{rows=await query(ACCEPTANCE_MAIL_DB_ID,sql);}
-  catch{refuse('metadata or aggregate query unavailable');}
-  result[name]=safeRows(rows);
- }
- return assessAcceptanceMigrationReadiness(result);
+ // D1's SQL API is not one read transaction across these requests. Check all
+ // four metadata/count views twice to detect drift visible between passes.
+ // The comparison is deliberately fail-closed. It does NOT confer atomicity:
+ // writes after the final read, or replacements with identical aggregate
+ // results, still require a fresh pre-migration gate.
+ const readPass=async()=>{
+  const rowsByQuery={};
+  const readback={};
+  // Only constant SQL in this fixed allowlist is sent, always to the pinned
+  // acceptance MAIL_DB. No message body, recipient or ciphertext is selected.
+  for(const [name,sql] of Object.entries(MIGRATION_READINESS_SQL)){
+   let rows;
+   try{rows=await query(ACCEPTANCE_MAIL_DB_ID,sql);}
+   catch{refuse('metadata or aggregate query unavailable');}
+   rowsByQuery[name]=safeRows(rows);
+   // Freeze an immediate snapshot: adapters may reuse/mutate returned objects.
+   // Never surface a snapshot, SQL, or provider exception in an error.
+   readback[name]=JSON.stringify(rowsByQuery[name]);
+  }
+  return {rowsByQuery,readback};
+ };
+ const initial=await readPass();
+ const assessment=assessAcceptanceMigrationReadiness(initial.rowsByQuery);
+ const rechecked=await readPass();
+ assessAcceptanceMigrationReadiness(rechecked.rowsByQuery);
+ for(const name of Object.keys(MIGRATION_READINESS_SQL))
+  if(initial.readback[name]!==rechecked.readback[name])
+   refuse('acceptance metadata or aggregate counts changed during verification');
+ return Object.freeze({
+  ...assessment,readPasses:2,
+  proofScope:'TWO_PASS_READ_ONLY_METADATA_AND_AGGREGATES_NOT_ATOMIC'
+ });
 }
