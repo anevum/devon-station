@@ -81,19 +81,26 @@
         response.status===409?'mail_inbox_changed':'mail_request_failed');
     return response.json();
   }
+  function matchesSearch(item,query=state.search.trim().toLowerCase()){
+    return !query||[item.from,item.subject,item.text].some(value=>value.toLowerCase().includes(query));
+  }
   function filterLoadedPage(root){
     const query=state.search.trim().toLowerCase();
-    let visible=0;
-    for(const row of root.querySelectorAll('.mail-message')){
-      const item=state.items.find(message=>message.key===row.dataset.mailKey);
-      const match=!!item&&(!query||[item.from,item.subject,item.text]
-        .some(value=>value.toLowerCase().includes(query)));
-      row.hidden=!match;if(match)visible++;
-    }
+    const matches=new Set(state.items.filter(item=>matchesSearch(item,query)).map(item=>item.key));
+    for(const row of root.querySelectorAll('.mail-message'))row.hidden=!matches.has(row.dataset.mailKey);
+    const visible=matches.size;
     const summary=root.querySelector('[data-mail-search-summary]');
     if(summary)summary.textContent=query?
       visible+' of '+state.items.length+' loaded messages match. Other pages are not searched.':
       'Search is limited to the currently loaded inbox page.';
+    const empty=root.querySelector('[data-mail-filter-empty]');
+    if(empty)empty.hidden=!query||visible>0||state.items.length===0;
+    // Do not leave reply/forward controls for a hidden, previously selected mail.
+    // Preserve the selection in memory so clearing the search restores the reader.
+    const selectedHidden=!!query&&state.selected!==null&&!matches.has(state.selected);
+    const selected=root.querySelector('[data-mail-reader-content]');
+    const filtered=root.querySelector('[data-mail-reader-filtered]');
+    if(selected&&filtered){selected.hidden=selectedHidden;filtered.hidden=!selectedHidden;}
   }
   function render(){
     const root=document.getElementById('station-mail');
@@ -174,7 +181,10 @@
       search.placeholder='Sender, subject or message text';search.value=state.search;
       label.append(search);listing.append(label);
       const summary=node('p','mail-page-search-summary');
-      summary.dataset.mailSearchSummary='true';listing.append(summary);
+      summary.dataset.mailSearchSummary='true';
+      summary.setAttribute('aria-live','polite');
+      summary.setAttribute('aria-atomic','true');
+      listing.append(summary);
       search.addEventListener('input',()=>{
         state.search=search.value.slice(0,120);
         filterLoadedPage(root);
@@ -203,6 +213,10 @@
       listing.append(node('p','mail-empty',state.status?.configured?
         'No synchronized messages. Select Synchronize Inbox to check for mail.':
         'The initial mailbox must be configured and authorized before it can be used.'));
+    }
+    if(state.status?.configured){
+      const empty=node('p','mail-empty','No matches on this loaded page. Clear the search or choose Newer/Older.');
+      empty.dataset.mailFilterEmpty='true';empty.hidden=true;listing.append(empty);
     }
     const reader=node('article','mail-reader');
     reader.setAttribute('aria-label','Selected message');
@@ -233,6 +247,13 @@
     } else {
       reader.append(node('div','mail-placeholder','Select a message to read it securely.'));
     }
+    const content=node('div','mail-reader-content');
+    content.dataset.mailReaderContent='true';
+    while(reader.firstChild)content.append(reader.firstChild);
+    reader.append(content);
+    const filtered=node('p','mail-placeholder',
+      'The selected message is outside these results. Select a matching message or clear the search.');
+    filtered.dataset.mailReaderFiltered='true';filtered.hidden=true;reader.append(filtered);
     body.append(listing,reader);
     root.append(body);
     if(state.status?.draftsEnabled)globalThis.StationDrafts?.mount?.(root.querySelector('#mail-drafts'),true,state.status?.outgoingEnabled===true,state.status?.outboxEnabled===true);
@@ -450,7 +471,7 @@
     if(action==='stop'){state.stopRequested=true;render();return;}
     if(action==='reply'||action==='forward'){
       const item=state.items.find(x=>x.key===state.selected);
-      if(!state.busy&&state.status?.draftsEnabled&&item)
+      if(!state.busy&&state.status?.draftsEnabled&&item&&matchesSearch(item))
         void globalThis.StationDrafts?.[action]?.({from:item.from,subject:item.subject,
           ...(Object.hasOwn(item,'replyTo')?{replyTo:item.replyTo}:{}),
           ...(Object.hasOwn(item,'replyContext')?{replyContext:item.replyContext}:{}),
