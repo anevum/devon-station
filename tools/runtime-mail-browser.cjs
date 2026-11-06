@@ -63,7 +63,9 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    await page.getByRole('button',{name:'Save Draft',exact:true}).click();
    await page.getByText(/^Draft saved at revision [0-9]+\. No message was sent\.$/,{exact:true}).waitFor();
    await page.getByRole('button',{name:'Reply to sender',exact:true}).click();
-   await page.getByLabel('Subject',{exact:true}).waitFor();
+   // The prior forward editor is still visible while the new draft is created.
+   // Wait for the new working copy rather than merely an existing textbox.
+   await page.waitForFunction(()=>document.querySelector('[data-mail-draft-field="subject"]')?.value==='Re: Browser incoming fixture');
    assert.equal(await page.getByLabel('Subject',{exact:true}).inputValue(),'Re: Browser incoming fixture');
    assert.equal(await page.getByLabel('Message',{exact:true}).inputValue(),'');
    assert.equal(provider.evidence.smtpConnections,0);

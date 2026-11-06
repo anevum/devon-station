@@ -253,3 +253,19 @@ test('expired-session forwarding creates no editable preview and never sends',as
  assert.equal(x.calls.filter(c=>c.path.endsWith('/save')||/outbox|smtp/.test(c.path)).length,0);
  x.dom.window.close();
 });
+
+test('a saved forward stays separate when the owner subsequently opens a reply',async()=>{
+ const x=setup({messages:[incoming]});await wait();
+ x.doc.querySelector('[data-mail-action="forward"]').click();await wait();
+ const to=x.doc.querySelector('[data-mail-draft-field="to"]');to.value='chosen@example.org';
+ to.dispatchEvent(new x.dom.window.Event('input',{bubbles:true}));
+ x.doc.querySelector('[data-mail-draft-action="save"]').click();await wait();
+ const saved=JSON.stringify(x.records[0]);
+ x.doc.querySelector('[data-mail-action="reply"]').click();await wait();
+ assert.equal(x.records.length,2);assert.equal(JSON.stringify(x.records[0]),saved);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="to"]').value,incoming.from);
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="subject"]').value,'Re: A question');
+ assert.equal(x.doc.querySelector('[data-mail-draft-field="body"]').value,'');
+ assert.equal(x.calls.filter(c=>c.path.endsWith('/save')).length,1,'new reply must require its own explicit save');
+ x.dom.window.close();
+});
