@@ -53,10 +53,40 @@ test('exact migration 0004-0008, prerequisites, one encrypted accepted row and z
  assert.equal(result.dataWrites,0);
  assert.equal(result.migrationApproved,false);
  assert.equal(result.databaseId,ACCEPTANCE_MAIL_DB_ID);
- assert.equal(h.calls.length,Object.keys(MIGRATION_READINESS_SQL).length);
+ assert.equal(h.calls.length,2*Object.keys(MIGRATION_READINESS_SQL).length);
+ assert.equal(result.readPasses,2);
+ assert.equal(result.proofScope,'TWO_PASS_READ_ONLY_METADATA_AND_AGGREGATES_NOT_ATOMIC');
  assert(h.calls.every(({db,sql})=>db===ACCEPTANCE_MAIL_DB_ID&&Object.values(MIGRATION_READINESS_SQL).includes(sql)));
  assert(!JSON.stringify(result).includes('owner_sub'));
  assert(!JSON.stringify(result).includes('payload_json'));
+});
+
+test('second pass rejects changes to schema, ledger, indexes or counts between read sequences',async()=>{
+ for(const change of [
+  (type,rows,call)=>{if(call===5&&type==='ledger')rows[0].sha256='0'.repeat(64);},
+  (type,rows,call)=>{if(call===6&&type==='objects')rows.push({type:'table',name:'comms_sent_archive',sql:'CREATE TABLE comms_sent_archive(a TEXT)'});},
+  (type,rows,call)=>{if(call===7&&type==='columns')rows[0].notnull=0;},
+  (type,rows,call)=>{if(call===8&&type==='counts')rows[0].total=2;}
+ ]){
+  let n=0;
+  const h=harness((type,rows)=>change(type,rows,++n));
+  await assert.rejects(preflightAcceptanceMigration0009({query:h.query}),/refused:/);
+  assert(h.calls.every(({db,sql})=>db===ACCEPTANCE_MAIL_DB_ID&&
+   Object.values(MIGRATION_READINESS_SQL).includes(sql)));
+ }
+});
+
+test('second-pass provider failure remains redacted and first-pass success is never sufficient',async()=>{
+ let calls=0;
+ const data=fixture();
+ const query=async(_db,sql)=>{
+  calls++;
+  if(calls===7)throw Error('PRIVATE_PROVIDER_INFORMATION');
+  return structuredClone(data[Object.keys(MIGRATION_READINESS_SQL).find(k=>MIGRATION_READINESS_SQL[k]===sql)]);
+ };
+ await assert.rejects(preflightAcceptanceMigration0009({query}),e=>
+  /query unavailable/.test(e.message)&&!/PRIVATE_PROVIDER_INFORMATION/.test(e.message));
+ assert.equal(calls,7);
 });
 
 test('ledger refuses a missing prerequisite, duplicate row or already-applied archive migration',()=>{
