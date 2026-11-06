@@ -7,6 +7,11 @@ import {execFileSync} from 'node:child_process';
 import {fileURLToPath} from 'node:url';
 import {resolve} from 'node:path';
 
+// Owner-approved immutable release. Changes require a new reviewed authorization.
+export const APPROVED_RELEASE=Object.freeze({
+ sourceCommit:'bba373f35f3cc913447e72fcdfff589cd6f3a073',
+ candidateSha256:'119ef1d3b3212f34be707a7262be11071b177fd532e9661768a4d74d9125d32d'
+});
 const WORKER='devon-station-mail-acceptance';
 const PRODUCTION_WORKER='devon-station';
 const ORIGIN='https://devon-station-mail-acceptance.devonakins.workers.dev';
@@ -49,6 +54,17 @@ export function verifyReviewCandidate({manifest,candidateBytes,expectedSha}){
     !modules['worker/index.mjs'].includes('CF_VERSION_METADATA'))
   refuse('missing reviewed TLS, privacy, diagnostics or version entrypoint');
  return Object.freeze(modules);
+}
+
+// Self-consistent candidate manifests establish integrity, not trusted provenance.
+// This privileged boundary uses pins in the reviewed uploader, never artifact input.
+export function verifyApprovedRelease({manifest,candidateBytes,expectedSha}){
+ if(expectedSha!==APPROVED_RELEASE.sourceCommit||manifest?.sourceCommit!==APPROVED_RELEASE.sourceCommit)
+  refuse('release is outside the immutable owner-approved source SHA');
+ const bytes=Buffer.from(candidateBytes);
+ if(sha256(bytes)!==APPROVED_RELEASE.candidateSha256)
+  refuse('release bytes differ from the independently approved candidate digest');
+ return verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha});
 }
 
 export function verifyAcceptanceSettings(settings){
@@ -263,7 +279,7 @@ export function approvedSourceForMode({mode,checkoutSha,manifestSha,approvedSha,
   if(manifestSha!==checkoutSha)refuse('review manifest is not from this checkout');
   return checkoutSha;
  }
- if(mode==='--upload'){
+ if(mode==='--upload'||mode==='--verify-approved'){
   if(!SHA.test(approvedSha)||manifestSha!==approvedSha)
    refuse('candidate SHA does not match explicit owner upload approval');
   if(!SHA.test(trustedUploaderSha)||checkoutSha!==trustedUploaderSha)
@@ -353,8 +369,8 @@ export function buildConnectedAcceptanceCode({manifest,candidateBytes,expectedSh
 }
 async function main(){
  const args=process.argv.slice(2);
- if(args.length!==1||!['--verify','--upload'].includes(args[0]))
-  refuse('usage: node tools/comms-acceptance-upload.mjs --verify|--upload');
+ if(args.length!==1||!['--verify','--verify-approved','--upload'].includes(args[0]))
+  refuse('usage: node tools/comms-acceptance-upload.mjs --verify|--verify-approved|--upload');
  const root=new URL('../',import.meta.url);
  const manifest=JSON.parse(readFileSync(new URL('release-review/manifest.json',root),'utf8'));
  const bytes=readFileSync(new URL('release-review/candidate.modules.json',root));
@@ -367,9 +383,10 @@ async function main(){
   approvedSha:process.env.DS011_APPROVED_SOURCE_SHA,
   trustedUploaderSha:process.env.DS011_TRUSTED_UPLOADER_SHA
  });
- const modules=verifyReviewCandidate({manifest,candidateBytes:bytes,expectedSha:sourceSha});
- if(args[0]==='--verify'){
-  console.log(JSON.stringify({status:'OFFLINE_REVIEW_VERIFIED_NOT_DEPLOYED',sourceCommit:sha,
+ const modules=(args[0]==='--verify'?verifyReviewCandidate:verifyApprovedRelease)({manifest,candidateBytes:bytes,expectedSha:sourceSha});
+ if(args[0]==='--verify'||args[0]==='--verify-approved'){
+  console.log(JSON.stringify({status:'OFFLINE_REVIEW_VERIFIED_NOT_DEPLOYED',sourceCommit:sourceSha,
+   ...(args[0]==='--verify-approved'?{trustedUploaderCommit:sha}:{}),
    moduleCount:Object.keys(modules).length,candidateSha256:sha256(bytes)}));
   return;
  }
