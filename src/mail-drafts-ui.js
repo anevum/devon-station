@@ -128,7 +128,7 @@ function render(){
      if(copy?.deliveryId===entry.deliveryId){
       const panel=element('section','mail-outbox-review');
       panel.setAttribute('aria-label','Decrypted Sent copy — owner only');
-      panel.append(element('h4','mail-draft-heading','Encrypted archive · SMTP accepted'));
+      panel.append(element('h4','mail-draft-heading','Saved message · SMTP accepted'));
       panel.append(element('p','mail-draft-notice','Recipient delivery and provider Sent copy are not confirmed.'));
       const details=element('dl','mail-details');
       for(const [label,value] of [['From',copy.from],['To',copy.to.join(', ')],['Subject',copy.subject],
@@ -166,9 +166,9 @@ function render(){
  sentHistory.setAttribute('aria-label','Encrypted Sent history');
  sentHistory.append(element('h3','mail-draft-heading','Sent history · Encrypted private copies'));
  sentHistory.append(element('p','mail-draft-notice',
-  'Saved on SMTP acceptance, independent of the provider Sent folder. Content stays encrypted until you open a copy.'));
+  'Accepted SMTP receipts with saved encrypted messages, independent of the provider Sent folder. Recipient delivery is not confirmed. Content is opened only on request.'));
  if(state.archiveError)sentHistory.append(element('p','mail-draft-live',state.archiveError));
- if(!state.archiveLoaded)sentHistory.append(element('p','mail-draft-empty','Select Inspect encrypted Sent history to load archived messages.'));
+ if(!state.archiveLoaded)sentHistory.append(element('p','mail-draft-empty','Select Inspect encrypted Sent history to load accepted messages.'));
  else if(!state.archiveEntries.length)sentHistory.append(element('p','mail-draft-empty','No encrypted Sent records available.'));
  else{
   const list=element('ol','mail-outbox-list');
@@ -187,7 +187,7 @@ function render(){
     const copy=state.archiveCopy;
     const panel=element('section','mail-outbox-review');
     panel.setAttribute('aria-label','Decrypted Sent copy — owner only');
-    panel.append(element('h4','mail-draft-heading','Encrypted archive · SMTP accepted'));
+    panel.append(element('h4','mail-draft-heading','Saved message · SMTP accepted'));
     panel.append(element('p','mail-draft-notice','Recipient delivery and provider Sent copy are not confirmed.'));
     const details=element('dl','mail-details');
     for(const [label,value] of [['From',copy.from],['To',copy.to.join(', ')],['Subject',copy.subject],
@@ -587,7 +587,7 @@ async function loadArchivedHistory(){
  state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;state.archiveError=null;
  const epoch=++state.archiveEpoch;render();
  try{
-  const result=await api('/api/mail/outbox/archive');
+  const result=await api('/api/mail/outbox/accepted');
   const rows=validatedArchivePage(result);
   if(epoch!==state.archiveEpoch||document.visibilityState==='hidden'||!state.enabled)return;
   state.archiveEntries=rows;state.archiveLoaded=true;state.archiveHasMore=result.hasMore;
@@ -607,7 +607,7 @@ async function loadEarlierArchive(){
  state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;state.archiveError=null;
  const epoch=++state.archiveEpoch;render();
  try{
-  const result=await api('/api/mail/outbox/archive/page',{before});
+  const result=await api('/api/mail/outbox/accepted/page',{before});
   const rows=validatedArchivePage(result,known,before);
   if(epoch!==state.archiveEpoch||document.visibilityState==='hidden'||!state.enabled)return;
   state.archiveEntries=[...state.archiveEntries,...rows];
@@ -625,8 +625,8 @@ async function openArchivedCopy(deliveryId){
  state.busy=true;state.archiveCopy=null;state.archiveErrorId=null;
  const epoch=++state.archiveEpoch;render();
  try{
-  const response=await api('/api/mail/outbox/archive/view',{deliveryId});
-  const c=response?.archive;
+  const response=await api('/api/mail/outbox/accepted/view',{deliveryId});
+  const c=response?.copy;
   if(response?.providerIndependent!==true||!c||
      c.deliveryId!==deliveryId||c.draftId!==receipt.draftId||
      c.draftRevision!==receipt.draftRevision||c.state!=='accepted'||

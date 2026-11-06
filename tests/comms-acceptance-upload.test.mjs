@@ -1,9 +1,12 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {createHash} from 'node:crypto';
-import {readFileSync} from 'node:fs';
+import {readFileSync,writeFileSync,mkdirSync,mkdtempSync,rmSync} from 'node:fs';
+import {execFileSync,spawnSync} from 'node:child_process';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
 import vm from 'node:vm';
-import {verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,verifyDatabaseIsolation,
+import {APPROVED_RELEASE,verifyApprovedRelease,verifyReviewCandidate,verifyAcceptanceSettings,verifyOwnerAccess,verifyDatabaseIsolation,
  verifyBindingParity,approvedSourceForMode,buildVersionForm,uploadAcceptanceVersion,buildConnectedAcceptanceCode} from '../tools/comms-acceptance-upload.mjs';
 
 const sha256=s=>createHash('sha256').update(s).digest('hex');
@@ -267,7 +270,8 @@ test('manual staging workflow never grants Cloudflare secrets to untrusted candi
  assert.match(upload,/DS011_MAIL_ACCEPTANCE_STAGE_ENABLED/);
  assert.match(upload,/DS011_CF_ACCEPTANCE_TOKEN/);
  assert.match(upload,/DS011_CF_ACCOUNT_ID/);
- assert.match(upload,/sha256sum -c SHA256SUMS/);
+ assert.match(upload,/node tools\/comms-acceptance-upload\.mjs --verify-approved/);
+ assert.doesNotMatch(upload,/sha256sum -c SHA256SUMS/);
  assert.match(upload,/gh api/);
  assert.match(upload,/node tools\/comms-acceptance-upload\.mjs --upload/);
  assert.doesNotMatch(upload,/npm ci|npm run build|node tools\/prepare-rb01-review/);
@@ -388,4 +392,57 @@ test('candidate source remains inert data in the connected executor',async()=>{
  const code=buildConnectedAcceptanceCode({...h.args,manifest,candidateBytes:bytes,expectedCandidateSha256:sha256(bytes)});
  const result=await h.run(code);
  assert.equal(result.status,'CONNECTED_PREFLIGHT_VERIFIED_NO_UPLOAD');
+});
+
+
+test('privileged release gate refuses self-consistent forged bytes labeled with the approved SHA',()=>{
+ const {manifest,bytes}=fakeBundle();
+ // All per-module and candidate checksums are internally valid; only the
+ // independently reviewed digest distinguishes this forgery from approved bytes.
+ const forged={...manifest,sourceCommit:APPROVED_RELEASE.sourceCommit};
+ assert.equal(Object.keys(verifyReviewCandidate({manifest:forged,candidateBytes:bytes,
+  expectedSha:APPROVED_RELEASE.sourceCommit})).length,44);
+ assert.throws(()=>verifyApprovedRelease({manifest:forged,candidateBytes:bytes,
+  expectedSha:APPROVED_RELEASE.sourceCommit}),/independently approved candidate digest/);
+ assert.throws(()=>verifyApprovedRelease({manifest,candidateBytes:bytes,
+  expectedSha:sourceSha}),/immutable owner-approved source SHA/);
+ assert.throws(()=>verifyApprovedRelease({manifest:forged,candidateBytes:bytes,
+  expectedSha:'b'.repeat(40)}),/immutable owner-approved source SHA/);
+});
+
+test('manual privileged workflow pins every external action to immutable source and limits approved SHA',()=>{
+ for(const path of ['mail-acceptance-version-only.yml','mail-acceptance-uploader-review.yml']){
+  const file=readFileSync(new URL('../.github/workflows/'+path,import.meta.url),'utf8');
+  const actions=[...file.matchAll(/uses: (actions\/[a-z-]+)@([^\s]+)/g)];
+  assert(actions.length>0);
+  for(const [,name,ref] of actions)assert.match(ref,/^[a-f0-9]{40}$/,name+' must be immutable');
+ }
+ const file=readFileSync(new URL('../.github/workflows/mail-acceptance-version-only.yml',import.meta.url),'utf8');
+ assert(file.includes(`test "$EXPECTED_SHA" = '${APPROVED_RELEASE.sourceCommit}'`));
+ assert(file.includes(`test "$APPROVED_SHA" = '${APPROVED_RELEASE.sourceCommit}'`));
+ assert(file.indexOf('--verify-approved')<file.indexOf('secrets.DS011_CF_ACCEPTANCE_TOKEN'));
+});
+
+
+test('actual privileged CLI rejects forged release bytes before credentials or provider transport',t=>{
+ const root=mkdtempSync(join(tmpdir(),'ds-trusted-uploader-'));
+ t.after(()=>rmSync(root,{recursive:true,force:true}));
+ mkdirSync(join(root,'tools'));mkdirSync(join(root,'release-review'));
+ writeFileSync(join(root,'tools/comms-acceptance-upload.mjs'),
+  readFileSync(new URL('../tools/comms-acceptance-upload.mjs',import.meta.url)));
+ const git=args=>execFileSync('git',args,{cwd:root,encoding:'utf8',stdio:['ignore','pipe','pipe']}).trim();
+ git(['init','--quiet']);git(['add','tools']);
+ git(['-c','user.name=Synthetic','-c','user.email=synthetic@example.test','commit','--quiet','-m','Synthetic trusted source']);
+ const {manifest,bytes}=fakeBundle();
+ writeFileSync(join(root,'release-review/manifest.json'),JSON.stringify({...manifest,sourceCommit:APPROVED_RELEASE.sourceCommit}));
+ writeFileSync(join(root,'release-review/candidate.modules.json'),bytes);
+ const run=spawnSync(process.execPath,['tools/comms-acceptance-upload.mjs','--upload'],{
+  cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,
+   DS011_TRUSTED_UPLOADER_SHA:git(['rev-parse','HEAD']),
+   DS011_APPROVED_SOURCE_SHA:APPROVED_RELEASE.sourceCommit,
+   DS011_ALLOW_ACCEPTANCE_UPLOAD:'true'}});
+ assert.equal(run.status,1);
+ assert.match(run.stderr,/independently approved candidate digest/);
+ assert.equal(run.stdout,'');
+ assert.doesNotMatch(run.stderr,/missing exact upload authorization|Cloudflare/);
 });

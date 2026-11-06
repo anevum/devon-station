@@ -102,6 +102,15 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    await page.reload();await page.getByRole('button',{name:'Inspect Outbox History',exact:true}).click();
    await page.locator('[data-outbox-state=accepted]').first().waitFor();
    assert.equal(await page.locator('.mail-message').count(),1);assert.equal(provider.evidence.dataWrites,1);
+   await page.getByRole('button',{name:'Inspect encrypted Sent history',exact:true}).click();
+   const sentHistory=page.getByRole('region',{name:'Encrypted Sent history',exact:true});
+   await sentHistory.locator('[data-outbox-state=accepted]').waitFor();
+   await sentHistory.getByRole('button',{name:'View encrypted Sent copy',exact:true}).click();
+   await page.getByRole('region',{name:'Decrypted Sent copy — owner only',exact:true}).waitFor();
+   assert.match(await page.locator('.mail-outbox-text').textContent(),/Synthetic browser outgoing body/);
+   assert.equal(provider.evidence.smtpConnections,1);assert.equal(provider.evidence.dataWrites,1);
+   const deniedHistory=await context.request.get(server.url+'/api/mail/outbox/accepted',{headers:{'Cf-Access-Jwt-Assertion':token('not-owner')}});
+   assert.equal(deniedHistory.status(),403);
    const overflow=await page.evaluate(()=>document.documentElement.scrollWidth-innerWidth);assert(overflow<=1,'overflow '+width+': '+overflow);
    assert.deepEqual(errors,[]);
    await page.addScriptTag({content:require('axe-core').source});
@@ -111,7 +120,7 @@ const {tmpdir}=require('node:os');const {join}=require('node:path');
    // A different signed subject cannot list mail even with the same named email.
    const denied=await context.request.get(server.url+'/api/mail/inbox',{headers:{'Cf-Access-Jwt-Assertion':token('not-owner')}});assert.equal(denied.status(),403);
    assert.equal(server.externalCalls(),0);
-   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,replyDraft:true,replyToRouting:true,replyHeaders:true,forwardDraft:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,reload:true,nonownerStatus:403,externalCalls:0});
+   results.push({width,overflow,pageErrors:0,ownerDiagnostics:true,ownerReadOnlyImapProbe:true,inboxRead:true,replyDraft:true,replyToRouting:true,replyHeaders:true,forwardDraft:true,draftSaved:true,confirmationCancelled:true,syntheticSmtpAttempts:1,acceptedNotDelivered:true,receiptBackedSent:true,reload:true,nonownerStatus:403,externalCalls:0});
    await context.close();await server.close();server=null;
   }
   writeFileSync(join(__dirname,'mail-browser-results.json'),JSON.stringify({provider:'synthetic-only',results},null,2));console.log(JSON.stringify({provider:'synthetic-only',results}));
