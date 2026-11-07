@@ -5,6 +5,7 @@ async function add(path){for(const entry of await readdir(path,{withFileTypes:tr
 await add(resolve(root,sourceDirectory));const modules={'index.mjs':"import {connect} from 'cloudflare:sockets';\nimport {createStation} from './worker/index.mjs';\nconst assets="+JSON.stringify(assets)+";\nexport default createStation(assets,undefined,undefined,connect);\n"};for(const name of ['index.mjs','access.mjs','notifications.mjs','state.mjs','portfolio.mjs','workspace.mjs','workspace-journal.mjs'])modules['worker/'+name]=await readFile(resolve(root,'worker',name),'utf8');
 for(const name of ['src/foundation.mjs','src/access-scope-bridge.mjs','interop/approved-portfolio.mjs'])modules['foundation/'+name]=await readFile(resolve(root,'foundation',name),'utf8');
 modules['src/workspace-backup.mjs']=await readFile(resolve(root,'src/workspace-backup.mjs'),'utf8');
+modules['worker/ai-work-api.mjs']=await readFile(resolve(root,'worker/ai-work-api.mjs'),'utf8');
 modules['worker/mail-api.mjs']=await readFile(resolve(root,'worker/mail-api.mjs'),'utf8');
 modules['worker/mail-outbox-api.mjs']=await readFile(resolve(root,'worker/mail-outbox-api.mjs'),'utf8');
 modules['worker/mail-drafts-api.mjs']=await readFile(resolve(root,'worker/mail-drafts-api.mjs'),'utf8');
