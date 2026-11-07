@@ -1,0 +1,31 @@
+name: DS011 private agent core source review
+on:
+  pull_request:
+    paths:
+      - 'tools/ai-work/**'
+      - 'tests/ai-work-agents.test.mjs'
+      - 'docs/DS011-AI-WORK01-PRIVATE-RUNNER.md'
+      - '.github/workflows/ai-work-source-review.yml'
+permissions:
+  contents: read
+concurrency:
+  group: ds011-ai-work-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+jobs:
+  review-source-only:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: '22'
+      - name: Syntax and mocked agent contract
+        run: |
+          node --check tools/ai-work/agents-client.mjs
+          node --check tools/ai-work/run.mjs
+          node --test tests/ai-work-agents.test.mjs
+      - name: No metered provider request without explicit flag
+        run: node tools/ai-work/run.mjs
