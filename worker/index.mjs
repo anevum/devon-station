@@ -3,6 +3,7 @@ import {authorizedIdentity} from './access.mjs';
 import {validEndpoint,deviceId,endpointHash,sendGenericPush,PushDispatchError,safePushServiceFailure} from './notifications.mjs';
 import {getOwnerState,saveOwnerState} from './state.mjs';
 import {getCachedPortfolio,refreshPortfolio} from './portfolio.mjs';
+import {handleAiWorkApi} from './ai-work-api.mjs';
 import {handleMailApi} from './mail-api.mjs';
 const common={'Cache-Control':'no-store, private','X-Content-Type-Options':'nosniff','Referrer-Policy':'no-referrer','Strict-Transport-Security':'max-age=31536000','Permissions-Policy':'camera=(), microphone=(), geolocation=()'};
 const csp="default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'none'; connect-src 'self'; worker-src 'self'; manifest-src 'self'; frame-src 'none'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'";
@@ -42,6 +43,7 @@ export function createStation(assets,auth=authorizedIdentity,transport=fetch,ima
  if(user?.email!==env.OWNER_EMAIL||!user.subject)return json({error:'owner_only'},403);
  if(!['GET','HEAD','POST','DELETE'].includes(request.method))return json({error:'method_not_allowed'},405);
  const writes=['POST','DELETE'].includes(request.method);if(writes&&(request.headers.get('Origin')!==url.origin||request.headers.get('Content-Type')?.split(';')[0]!=='application/json'))return json({error:'same_origin_json_required'},403);
+ if(url.pathname.startsWith('/api/ai-work/'))return json(await handleAiWorkApi({request,url,user,env,readBody}));
  const workerVersionId=trustedWorkerVersion(env);
  if(url.pathname.startsWith('/api/mail/')){const result=await handleMailApi({request,url,user,env,connect:imapSocket,readBody,workerVersionId});return json(result.body,result.status);}
  if(url.pathname==='/api/session'&&request.method==='GET')return json({authenticated:true,mode:'owner',version:'0.4.8',snapshot:true,persistentStorage:!!env.DB,...(workerVersionId?{workerVersionId}:{})});

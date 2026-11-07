@@ -12,7 +12,7 @@ const EXPECTED_MODULES = [
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs',
-  'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs', 'worker/mail-outbox-api.mjs',
+  'worker/ai-work-api.mjs', 'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs', 'worker/mail-outbox-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
     'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs','mail-outbound-wire.mjs','mail-smtp-transport.mjs','mail-outbox.mjs','mail-payload-crypto.mjs','mail-sent-evidence.mjs'].map(name => 'src/communications/' + name),
