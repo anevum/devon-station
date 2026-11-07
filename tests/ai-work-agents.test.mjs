@@ -214,3 +214,12 @@ test('asynchronous optional reporter failure does not become an unhandled reject
  const result=await runAgentJob(OPTIONS,{fetchImpl:async()=>mockResponse([root('agent.session.turn.completed')]),onPublicStatus:async()=>{throw Error('unavailable');}});
  assert.equal(result.status,'completed');
 });
+
+test('provider identity binding does not invent an undocumented session prefix but rejects unsafe IDs',async()=>{
+ const result=await runAgentJob(OPTIONS,{fetchImpl:async()=>mockResponse([
+  {type:'agent.session.created',session:{id:'as_syntheticSession'}},
+  {type:'agent.session.turn.completed',session_id:'as_syntheticSession',turn:{subagent_id:null}},
+ ])});assert.equal(result.status,'completed');assert.equal(result.sessionId,'as_syntheticSession');
+ const unsafe=await runAgentJob(OPTIONS,{fetchImpl:async()=>mockResponse([{type:'agent.session.created',session:{id:'../../private'}}])});
+ assert.equal(unsafe.status,'unverified');assert.equal(unsafe.sessionId,null);
+});

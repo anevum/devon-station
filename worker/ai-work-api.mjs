@@ -1,3 +1,4 @@
+import {createExecutionLedger,executionView} from './ai-work-execution.mjs';
 import {createMailPayloadCipher} from '../src/communications/mail-payload-crypto.mjs';
 
 // Deliberately no provider import, dispatcher, fetch, publication, or execution flag.
@@ -51,7 +52,8 @@ function inputPlan(body){
 export async function handleAiWorkApi({request,url,user,env,readBody}){
  const {allowed,cipher}=config(env,user),db=env.DB;
  const path=url.pathname,method=request.method;
- if(path==='/api/ai-work/config'&&method==='GET')return {projects:allowed.map(slug=>({slug,name:WORK_PROJECTS[slug]})),profiles:WORK_PROFILES,executionEnabled:false,publicSharing:false,billing:'Separate API authorization required'};
+ const ledger=env.AI_WORK_LEDGER_ENABLED==='true'?createExecutionLedger({db,cipher,ownerSubject:user.subject}):null;
+ if(path==='/api/ai-work/config'&&method==='GET')return {projects:allowed.map(slug=>({slug,name:WORK_PROJECTS[slug]})),profiles:WORK_PROFILES,executionEnabled:false,publicSharing:false,executionLedgerEnabled:!!ledger,billing:'Separate API authorization required'};
  if(path==='/api/ai-work/jobs'&&method==='GET'){
   const cursor=url.searchParams.get('cursor');let before=null;
   if(cursor){try{before=JSON.parse(atob(cursor));if(!Array.isArray(before)||before.length!==2||!Number.isSafeInteger(before[0])||before[0]<0||!uuid(before[1]))throw Error();}catch{fail('invalid_cursor');}}
@@ -60,7 +62,9 @@ export async function handleAiWorkApi({request,url,user,env,readBody}){
   // Metadata only; do not decrypt private prompts to draw job lanes.
   const rows=(await db.prepare('SELECT job_id,project_slug,revision,state,created_at,updated_at FROM ai_work_jobs WHERE owner_sub=?'+filter+' ORDER BY created_at DESC,job_id DESC LIMIT 51').bind(...args).all()).results;
   const page=rows.slice(0,50),last=page.at(-1);
-  return {jobs:page.filter(x=>allowed.includes(x.project_slug)).map(summary),nextCursor:rows.length>50?btoa(JSON.stringify([last.created_at,last.job_id])):null,executionEnabled:false,publicSharing:false};
+  let executions=[];if(ledger&&page.length)executions=(await db.prepare('SELECT job_id,revision,phase FROM ai_work_executions WHERE owner_sub=? AND job_id IN ('+page.map(()=>'?').join(',')+')').bind(user.subject,...page.map(r=>r.job_id)).all()).results;
+  const summarize=row=>{const run=executions.find(x=>x.job_id===row.job_id);return {...summary(row),...(run?{execution:{revision:run.revision,phase:run.phase}}:{})};};
+  return {jobs:page.filter(x=>allowed.includes(x.project_slug)).map(summarize),nextCursor:rows.length>50?btoa(JSON.stringify([last.created_at,last.job_id])):null,executionEnabled:false,publicSharing:false};
  }
  if(path==='/api/ai-work/jobs'&&method==='POST'){
   const body=await readBody(request,12288),plan=inputPlan(body);assertProject(allowed,plan.projectSlug);
@@ -75,15 +79,26 @@ export async function handleAiWorkApi({request,url,user,env,readBody}){
   if(Object.keys(plan).some(k=>saved[k]!==plan[k]))fail('job_id_conflict',409);
   return {job:summary(row),created:inserted.meta?.changes===1};
  }
- const match=path.match(/^\/api\/ai-work\/jobs\/([0-9a-f-]+)(?:\/(decision|cancel|execute))?$/);
+ const match=path.match(/^\/api\/ai-work\/jobs\/([0-9a-f-]+)(?:\/(decision|cancel|execute|execution))?$/);
  if(!match||!uuid(match[1]))fail('not_found',404);
  const row=await record(db,user,match[1]);assertProject(allowed,row.project_slug);
- if(!match[2]&&method==='GET')return {job:{...summary(row),...await open(cipher,row,user)},executionEnabled:false,publicSharing:false};
+ const privatePlan=await open(cipher,row,user);
+ const readExecution=async()=>{const run=ledger?await ledger.get(row.job_id):null;if(run&&run.data.projectSlug!==row.project_slug)fail('execution_payload_unavailable',503);return run;};
+ if(match[2]==='execution'&&method==='GET')return {execution:executionView(await readExecution())};
+ if(!match[2]&&method==='GET')return {job:{...summary(row),...privatePlan,...(ledger?{execution:executionView(await readExecution())}:{})},executionEnabled:false,publicSharing:false};
  // No request or env flag can turn this into a billable endpoint.
  if(match[2]==='execute'&&method==='POST')fail('execution_not_connected',503);
  if(!['decision','cancel'].includes(match[2])||method!=='POST')fail('method_not_allowed',405);
- const body=await readBody(request,1024);exact(body,match[2]==='decision'?['expectedRevision','decision']:['expectedRevision']);
+ const body=await readBody(request,1024);exact(body,match[2]==='decision'?['expectedRevision','decision']:['expectedRevision','expectedExecutionRevision']);
  if(!Number.isSafeInteger(body.expectedRevision)||body.expectedRevision!==row.revision)fail('revision_conflict',409);
+ if(match[2]==='cancel'&&ledger){
+  const run=await readExecution();
+  if(run){
+   if(!Number.isSafeInteger(body.expectedExecutionRevision))fail('execution_revision_required',409);
+   const result=await ledger.requestCancel(row.job_id,body.expectedExecutionRevision);
+   return {job:summary(row),execution:executionView(result),executionEnabled:false,publicSharing:false};
+  }
+ }
  let next;
  if(match[2]==='decision'){
   if(row.state!=='review'||!['approve-plan','reject'].includes(body.decision))fail('invalid_job_transition',409);
@@ -92,9 +107,9 @@ export async function handleAiWorkApi({request,url,user,env,readBody}){
   if(!['review','ready'].includes(row.state))fail('invalid_job_transition',409);
   next='cancelled';
  }
- const data=await open(cipher,row,user),now=Date.now();data.history.push({state:next,at:now});
+ const data=privatePlan,now=Date.now();data.history.push({state:next,at:now});
  const payload=await cipher.seal(data,context(user,{...row,revision:row.revision+1,state:next}));
- const result=await db.prepare('UPDATE ai_work_jobs SET revision=revision+1,state=?,updated_at=?,payload=? WHERE owner_sub=? AND job_id=? AND revision=?').bind(next,now,payload,user.subject,row.job_id,row.revision).run();
+ const result=await db.prepare('UPDATE ai_work_jobs SET revision=revision+1,state=?,updated_at=?,payload=? WHERE owner_sub=? AND job_id=? AND revision=?'+(ledger?' AND NOT EXISTS(SELECT 1 FROM ai_work_executions WHERE owner_sub=? AND job_id=?)':'')).bind(next,now,payload,user.subject,row.job_id,row.revision,...(ledger?[user.subject,row.job_id]:[])).run();
  if(result.meta?.changes!==1)fail('revision_conflict',409);
  return {job:{...summary(row),state:next,updatedAt:now,revision:row.revision+1},executionEnabled:false,publicSharing:false};
 }

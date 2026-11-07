@@ -15,7 +15,7 @@ const modules = [
   'worker/workspace.mjs', 'worker/workspace-journal.mjs',
   'foundation/src/foundation.mjs', 'foundation/src/access-scope-bridge.mjs',
   'foundation/interop/approved-portfolio.mjs', 'src/workspace-backup.mjs',
-  'worker/ai-work-api.mjs', 'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs','worker/mail-outbox-api.mjs',
+  'worker/ai-work-execution.mjs','worker/ai-work-api.mjs', 'worker/mail-api.mjs', 'worker/mail-drafts-api.mjs','worker/mail-outbox-api.mjs',
   ...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs',
     'mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs',
     'mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs','mail-outbound-wire.mjs','mail-smtp-transport.mjs','mail-outbox.mjs','mail-payload-crypto.mjs','mail-sent-evidence.mjs'].map(name=>'src/communications/'+name),
@@ -43,7 +43,7 @@ test('review-only package is deterministic, SHA-256 listed and retains the harde
   const first = prepare(); const second = prepare();
   assert.deepEqual(first.files, second.files);
   assert.equal(first.manifest.status, 'REVIEW_ONLY_NOT_DEPLOYED_OR_ACCEPTED');
-  assert.equal(first.manifest.candidate.moduleCount, 45);
+  assert.equal(first.manifest.candidate.moduleCount, 46);
   assert.equal(first.manifest.guardedFallback.moduleCount, 4);
   assert.equal(first.manifest.intendedIsolatedRuntime.compatibilityFlags[0], 'nodejs_compat');
   assert.equal(first.manifest.intendedIsolatedRuntime.verifiedOnLiveOctoberRuntime, false);

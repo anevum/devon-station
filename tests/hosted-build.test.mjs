@@ -1,7 +1,11 @@
+import {Script} from 'node:vm';
 import test from 'node:test';import assert from 'node:assert/strict';import {readFileSync} from 'node:fs';import {execFileSync} from 'node:child_process';
 test('hosted packaging removes private inventory, has no embedded private source URLs, and contains all API modules',()=>{
  execFileSync(process.execPath,['tools/build-hosted-shell.mjs']);execFileSync(process.execPath,['tools/build-worker.mjs','--shell']);
  const src=readFileSync('hosted-dist/index.html','utf8');
+ const scripts=[...src.matchAll(/<script[^>]*>([\s\S]*?)<\/script>/g)];assert(scripts.length>0);
+ for(const script of scripts)assert.doesNotThrow(()=>new Script(script[1]),'embedded source must survive dollar replacement syntax');
+ assert(src.includes("?'$'+(run.usage.consumedCents/100).toFixed(2)"));
  const match=src.match(/const SNAPSHOT=(\{.+?\});\s*const AREAS=/s);assert(match,'snapshot marker missing');
  const snap=JSON.parse(match[1]);
  assert.equal(snap.privateDataLoaded,false);assert.equal(snap.projects.length,0);assert.equal(snap.resources.length,0);
@@ -9,12 +13,12 @@ test('hosted packaging removes private inventory, has no embedded private source
  assert(src.includes("connect-src 'self'"));assert(src.includes('Private storage connected')||src.includes('Private storage synced'));
  const bundle=JSON.parse(readFileSync('deployment/modules.json','utf8'));
  for(const name of ['index.mjs','worker/index.mjs','worker/access.mjs','worker/notifications.mjs','worker/state.mjs','worker/portfolio.mjs','worker/workspace.mjs','worker/workspace-journal.mjs','src/workspace-backup.mjs','foundation/src/foundation.mjs','foundation/src/access-scope-bridge.mjs','foundation/interop/approved-portfolio.mjs'])assert(Object.hasOwn(bundle,name),name);
- for(const name of ['worker/ai-work-api.mjs','worker/mail-api.mjs',...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs'].map(name=>'src/communications/'+name)])assert(Object.hasOwn(bundle,name),name);
+ for(const name of ['worker/ai-work-execution.mjs','worker/ai-work-api.mjs','worker/mail-api.mjs',...['mail-onboarding.mjs','mail-core.mjs','mail-readonly-service.mjs','mail-imap-readonly.mjs','mail-imap-transport.mjs','mail-mime-text.mjs','mail-d1-store.mjs','mail-sqlite-store.mjs','mail-mime-safe.mjs','mail-drafts.mjs'].map(name=>'src/communications/'+name)])assert(Object.hasOwn(bundle,name),name);
  for(const name of ['address-parser.mjs','base64-decoder.mjs','base64-encoder.mjs','chunk-writer.mjs','decode-strings.mjs','errors.mjs','html-entities.mjs','mime-node.mjs','otp-token.mjs','pass-through-decoder.mjs','postal-mime.mjs','qp-decoder.mjs','text-format.mjs','types.mjs'])assert(Object.hasOwn(bundle,'vendor/postal-mime/'+name),name);
  assert(Object.hasOwn(bundle,'worker/mail-drafts-api.mjs'));
  assert(Object.hasOwn(bundle,'src/communications/mail-sent-evidence.mjs'),'Sent evidence module must be bundled');
  assert.match(bundle['worker/mail-outbox-api.mjs'],/mail-sent-evidence\.mjs/,'outbox must import bundled Sent probe');
- assert.equal(Object.keys(bundle).length,45);
+ assert.equal(Object.keys(bundle).length,46);
  assert.match(bundle['index.mjs'],/^import \{connect\} from 'cloudflare:sockets';/);
  const assets=JSON.parse(bundle['index.mjs'].match(/const assets=(.*);\nexport default/s)[1]);
  for(const [name,size] of [['icon-192.png',192],['icon-512.png',512],['apple-touch-icon.png',180]]){
