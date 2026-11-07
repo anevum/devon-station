@@ -4,9 +4,11 @@ on:
     paths:
       - 'tools/ai-work/**'
       - 'tests/ai-work-*.test.mjs'
-      - 'worker/ai-work-api.mjs'
+      - 'worker/ai-work*.mjs'
       - 'src/ai-work*'
       - 'worker/migrations/0010-ai-work-jobs.sql'
+      - 'worker/migrations/0011-ai-work-executions.sql'
+      - 'docs/DS011-AI-WORK03-DURABLE-EXECUTION.md'
       - 'docs/DS011-AI-WORK01-PRIVATE-RUNNER.md'
       - '.github/workflows/ai-work-source-review.yml'
 permissions:
@@ -29,6 +31,8 @@ jobs:
         run: |
           node --check tools/ai-work/agents-client.mjs
           node --check tools/ai-work/run.mjs
+          node --check tools/ai-work/execution-controller.mjs
+          node --check tools/ai-work/execution-provider.mjs
           node tools/build-hosted-shell.mjs
           node tools/build-worker.mjs --shell
           node --test tests/ai-work-*.test.mjs

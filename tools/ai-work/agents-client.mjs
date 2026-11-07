@@ -149,7 +149,7 @@ export async function runAgentJob(options, {
       eventCount++;
       const ids=[event?.session_id,event?.session?.id].filter(value=>value!==undefined);
       for(const id of ids){
-        if(typeof id!=='string'||!/^sess_[a-zA-Z0-9_-]{1,128}$/.test(id)||
+        if(typeof id!=='string'||!/^[a-zA-Z0-9_-]{1,128}$/.test(id)||
            (sessionId!==null&&sessionId!==id))throw new AgentWorkError('session_identity_unverified');
         sessionId=id;
       }
